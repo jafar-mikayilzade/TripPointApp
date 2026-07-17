@@ -1,0 +1,14 @@
+**/node_modules
+**/.venv
+**/venv
+**/__pycache__
+**/.expo
+**/.git
+**/.env
+**/.env.*
+!**/.env.example
+apps/mobile
+docs
+.cursor
+*.md
+!apps/api/README.md

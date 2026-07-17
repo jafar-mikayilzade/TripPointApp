@@ -21,7 +21,7 @@ Filter: `status = approved`, `region` = `quba|qusar|seki|lerik|qabala` (**lowerc
 ### Sync (background)
 
 Mobile → `{API_URL}/api/sync-places?region=&category=`  
-→ FastAPI (`DATA_SOURCE=mock` və ya `google`)  
+→ FastAPI (`DATA_SOURCE=mock` / `osm` / `google`)  
 → clean/map to schema  
 → Supabase upsert `on_conflict=place_id` (**SERVICE_ROLE yalnız serverdə**)  
 → Mobile yenidən Supabase-dən oxuyur
@@ -70,7 +70,8 @@ Real telefonda `localhost` işləmir — LAN IP istifadə et.
 
 ## Production (Railway)
 
-API `apps/api` Dockerfile ilə deploy olunur (bax: `apps/api/README.md`).
+Monorepo root-da `Dockerfile` + `railway.toml` API-ni Docker ilə build edir (Railpack/Expo-nu keçir).
+Ətraflı: `apps/api/README.md`.
 
 ```env
 # Mobile — lokal IP əvəzinə Railway HTTPS
@@ -80,14 +81,18 @@ EXPO_PUBLIC_API_URL=https://YOUR-SERVICE.up.railway.app
 Server env: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `DATA_SOURCE=osm`  
 Service role key yalnız Railway Variables-də — heç vaxt `EXPO_PUBLIC_*` içində olmamalıdır.
 
+Əgər `Railpack could not determine...` / `start.sh not found` görürsənsə: root `Dockerfile` push olunmayıb və ya Builder hələ Railpack-dir — Settings → Build → **Dockerfile** seç və Redeploy et.
+
 ## Repo layout
 
 ```
 TripPoint/
-  apps/mobile/   # Expo app
-  apps/api/      # FastAPI worker
-  docs/          # architecture & contracts
-  .cursor/rules  # agent guidance
+  Dockerfile         # Railway monorepo API build
+  railway.toml
+  apps/mobile/       # Expo app
+  apps/api/          # FastAPI worker
+  docs/              # architecture & contracts
+  .cursor/rules      # agent guidance
 ```
 
 ## Non-goals (don't break)

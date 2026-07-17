@@ -7,40 +7,62 @@ OSM / mock / Google Places sync → Supabase `pois` upsert.
 ```bash
 cd apps/api
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1   # Windows
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env         # fill secrets
+copy .env.example .env
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## Railway deploy
+## Railway deploy (monorepo)
 
-1. Push repo to GitHub (`.env` gitignore-dadır — secret commit olunmur).
-2. [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo**.
-3. Service settings:
-   - **Root Directory:** `apps/api`
-   - Build uses `Dockerfile` + `railway.toml`
-4. **Variables** (Settings → Variables):
+Repo root-da `Dockerfile` + `railway.toml` var — Railpack/Expo-nu keçir, yalnız API build olunur.
+
+### 1) Push et
+
+Root `Dockerfile` və `railway.toml` GitHub-da olmalıdır.
+
+### 2) Railway service
+
+1. [railway.app](https://railway.app) → project → service
+2. **Settings → Source**
+   - Repo: TripPoint
+   - **Root Directory:** boş burax (repo root) **və ya** `apps/api`
+3. **Settings → Build**
+   - Builder: **Dockerfile** (avtomatik `Dockerfile` tapılmalıdır)
+   - Əgər hələ Railpack işləyirsə: Builder-i əl ilə **Dockerfile** seç
+4. **Settings → Deploy → Start Command** (ehtiyat):
+
+   ```bash
+   uvicorn main:app --host 0.0.0.0 --port $PORT
+   ```
+
+5. **Variables:**
 
    | Name | Value |
    |------|--------|
-   | `SUPABASE_URL` | your project URL |
+   | `SUPABASE_URL` | Supabase project URL |
    | `SUPABASE_SERVICE_KEY` | service role key |
    | `DATA_SOURCE` | `osm` |
-   | `GOOGLE_PLACES_API_KEY` | optional |
 
-5. **Settings → Networking → Generate Domain** → copy public HTTPS URL.
-6. Mobile `apps/mobile/.env`:
+6. **Networking → Generate Domain**
 
-   ```env
-   EXPO_PUBLIC_API_URL=https://YOUR-SERVICE.up.railway.app
-   ```
+7. Redeploy (Deployments → Redeploy)
 
-7. Expo-nu restart et. Yoxla:
+### 3) Mobile
 
-   ```text
-   https://YOUR-SERVICE.up.railway.app/
-   https://YOUR-SERVICE.up.railway.app/api/sync-places?region=quba&category=restaurant
-   ```
+```env
+EXPO_PUBLIC_API_URL=https://YOUR-SERVICE.up.railway.app
+```
 
-OSM sync 30–90 s çəkə bilər — normaldır.
+### Yoxla
+
+```text
+https://YOUR-SERVICE.up.railway.app/
+https://YOUR-SERVICE.up.railway.app/api/sync-places?region=quba&category=restaurant
+```
+
+### Tipik xəta: `Railpack could not determine...` / `start.sh not found`
+
+Səbəb: Railway monorepo root-da Expo (`apps/mobile`) görür.
+Həll: root `Dockerfile` push et + Builder = **Dockerfile** + Redeploy.
+Root Directory `apps/api` qoyursansa, `apps/api/Dockerfile` istifadə olunur.
