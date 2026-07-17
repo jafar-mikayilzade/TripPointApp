@@ -1,0 +1,24 @@
+{
+  "folders": [
+    {
+      "name": "mobile",
+      "path": "apps/mobile"
+    },
+    {
+      "name": "api",
+      "path": "apps/api"
+    },
+    {
+      "name": "docs",
+      "path": "docs"
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/node_modules": true,
+      "**/.expo": true,
+      "**/__pycache__": true,
+      "**/.venv": true
+    }
+  }
+}

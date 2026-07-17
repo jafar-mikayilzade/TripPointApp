@@ -1,0 +1,28 @@
+Bu layihə Azərbaycan turizm platformasıdır.
+
+TECH STACK:
+- Frontend: React Native (Expo, TypeScript)
+- Backend: Supabase (PostgreSQL + PostGIS + Auth + Storage + Realtime)
+- Xəritə: react-native-maps (Google Maps)
+- AI: OpenAI API (Edge Function vasitəsilə)
+
+SUPABASE CƏDVƏLLƏRİ:
+profiles, pois, poi_photos, businesses, listings, listing_photos,
+listing_pois, listing_participants, travel_history,
+travel_history_photos, ratings, posts, post_photos,
+expense_groups, expense_group_members, expenses
+
+ƏSAS QAYDALAR:
+- Hər Supabase sorğusunda xətaları həmişə handle et
+- Supabase client-i həmişə /lib/supabase.ts-dən import et
+- Şəkillər Supabase Storage-a yüklənir, URL-lər DB-də saxlanılır
+- Xəritə koordinatları: lat (enlik), lng (uzunluq)
+- Auth: Supabase Auth, istifadəçi məlumatları profiles cədvəlindədir
+- Pul vahidi: AZN
+
+QOVLUQ STRUKTURU:
+/app         → ekranlar (Expo Router)
+/components  → təkrarlanan UI komponentləri
+/lib         → supabase.ts, helpers
+/hooks       → custom hooks
+/types       → TypeScript tipləri

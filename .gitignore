@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.Python
+
+# Expo / mobile
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+apps/mobile/ios/
+apps/mobile/android/
+.kotlin/
+.metro-health-check*
+
+# Env & secrets
+.env
+.env*.local
+**/credentials.json
+**/*.jks
+**/*.p8
+**/*.p12
+**/*.key
+**/*.mobileprovision
+
+# Debug / OS
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+*.pem
+*.tsbuildinfo
+
+# IDE / tools
+.claude/
+.idea/
+.vscode/
+!.cursor/rules

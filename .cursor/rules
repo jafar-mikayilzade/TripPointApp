@@ -1,0 +1,30 @@
+# TripPoint monorepo
+
+TECH STACK:
+- apps/mobile: React Native (Expo, TypeScript) + Supabase Auth/Client
+- apps/api: Python FastAPI worker (Places/mock sync, route math, cache)
+- Data: Supabase (PostgreSQL + Auth + Storage + RLS)
+
+ARCHITECTURE (see docs/ARCHITECTURE.md):
+- Supabase = source of truth + auth + POI read
+- Python = sync-places / Places / marşrut riyaziyyatı / keş (writes via service role)
+- Expo = UI only for those concerns; does not hold SERVICE_ROLE or Places keys
+
+POI RULES:
+- region ids lowercase: quba, qusar, seki, lerik, qabala
+- upsert on place_id
+- status for synced places: approved
+- map coords: lat / lng
+
+ƏSAS QAYDALAR:
+- Auth/Supabase auth axınına toxunma (ayrı task olmadan)
+- Mobile Supabase client: apps/mobile/lib/supabase.ts
+- API secrets yalnız apps/api/.env
+- Hər Supabase/API sorğusunda xətaları handle et
+- Pul vahidi: AZN
+
+QOVLUQ:
+- apps/mobile/app → ekranlar
+- apps/mobile/components → UI
+- apps/mobile/lib → helpers + supabase
+- apps/api → FastAPI (main.py və s.)

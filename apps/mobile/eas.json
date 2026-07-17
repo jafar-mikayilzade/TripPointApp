@@ -1,0 +1,38 @@
+{
+  "cli": {
+    "version": ">= 10.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://jfbzpxesqfqugiraatcl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_xryAwTspRU1tzS1DhkVOiw_2x6jRqGk",
+        "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "AIzaSyAx_gGukcD-MTvAc1clUwXdvuK4ARNdODU",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "361114640439-fof8seso1jgth8kss8v2fi7tsc091v0n.apps.googleusercontent.com"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "app-bundle",
+        "credentialsSource": "local"
+      },
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://jfbzpxesqfqugiraatcl.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_xryAwTspRU1tzS1DhkVOiw_2x6jRqGk",
+        "EXPO_PUBLIC_GOOGLE_MAPS_KEY": "AIzaSyAx_gGukcD-MTvAc1clUwXdvuK4ARNdODU",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "361114640439-fof8seso1jgth8kss8v2fi7tsc091v0n.apps.googleusercontent.com"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "track": "internal"
+      }
+    }
+  }
+}

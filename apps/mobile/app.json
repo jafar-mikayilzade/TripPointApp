@@ -1,0 +1,87 @@
+{
+  "expo": {
+    "name": "TripPoint",
+    "slug": "trippoint-app",
+    "scheme": "trippoint",
+    "version": "1.0.2",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.jafar.TripPoint",
+      "versionCode": 7,
+      "softwareKeyboardLayoutMode": "resize",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "trippoint",
+              "host": "auth",
+              "pathPrefix": "/callback"
+            }
+          ]
+        }
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAffY5-DqNN2620EmiRq3cPFf8KCDf6ZIA"
+        }
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "TripPoint sizə ən yaxın yerləri göstərmək üçün məkanınızdan istifadə edir."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "TripPoint yer şəkillərini yükləmək üçün qalereyanıza giriş istəyir."
+        }
+      ],
+      "expo-dev-client",
+      "expo-font",
+      "@react-native-google-signin/google-signin"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d5b536fe-e0fe-4c07-abb0-546bf1154185"
+      },
+      "googleWebClientId": "361114640439-fof8seso1jgth8kss8v2fi7tsc091v0n.apps.googleusercontent.com",
+      "googleMapsKey": "AIzaSyAx_gGukcD-MTvAc1clUwXdvuK4ARNdODU"
+    },
+    "owner": "jafarmikayilzade"
+  }
+}
