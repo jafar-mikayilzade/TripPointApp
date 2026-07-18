@@ -1,9 +1,26 @@
 /** Background Places sync via FastAPI worker. Read path stays on Supabase. */
 
-const API_CATEGORIES = ['restaurant', 'hotel', 'tourist_attraction'] as const;
-type ApiCategory = (typeof API_CATEGORIES)[number];
+/** Mobile/DB PoiCategory + region-wide "all" */
+const APP_CATEGORIES = [
+  'restaurant',
+  'cafe',
+  'hostel',
+  'hotel',
+  'home_restaurant',
+  'guesthouse',
+  'nature',
+  'waterfall',
+  'mountain',
+  'lake',
+  'historical',
+  'monument',
+  'other',
+] as const;
 
-/** Mobile REGIONS.id → API REGION_COORDINATES key (API indi mobile id-ləri də qəbul edir) */
+type AppCategory = (typeof APP_CATEGORIES)[number];
+type SyncCategory = AppCategory | 'all';
+
+/** Mobile REGIONS.id → API REGION_COORDINATES key */
 const REGION_TO_API: Record<string, string> = {
   quba: 'quba',
   qusar: 'qusar',
@@ -13,16 +30,15 @@ const REGION_TO_API: Record<string, string> = {
 };
 
 const DEBOUNCE_MS = 1200;
-/** Eyni region+category üçün təkrar sync spam-ini kəs */
 const COOLDOWN_MS = 5 * 60_000;
 const FETCH_TIMEOUT_MS = 55_000;
+const FETCH_TIMEOUT_ALL_MS = 120_000;
 
 const lastSyncedAt = new Map<string, number>();
 const inFlight = new Map<string, Promise<SyncPlacesResult>>();
 
 export type SyncPlacesResult = {
   ok: boolean;
-  /** True when something was attempted (not skipped by cooldown / missing config). */
   attempted: boolean;
   error?: string;
 };
@@ -35,27 +51,18 @@ function getApiBaseUrl(): string | null {
   return raw.replace(/\/+$/, '');
 }
 
-/**
- * Yalnız BİR API kateqoriyası — "all" üçün 3 Overpass sync UI-ni dondururdu.
- * Hamısı seçiləndə ən faydalı olan restaurant sync olunur.
- */
-function mapCategoryToApi(categoryFilter: string | null | undefined): ApiCategory {
+/** Pass real app category (or all) — API maps OSM tags → DB category. */
+function mapCategoryToApi(categoryFilter: string | null | undefined): SyncCategory {
   if (!categoryFilter || categoryFilter === 'all') {
-    return 'restaurant';
+    return 'all';
   }
-
-  if (['restaurant', 'cafe', 'home_restaurant'].includes(categoryFilter)) {
-    return 'restaurant';
+  if ((APP_CATEGORIES as readonly string[]).includes(categoryFilter)) {
+    return categoryFilter as AppCategory;
   }
-
-  if (['hotel', 'hostel', 'guesthouse'].includes(categoryFilter)) {
-    return 'hotel';
-  }
-
-  return 'tourist_attraction';
+  return 'other';
 }
 
-function syncKey(apiRegion: string, apiCategory: ApiCategory): string {
+function syncKey(apiRegion: string, apiCategory: SyncCategory): string {
   return `${apiRegion}:${apiCategory}`;
 }
 
@@ -64,7 +71,7 @@ type SyncOneStatus = 'synced' | 'skipped';
 async function syncOne(
   baseUrl: string,
   apiRegion: string,
-  apiCategory: ApiCategory
+  apiCategory: SyncCategory
 ): Promise<SyncOneStatus> {
   const key = syncKey(apiRegion, apiCategory);
   const now = Date.now();
@@ -79,8 +86,9 @@ async function syncOne(
     return 'synced';
   }
 
+  const timeoutMs = apiCategory === 'all' ? FETCH_TIMEOUT_ALL_MS : FETCH_TIMEOUT_MS;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   const request = (async (): Promise<SyncPlacesResult> => {
     const url = `${baseUrl}/api/sync-places?region=${encodeURIComponent(apiRegion)}&category=${encodeURIComponent(apiCategory)}`;
