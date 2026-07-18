@@ -30,11 +30,13 @@ Root `Dockerfile` və `railway.toml` GitHub-da olmalıdır.
 3. **Settings → Build**
    - Builder: **Dockerfile** (avtomatik `Dockerfile` tapılmalıdır)
    - Əgər hələ Railpack işləyirsə: Builder-i əl ilə **Dockerfile** seç
-4. **Settings → Deploy → Start Command** (ehtiyat):
+4. **Settings → Deploy → Custom Start Command:**
 
    ```bash
-   uvicorn main:app --host 0.0.0.0 --port $PORT
+   python start.py
    ```
+
+   (`$PORT` yazma — `start.py` env-dən oxuyur.)
 
 5. **Variables:**
 

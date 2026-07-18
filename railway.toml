@@ -5,7 +5,7 @@ dockerfilePath = "Dockerfile"
 watchPatterns = ["apps/api/**"]
 
 [deploy]
-startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
+startCommand = "python start.py"
 healthcheckPath = "/"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"

@@ -10,7 +10,9 @@ COPY apps/api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY apps/api/main.py .
+COPY apps/api/start.py .
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# start.py reads PORT from env — avoids "$PORT is not a valid integer"
+CMD ["python", "start.py"]
