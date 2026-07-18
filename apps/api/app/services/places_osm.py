@@ -11,16 +11,35 @@ import requests
 from app.config import (
     OSM_CACHE_TTL_SECONDS,
     OSM_HTTP_TIMEOUT_SECONDS,
+    OSM_PER_CATEGORY_LIMIT,
     OSM_RESULT_LIMIT,
     OSM_RESULT_LIMIT_ALL,
     OSM_SEARCH_RADIUS_METERS,
     OVERPASS_ENDPOINTS,
 )
+from app.constants.categories import APP_CATEGORIES
 from app.constants.osm import OSM_CATEGORY_FILTERS
 from app.services.places_clean import category_from_osm_tags
 
 # region+category -> (expires_at_epoch, places)
 _OSM_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+# Stable order for balanced "all" sync
+ALL_SYNC_CATEGORIES: list[str] = [
+    "restaurant",
+    "cafe",
+    "hotel",
+    "hostel",
+    "guesthouse",
+    "home_restaurant",
+    "nature",
+    "waterfall",
+    "mountain",
+    "lake",
+    "historical",
+    "monument",
+    "other",
+]
 
 
 def build_address_from_tags(tags: dict[str, Any]) -> str | None:
@@ -57,10 +76,13 @@ def build_overpass_query(
     result_limit: int = OSM_RESULT_LIMIT,
 ) -> str:
     around = f"(around:{OSM_SEARCH_RADIUS_METERS},{latitude},{longitude})"
+    # ways/relations need center coords; nodes work with either
+    needs_center = selector.lstrip().startswith(("way", "rel", "nwr"))
+    out_clause = "out center" if needs_center else "out body"
     return (
         f"[out:json][timeout:25];\n"
         f"{selector}{around};\n"
-        f"out body {result_limit};"
+        f"{out_clause} {result_limit};"
     )
 
 
@@ -172,51 +194,143 @@ def _overpass_get(query: str) -> dict[str, Any]:
     )
 
 
-def fetch_places_from_osm(
+def _fetch_selectors(
     latitude: float,
     longitude: float,
-    category: str,
-    cache_key: str | None = None,
+    selectors: list[str],
+    per_query_limit: int,
+    *,
+    parallel: bool = True,
 ) -> list[dict[str, Any]]:
-    key = cache_key or f"{latitude:.4f}:{longitude:.4f}:{category}"
-    cached = _OSM_CACHE.get(key)
-    now = time.time()
-    if cached and cached[0] > now:
-        print(f"[osm] cache hit {key} ({len(cached[1])} places)")
-        return list(cached[1])
+    """Run Overpass selectors and merge unique places."""
 
-    selectors = OSM_CATEGORY_FILTERS.get(category) or OSM_CATEGORY_FILTERS["other"]
-    limit = OSM_RESULT_LIMIT_ALL if category == "all" else OSM_RESULT_LIMIT
-    per_query_limit = min(25, limit)
-    merged: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-
-    def _fetch_selector(selector: str) -> list[dict[str, Any]]:
+    def _one(selector: str) -> list[dict[str, Any]]:
         query = build_overpass_query(
             latitude, longitude, selector, result_limit=per_query_limit
         )
         payload = _overpass_get(query)
         return _parse_overpass_places(payload, result_limit=per_query_limit)
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(_fetch_selector, selector) for selector in selectors]
-        for future in as_completed(futures):
+    merged: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    def _absorb(places: list[dict[str, Any]]) -> None:
+        for place in places:
+            place_id = place["place_id"]
+            if place_id in seen_ids:
+                continue
+            seen_ids.add(place_id)
+            merged.append(place)
+
+    if not parallel or len(selectors) <= 1:
+        for selector in selectors:
             try:
-                places = future.result()
+                _absorb(_one(selector))
             except Exception as exc:
                 print(f"[osm] selector failed: {exc}")
-                continue
+        return merged
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(_one, selector) for selector in selectors]
+        for future in as_completed(futures):
+            try:
+                _absorb(future.result())
+            except Exception as exc:
+                print(f"[osm] selector failed: {exc}")
+
+    return merged
+
+
+def _fetch_single_category(
+    latitude: float,
+    longitude: float,
+    category: str,
+    limit: int,
+    *,
+    selector_parallel: bool = True,
+) -> list[dict[str, Any]]:
+    selectors = OSM_CATEGORY_FILTERS.get(category) or OSM_CATEGORY_FILTERS["other"]
+    places = _fetch_selectors(
+        latitude,
+        longitude,
+        selectors,
+        per_query_limit=min(25, limit),
+        parallel=selector_parallel,
+    )
+    # Specific filter: stamp requested category so home UI filter matches
+    for place in places:
+        place["category"] = category
+    return places[:limit]
+
+
+def _fetch_all_categories_balanced(
+    latitude: float,
+    longitude: float,
+) -> list[dict[str, Any]]:
+    """
+    Fetch each app category with its own quota so restaurants don't crowd out
+    hotels / nature / monuments in a single merge limit.
+    """
+    per_cat = OSM_PER_CATEGORY_LIMIT
+    merged: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    counts: dict[str, int] = {}
+
+    cats = [c for c in ALL_SYNC_CATEGORIES if c in APP_CATEGORIES]
+
+    def _one_category(cat: str) -> tuple[str, list[dict[str, Any]]]:
+        try:
+            # Selectors sequential here; categories run in parallel outer pool
+            return cat, _fetch_single_category(
+                latitude, longitude, cat, per_cat, selector_parallel=False
+            )
+        except Exception as exc:
+            print(f"[osm] category {cat} failed: {exc}")
+            return cat, []
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(_one_category, cat) for cat in cats]
+        for future in as_completed(futures):
+            cat, places = future.result()
+            kept = 0
             for place in places:
                 place_id = place["place_id"]
                 if place_id in seen_ids:
                     continue
-                if category not in {"all", "tourist_attraction"}:
-                    place_cat = place.get("category")
-                    if place_cat and place_cat != category:
-                        place["category"] = category
+                place["category"] = cat
                 seen_ids.add(place_id)
                 merged.append(place)
+                kept += 1
+            counts[cat] = kept
+            print(f"[osm] category={cat} kept={kept}")
 
-    merged = merged[:limit]
+    print(f"[osm] all-sync totals={counts} total={len(merged)}")
+    return merged[:OSM_RESULT_LIMIT_ALL]
+
+
+def fetch_places_from_osm(
+    latitude: float,
+    longitude: float,
+    category: str,
+    cache_key: str | None = None,
+) -> list[dict[str, Any]]:
+    # v2: balanced all-sync (invalidate old restaurant-heavy cache)
+    key = cache_key or f"v2:{latitude:.4f}:{longitude:.4f}:{category}"
+    if not key.startswith("v2:"):
+        key = f"v2:{key}"
+
+    cached = _OSM_CACHE.get(key)
+    now = time.time()
+    if cached and cached[0] > now:
+        print(f"[osm] cache hit {key} ({len(cached[1])} places)")
+        return list(cached[1])
+
+    if category == "all":
+        merged = _fetch_all_categories_balanced(latitude, longitude)
+    else:
+        merged = _fetch_single_category(
+            latitude, longitude, category, OSM_RESULT_LIMIT
+        )
+
     _OSM_CACHE[key] = (now + OSM_CACHE_TTL_SECONDS, merged)
     return merged

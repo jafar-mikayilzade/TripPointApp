@@ -73,6 +73,10 @@ def sync_places(region: str, category: str) -> JSONResponse:
             .execute()
         )
         upserted_count = len(result.data) if result.data else len(cleaned_places)
+        category_counts: dict[str, int] = {}
+        for row in cleaned_places:
+            cat = str(row.get("category") or "other")
+            category_counts[cat] = category_counts.get(cat, 0) + 1
 
         return JSONResponse(
             content={
@@ -82,6 +86,7 @@ def sync_places(region: str, category: str) -> JSONResponse:
                 "category": category_key,
                 "fetched": len(raw_places),
                 "upserted": upserted_count,
+                "category_counts": category_counts,
                 "data": result.data or cleaned_places,
             }
         )

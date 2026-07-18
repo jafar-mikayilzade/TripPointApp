@@ -62,12 +62,17 @@ def resolve_db_category(place: dict[str, Any], requested: str) -> str:
     place_cat = str(place.get("category") or "").strip().lower()
     req = str(requested or "").strip().lower()
 
+    # Region-wide sync: keep OSM-derived category for every POI
+    if req in {"all", "tourist_attraction"}:
+        if place_cat in APP_CATEGORIES:
+            return place_cat
+        return "historical" if req == "tourist_attraction" else "other"
+
+    # Specific filter: store as requested so home chips match
     if req in APP_CATEGORIES:
         return req
     if place_cat in APP_CATEGORIES:
         return place_cat
-    if req == "tourist_attraction":
-        return "historical"
     return "other"
 
 

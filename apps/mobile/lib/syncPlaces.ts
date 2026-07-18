@@ -30,7 +30,8 @@ const REGION_TO_API: Record<string, string> = {
 };
 
 const DEBOUNCE_MS = 1200;
-const COOLDOWN_MS = 5 * 60_000;
+// Short enough that a redeployed API can be re-tested without a long wait
+const COOLDOWN_MS = 90_000;
 const FETCH_TIMEOUT_MS = 55_000;
 const FETCH_TIMEOUT_ALL_MS = 120_000;
 

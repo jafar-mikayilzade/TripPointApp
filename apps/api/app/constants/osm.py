@@ -1,4 +1,8 @@
-"""Overpass QL selectors per app category."""
+"""Overpass QL selectors per app category.
+
+Prefer `node` for dense amenities (fast). Use `nwr` (node/way/relation)
+for tourism / nature / historic — many Azerbaijan POIs are ways, not nodes.
+"""
 
 OSM_CATEGORY_FILTERS: dict[str, list[str]] = {
     "restaurant": [
@@ -8,65 +12,77 @@ OSM_CATEGORY_FILTERS: dict[str, list[str]] = {
         'node["amenity"="cafe"]["name"]',
     ],
     "hotel": [
-        'node["tourism"="hotel"]["name"]',
+        'nwr["tourism"="hotel"]["name"]',
     ],
     "hostel": [
-        'node["tourism"="hostel"]["name"]',
+        'nwr["tourism"="hostel"]["name"]',
     ],
     "home_restaurant": [
         'node["amenity"="canteen"]["name"]',
         'node["amenity"="biergarten"]["name"]',
+        'node["amenity"="restaurant"]["cuisine"~"home|homemade|family",i]["name"]',
     ],
     "guesthouse": [
-        'node["tourism"="guest_house"]["name"]',
-        'node["tourism"="chalet"]["name"]',
+        'nwr["tourism"="guest_house"]["name"]',
+        'nwr["tourism"="chalet"]["name"]',
+        'nwr["tourism"="alpine_hut"]["name"]',
     ],
     "nature": [
-        'node["tourism"="viewpoint"]["name"]',
-        'node["tourism"="attraction"]["name"]',
-        'node["leisure"="nature_reserve"]["name"]',
+        'nwr["tourism"="viewpoint"]["name"]',
+        'nwr["leisure"="nature_reserve"]["name"]',
+        'nwr["boundary"="protected_area"]["name"]',
+        'nwr["leisure"="park"]["name"]',
     ],
     "waterfall": [
-        'node["waterway"="waterfall"]["name"]',
+        'nwr["waterway"="waterfall"]["name"]',
+        'nwr["natural"="waterfall"]["name"]',
     ],
     "mountain": [
         'node["natural"="peak"]["name"]',
+        'nwr["natural"="ridge"]["name"]',
     ],
     "lake": [
-        'node["natural"="water"]["name"]',
-        'node["water"="lake"]["name"]',
+        'nwr["natural"="water"]["water"="lake"]["name"]',
+        'nwr["water"="lake"]["name"]',
+        'nwr["natural"="water"]["name"]',
     ],
     "historical": [
-        'node["tourism"="museum"]["name"]',
-        'node["historic"="castle"]["name"]',
-        'node["historic"="ruins"]["name"]',
-        'node["historic"="archaeological_site"]["name"]',
+        'nwr["tourism"="museum"]["name"]',
+        'nwr["historic"="castle"]["name"]',
+        'nwr["historic"="ruins"]["name"]',
+        'nwr["historic"="archaeological_site"]["name"]',
+        'nwr["historic"="manor"]["name"]',
+        'nwr["tourism"="attraction"]["historic"]["name"]',
     ],
     "monument": [
-        'node["historic"="monument"]["name"]',
-        'node["historic"="memorial"]["name"]',
+        'nwr["historic"="monument"]["name"]',
+        'nwr["historic"="memorial"]["name"]',
+        'nwr["tourism"="artwork"]["name"]',
     ],
     "other": [
-        'node["tourism"="information"]["name"]',
-        'node["amenity"="marketplace"]["name"]',
+        'nwr["tourism"="information"]["name"]',
+        'nwr["amenity"="marketplace"]["name"]',
+        'nwr["shop"="souvenir"]["name"]',
+        'nwr["tourism"="yes"]["name"]',
     ],
     "tourist_attraction": [
-        'node["tourism"="attraction"]["name"]',
-        'node["tourism"="museum"]["name"]',
-        'node["historic"="monument"]["name"]',
+        'nwr["tourism"="attraction"]["name"]',
+        'nwr["tourism"="museum"]["name"]',
+        'nwr["historic"="monument"]["name"]',
     ],
+    # Legacy bulk selector — unused by balanced all-sync, kept for tooling
     "all": [
         'node["amenity"="restaurant"]["name"]',
         'node["amenity"="cafe"]["name"]',
-        'node["tourism"="hotel"]["name"]',
-        'node["tourism"="hostel"]["name"]',
-        'node["tourism"="guest_house"]["name"]',
-        'node["tourism"="viewpoint"]["name"]',
-        'node["tourism"="attraction"]["name"]',
-        'node["tourism"="museum"]["name"]',
-        'node["waterway"="waterfall"]["name"]',
+        'nwr["tourism"="hotel"]["name"]',
+        'nwr["tourism"="hostel"]["name"]',
+        'nwr["tourism"="guest_house"]["name"]',
+        'nwr["tourism"="viewpoint"]["name"]',
+        'nwr["tourism"="attraction"]["name"]',
+        'nwr["tourism"="museum"]["name"]',
+        'nwr["waterway"="waterfall"]["name"]',
         'node["natural"="peak"]["name"]',
-        'node["natural"="water"]["name"]',
-        'node["historic"]["name"]',
+        'nwr["natural"="water"]["name"]',
+        'nwr["historic"]["name"]',
     ],
 }
