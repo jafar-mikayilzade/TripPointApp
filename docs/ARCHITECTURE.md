@@ -90,9 +90,17 @@ TripPoint/
   Dockerfile         # Railway monorepo API build
   railway.toml
   apps/mobile/       # Expo app
-  apps/api/          # FastAPI worker
-  docs/              # architecture & contracts
-  .cursor/rules      # agent guidance
+  apps/api/
+    main.py          # thin entry (create_app)
+    start.py
+    app/
+      factory.py / config.py / db.py
+      routers/       # HTTP
+      services/      # sync, OSM, mock, google, clean
+      constants/     # regions, categories, OSM filters
+      data/          # mock fixtures
+  docs/
+  .cursor/rules
 ```
 
 ## Non-goals (don't break)

@@ -2,6 +2,21 @@
 
 OSM / mock / Google Places sync → Supabase `pois` upsert.
 
+## Layout
+
+```
+main.py / start.py     # thin entrypoints
+app/
+  factory.py           # create_app()
+  config.py / db.py
+  constants/           # regions, categories, OSM filters
+  data/                # mock fixtures
+  services/            # fetch + clean + sync
+  routers/             # HTTP routes
+```
+
+Yeni endpoint/məntiq üçün `main.py`-yə yığmayın — uyğun `routers/` / `services/` moduluna yazın.
+
 ## Local
 
 ```bash

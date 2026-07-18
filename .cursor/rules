@@ -27,4 +27,10 @@ QOVLUQ:
 - apps/mobile/app → ekranlar
 - apps/mobile/components → UI
 - apps/mobile/lib → helpers + supabase
-- apps/api → FastAPI (main.py və s.)
+- apps/api → FastAPI (modular):
+  - main.py / start.py = thin entry only
+  - app/factory.py, config.py, db.py
+  - app/routers/ = HTTP endpoints
+  - app/services/ = sync/fetch/clean logic
+  - app/constants/, app/data/ = maps & fixtures
+  - Yeni kodu main.py-yə yığma; ehtiyac olsa yeni modul aç

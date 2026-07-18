@@ -1,0 +1,1 @@
+"""TripPoint FastAPI application package."""
