@@ -61,7 +61,9 @@ def sync_places(region: str, category: str) -> JSONResponse:
     db_region = to_db_region(region_key)
 
     try:
-        raw_places = _fetch_raw_places(coordinates, region_key, category_key, db_region)
+        raw_places, fetch_warnings = _fetch_raw_places(
+            coordinates, region_key, category_key, db_region
+        )
 
         cleaned_places = [
             cleaned
@@ -78,6 +80,7 @@ def sync_places(region: str, category: str) -> JSONResponse:
                     "category": category_key,
                     "fetched": 0,
                     "upserted": 0,
+                    "warnings": fetch_warnings,
                     "message": "No places found for the given region and category.",
                 }
             )
@@ -102,10 +105,26 @@ def sync_places(region: str, category: str) -> JSONResponse:
                 "fetched": len(raw_places),
                 "upserted": upserted_count,
                 "category_counts": category_counts,
+                "warnings": fetch_warnings,
                 "data": result.data or cleaned_places,
             }
         )
 
+    except RuntimeError as exc:
+        # e.g. invalid Google API key — return clear error (not empty success)
+        return JSONResponse(
+            status_code=502,
+            content={
+                "success": False,
+                "error": "upstream_error",
+                "data_source": DATA_SOURCE,
+                "message": str(exc),
+                "hint": (
+                    "Check Railway GOOGLE_PLACES_API_KEY: Places API enabled, "
+                    "billing on, key unrestricted for server (or IP), no extra spaces/quotes."
+                ),
+            },
+        )
     except requests.RequestException as exc:
         source_label = {
             "google": "Google Places API",
@@ -138,7 +157,7 @@ def _fetch_raw_places(
     region_key: str,
     category_key: str,
     db_region: str,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[str]]:
     if DATA_SOURCE == "hybrid":
         return fetch_places_from_hybrid(
             latitude=coordinates["latitude"],
@@ -147,16 +166,22 @@ def _fetch_raw_places(
             cache_key=f"{db_region}:{category_key}",
         )
     if DATA_SOURCE == "google":
-        return fetch_places_from_google(
-            latitude=coordinates["latitude"],
-            longitude=coordinates["longitude"],
-            category=category_key,
+        return (
+            fetch_places_from_google(
+                latitude=coordinates["latitude"],
+                longitude=coordinates["longitude"],
+                category=category_key,
+            ),
+            [],
         )
     if DATA_SOURCE == "osm":
-        return fetch_places_from_osm(
-            latitude=coordinates["latitude"],
-            longitude=coordinates["longitude"],
-            category=category_key,
-            cache_key=f"{db_region}:{category_key}",
+        return (
+            fetch_places_from_osm(
+                latitude=coordinates["latitude"],
+                longitude=coordinates["longitude"],
+                category=category_key,
+                cache_key=f"{db_region}:{category_key}",
+            ),
+            [],
         )
-    return fetch_places_from_mock(region_key, category_key)
+    return fetch_places_from_mock(region_key, category_key), []

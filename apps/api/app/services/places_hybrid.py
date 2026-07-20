@@ -4,19 +4,26 @@ from __future__ import annotations
 
 import math
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 from typing import Any
 
-from app.config import HYBRID_DEDUPE_METERS
+from app.config import HYBRID_DEDUPE_METERS, OSM_PER_CATEGORY_LIMIT
 from app.constants.categories import (
     HYBRID_GOOGLE_CATEGORIES,
-    HYBRID_GOOGLE_SYNC_ORDER,
     HYBRID_OSM_CATEGORIES,
     HYBRID_OSM_SYNC_ORDER,
 )
 from app.services.places_google import fetch_places_from_google
-from app.services.places_osm import fetch_places_from_osm
+from app.services.places_osm import _fetch_single_category
 
+# "all" sync: one call per Google type (lodging covers hotel/hostel/guesthouse)
+_HYBRID_GOOGLE_ALL_ORDER = ("restaurant", "hotel")
+# Pause between OSM categories — public Overpass rate-limits hard on Railway
+_OSM_GAP_SECONDS = 2.5
+# Skip noisy/empty buckets on region-wide sync to cut Overpass load
+_HYBRID_OSM_ALL_ORDER = tuple(
+    c for c in HYBRID_OSM_SYNC_ORDER if c not in {"other"}
+)
 
 def _normalize_name(name: str) -> str:
     text = name.casefold().strip()
@@ -114,30 +121,27 @@ def merge_dedupe_places(
     return kept
 
 
-def _fetch_google_safe(
+def _fetch_google(
     latitude: float, longitude: float, category: str
 ) -> list[dict[str, Any]]:
-    try:
-        places = fetch_places_from_google(latitude, longitude, category)
-        print(f"[hybrid] google category={category} n={len(places)}")
-        return places
-    except Exception as exc:
-        print(f"[hybrid] google category={category} failed: {exc}")
-        return []
+    places = fetch_places_from_google(latitude, longitude, category)
+    print(f"[hybrid] google category={category} n={len(places)}")
+    return places
 
 
 def _fetch_osm_safe(
     latitude: float,
     longitude: float,
     category: str,
-    cache_key: str,
 ) -> list[dict[str, Any]]:
+    """Single-category OSM fetch with sequential selectors (no mirror stampede)."""
     try:
-        places = fetch_places_from_osm(
+        places = _fetch_single_category(
             latitude,
             longitude,
             category,
-            cache_key=cache_key,
+            OSM_PER_CATEGORY_LIMIT,
+            selector_parallel=False,
         )
         print(f"[hybrid] osm category={category} n={len(places)}")
         return places
@@ -150,35 +154,32 @@ def _fetch_all_hybrid(
     latitude: float,
     longitude: float,
     cache_key: str,
-) -> list[dict[str, Any]]:
-    """Balanced all: Google food/lodging + OSM nature/historic, then dedupe."""
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """
+    Balanced all: Google (few unique types) + OSM (fully sequential).
+    Returns (places, warnings).
+    """
+    del cache_key  # reserved for future hybrid cache
     merged: list[dict[str, Any]] = []
+    warnings: list[str] = []
 
-    # Google categories in parallel (few calls)
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = [
-            pool.submit(_fetch_google_safe, latitude, longitude, cat)
-            for cat in HYBRID_GOOGLE_SYNC_ORDER
-        ]
-        for future in as_completed(futures):
-            merged.extend(future.result())
+    for cat in _HYBRID_GOOGLE_ALL_ORDER:
+        try:
+            merged.extend(_fetch_google(latitude, longitude, cat))
+        except Exception as exc:
+            msg = f"google:{cat}: {exc}"
+            print(f"[hybrid] {msg}")
+            warnings.append(msg)
 
-    # OSM categories sequential-ish via small pool (Overpass-friendly)
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = [
-            pool.submit(
-                _fetch_osm_safe,
-                latitude,
-                longitude,
-                cat,
-                f"{cache_key}:osm:{cat}",
-            )
-            for cat in HYBRID_OSM_SYNC_ORDER
-        ]
-        for future in as_completed(futures):
-            merged.extend(future.result())
+    for i, cat in enumerate(_HYBRID_OSM_ALL_ORDER):
+        if i > 0:
+            time.sleep(_OSM_GAP_SECONDS)
+        places = _fetch_osm_safe(latitude, longitude, cat)
+        if not places:
+            warnings.append(f"osm:{cat}: empty or unavailable")
+        merged.extend(places)
 
-    return merge_dedupe_places(merged)
+    return merge_dedupe_places(merged), warnings
 
 
 def fetch_places_from_hybrid(
@@ -186,27 +187,27 @@ def fetch_places_from_hybrid(
     longitude: float,
     category: str,
     cache_key: str | None = None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """
+    Returns (places, warnings).
+    Google-only categories raise on API key / Places errors (do not swallow).
+    """
     key = cache_key or f"hybrid:{latitude:.4f}:{longitude:.4f}:{category}"
     cat = (category or "").strip().lower()
 
     if cat == "cafe":
-        return []
+        return [], []
 
     if cat == "all":
         return _fetch_all_hybrid(latitude, longitude, key)
 
-    # Legacy alias → OSM historical bucket
     if cat == "tourist_attraction":
-        return _fetch_osm_safe(
-            latitude, longitude, "historical", f"{key}:osm:historical"
-        )
+        return _fetch_osm_safe(latitude, longitude, "historical"), []
 
     if cat in HYBRID_GOOGLE_CATEGORIES:
-        return _fetch_google_safe(latitude, longitude, cat)
+        return _fetch_google(latitude, longitude, cat), []
 
     if cat in HYBRID_OSM_CATEGORIES:
-        return _fetch_osm_safe(latitude, longitude, cat, f"{key}:osm:{cat}")
+        return _fetch_osm_safe(latitude, longitude, cat), []
 
-    # Unknown → OSM other
-    return _fetch_osm_safe(latitude, longitude, "other", f"{key}:osm:other")
+    return _fetch_osm_safe(latitude, longitude, "other"), []

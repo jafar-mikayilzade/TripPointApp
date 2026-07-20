@@ -8,9 +8,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
-GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
+SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip()
+SUPABASE_SERVICE_KEY = (os.getenv("SUPABASE_SERVICE_KEY") or "").strip()
+# Strip quotes/whitespace — Railway paste often adds trailing spaces or quotes
+_raw_google_key = (os.getenv("GOOGLE_PLACES_API_KEY") or "").strip()
+GOOGLE_PLACES_API_KEY = _raw_google_key.strip('"').strip("'") or None
 
 # mock | osm | google | hybrid
 DATA_SOURCE = (os.getenv("DATA_SOURCE") or "mock").strip().lower()
