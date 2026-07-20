@@ -11,9 +11,15 @@ from typing import Any
 import requests
 
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
-from app.services.geo_route import order_stops_geo
+from app.services.geo_route import (
+    build_day_clusters,
+    cluster_centroid,
+    haversine_km,
+    nearest_poi_to_point,
+    order_stops_geo,
+    poi_coord,
+)
 from app.services.rank_pois import (
-    ATTRACTION_CATS,
     prefer_high_rated,
     public_poi_fields,
     rating_sort_key,
@@ -115,53 +121,86 @@ def _pick_unique(
     return out
 
 
-def select_day_stops(
+def select_stops_from_cluster(
     *,
-    day_index: int,
-    days_count: int,
-    attractions: list[dict[str, Any]],
+    cluster: list[dict[str, Any]],
     restaurants: list[dict[str, Any]],
-    accommodations: list[dict[str, Any]],
     used: set[str],
     interest_cats: set[str],
     want_food: bool,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Pick ~4 daytime stops (attractions + 1 lunch) + hotel for overnight nights."""
-    day_pois: list[dict[str, Any]] = []
+) -> list[dict[str, Any]]:
+    """Pick daytime stops only from this day's geographic cluster (+ nearby lunch)."""
+    if not cluster:
+        return []
 
+    day_pois: list[dict[str, Any]] = []
     preferred_pool = [
         p
-        for p in attractions
+        for p in cluster
         if not interest_cats or str(p.get("category") or "") in interest_cats
     ]
-    other_pool = [p for p in attractions if p not in preferred_pool]
+    other_pool = [p for p in cluster if p not in preferred_pool]
 
-    attr_need = STOPS_PER_DAY - (1 if (want_food or restaurants) else 0)
-    attr_need = max(2, attr_need)
+    attr_need = STOPS_PER_DAY - (1 if want_food else 0)
+    attr_need = max(2, min(attr_need, len(cluster)))
 
-    day_pois.extend(
-        _pick_unique(preferred_pool, used=used, limit=attr_need, category_allow=None)
-    )
-    if len([p for p in day_pois if str(p.get("category") or "") in ATTRACTION_CATS]) < attr_need:
-        need = attr_need - len(
-            [p for p in day_pois if str(p.get("category") or "") in ATTRACTION_CATS]
-        )
-        day_pois.extend(_pick_unique(other_pool, used=used, limit=need))
-
-    if restaurants:
-        lunch = _pick_unique(restaurants, used=used, limit=1)
-        day_pois.extend(lunch)
-
-    if len(day_pois) < 3:
+    day_pois.extend(_pick_unique(preferred_pool, used=used, limit=attr_need))
+    if len(day_pois) < attr_need:
         day_pois.extend(
-            _pick_unique(attractions, used=used, limit=3 - len(day_pois))
+            _pick_unique(other_pool, used=used, limit=attr_need - len(day_pois))
+        )
+    if len(day_pois) < min(2, len(cluster)):
+        day_pois.extend(
+            _pick_unique(cluster, used=used, limit=min(2, len(cluster)) - len(day_pois))
         )
 
-    hotels: list[dict[str, Any]] = []
-    if accommodations and days_count >= 2 and day_index < days_count:
-        hotels = _pick_unique(accommodations, used=used, limit=1)
+    # Lunch: nearest restaurant to cluster centroid (not global top)
+    if want_food and restaurants:
+        centroid = cluster_centroid(cluster) or cluster_centroid(day_pois)
+        if centroid:
+            lunch = nearest_poi_to_point(
+                restaurants,
+                lat=centroid[0],
+                lng=centroid[1],
+                exclude_ids=used,
+            )
+            if lunch is not None:
+                pid = str(lunch.get("id") or "")
+                if pid:
+                    used.add(pid)
+                day_pois.append(lunch)
 
-    return day_pois, hotels
+    return day_pois
+
+
+def pick_base_hotel(
+    accommodations: list[dict[str, Any]],
+    *,
+    origin_lat: float,
+    origin_lng: float,
+    first_cluster: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Single base hotel near region center / first-day zone — reused every night."""
+    if not accommodations:
+        return None
+    anchor = cluster_centroid(first_cluster)
+    lat = anchor[0] if anchor else origin_lat
+    lng = anchor[1] if anchor else origin_lng
+    # Prefer hotels near the first-day zone / region center (not a far "top-rated" hotel)
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for poi in accommodations:
+        coord = poi_coord(poi)
+        if coord is None:
+            continue
+        d = haversine_km(lat, lng, coord[0], coord[1])
+        scored.append((d, poi))
+    if not scored:
+        return None
+    scored.sort(key=lambda t: t[0])
+    close = [poi for dist, poi in scored if dist <= 12.0]
+    if close:
+        return max(close, key=rating_sort_key)
+    return scored[0][1]
 
 
 def assign_times(ordered: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -200,7 +239,6 @@ def build_skeleton(
     db_region = REGION_DB_ID.get(region_key, region_key)
     coords = REGION_COORDINATES.get(region_key) or REGION_COORDINATES.get(db_region)
     if not coords:
-        # fallback baku
         coords = REGION_COORDINATES["baku"]
 
     start_lat = float(coords["latitude"])
@@ -210,44 +248,68 @@ def build_skeleton(
     accommodations = apply_weather_filter(list(accommodations), weather)
     attractions = apply_weather_filter(list(attractions), weather)
 
-    # Sort pools by rating for stable picks
     restaurants = sorted(restaurants, key=rating_sort_key, reverse=True)
     accommodations = sorted(accommodations, key=rating_sort_key, reverse=True)
     attractions = sorted(attractions, key=rating_sort_key, reverse=True)
 
     interest_cats = _interest_sets(interests)
-    want_food = any(str(i).lower() == "food" for i in interests) or True
+    want_food = True
+
+    days_n = max(1, int(days))
+    clusters = build_day_clusters(
+        attractions,
+        days=days_n,
+        origin_lat=start_lat,
+        origin_lng=start_lng,
+    )
+
+    base_hotel = None
+    if days_n >= 2 and accommodations:
+        first_nonempty = next((c for c in clusters if c), [])
+        base_hotel = pick_base_hotel(
+            accommodations,
+            origin_lat=start_lat,
+            origin_lng=start_lng,
+            first_cluster=first_nonempty,
+        )
 
     used: set[str] = set()
+    if base_hotel and base_hotel.get("id"):
+        used.add(str(base_hotel["id"]))
+
     day_payloads: list[dict[str, Any]] = []
 
-    for day_i in range(1, days + 1):
-        daytime, hotels = select_day_stops(
-            day_index=day_i,
-            days_count=days,
-            attractions=attractions,
+    for day_i in range(1, days_n + 1):
+        cluster = clusters[day_i - 1] if day_i - 1 < len(clusters) else []
+        # Skip trailing empty days; if middle empty, try borrow leftover unused attractions
+        if not cluster:
+            leftovers = [
+                p
+                for p in attractions
+                if str(p.get("id") or "") not in used
+            ]
+            if leftovers:
+                # nearest leftovers to region center as emergency day
+                cluster = leftovers[:STOPS_PER_DAY]
+
+        daytime = select_stops_from_cluster(
+            cluster=cluster,
             restaurants=restaurants,
-            accommodations=accommodations,
             used=used,
             interest_cats=interest_cats,
             want_food=want_food,
         )
-        if not daytime and not hotels:
-            break
+        if not daytime:
+            continue
 
-        # Start from highest-rated attraction in the day set, else region center
-        seed_lat, seed_lng = start_lat, start_lng
-        if daytime:
-            top = max(daytime, key=rating_sort_key)
-            try:
-                seed_lat = float(top["lat"])
-                seed_lng = float(top["lng"])
-            except (KeyError, TypeError, ValueError):
-                pass
+        centroid = cluster_centroid(daytime) or (start_lat, start_lng)
+        ordered_day = order_stops_geo(
+            daytime, start_lat=centroid[0], start_lng=centroid[1]
+        )
 
-        ordered_day = order_stops_geo(daytime, start_lat=seed_lat, start_lng=seed_lng)
-        # Hotel last (not in geo zigzag of sightseeing)
-        ordered_day.extend(hotels)
+        # Same base hotel at end of each overnight day (not a new far hotel)
+        if base_hotel is not None and day_i < days_n:
+            ordered_day.append(base_hotel)
 
         stops = assign_times(ordered_day)
         day_payloads.append(
@@ -263,17 +325,22 @@ def build_skeleton(
     if not day_payloads or not any(d["stops"] for d in day_payloads):
         raise ValueError("Bu bölgədə marşrut üçün kifayət qədər yer tapılmadı")
 
+    # Renumber days sequentially if some were skipped
+    for i, day in enumerate(day_payloads, start=1):
+        day["day"] = i
+        day["title"] = f"{i}. gün"
+
     return {
         "summary": "",
         "days": day_payloads,
-        "total_cost": _budget_total(budget, days),
+        "total_cost": _budget_total(budget, len(day_payloads)),
         "best_time": "",
         "region": db_region,
         "meta": {
             "budget": budget,
             "interests": interests,
             "group_type": group_type,
-            "ordered_by": "haversine_nn_2opt",
+            "ordered_by": "geo_clusters_nn_2opt",
         },
     }
 
