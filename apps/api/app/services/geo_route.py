@@ -104,17 +104,6 @@ def two_opt(pois: Sequence[dict[str, Any]], *, max_passes: int = 40) -> list[dic
     return route
 
 
-def order_stops_geo(
-    pois: Sequence[dict[str, Any]],
-    *,
-    start_lat: float,
-    start_lng: float,
-) -> list[dict[str, Any]]:
-    """NN seed then 2-opt polish."""
-    seed = nearest_neighbor_order(pois, start_lat=start_lat, start_lng=start_lng)
-    return two_opt(seed)
-
-
 def poi_coord(poi: dict[str, Any]) -> tuple[float, float] | None:
     return _coord(poi)
 
@@ -126,6 +115,111 @@ def cluster_centroid(pois: Sequence[dict[str, Any]]) -> tuple[float, float] | No
     lat = sum(c[0] for c in coords) / len(coords)
     lng = sum(c[1] for c in coords) / len(coords)
     return lat, lng
+
+
+def _extreme_points(pois: Sequence[dict[str, Any]], limit: int = 3) -> list[dict[str, Any]]:
+    """Points farthest from centroid — good open-TSP start candidates."""
+    usable = [p for p in pois if _coord(p) is not None]
+    if not usable:
+        return []
+    c = cluster_centroid(usable)
+    if c is None:
+        return usable[:limit]
+    ranked = sorted(
+        usable,
+        key=lambda p: haversine_km(c[0], c[1], *(_coord(p) or c)),
+        reverse=True,
+    )
+    return ranked[:limit]
+
+
+def order_stops_geo(
+    pois: Sequence[dict[str, Any]],
+    *,
+    start_lat: float | None = None,
+    start_lng: float | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Open-path tour: try several NN starts (each POI as start + extremes + optional
+    external hint), 2-opt each, keep shortest tour_length_km.
+    """
+    usable = [p for p in pois if _coord(p) is not None]
+    if len(usable) <= 1:
+        return list(usable)
+
+    start_coords: list[tuple[float, float]] = []
+    seen: set[tuple[float, float]] = set()
+
+    def _add(lat: float, lng: float) -> None:
+        key = (round(lat, 5), round(lng, 5))
+        if key not in seen:
+            seen.add(key)
+            start_coords.append((lat, lng))
+
+    # Start from each stop itself (critical for 1-day open TSP)
+    for p in usable:
+        coord = _coord(p)
+        if coord:
+            _add(coord[0], coord[1])
+
+    for p in _extreme_points(usable, 3):
+        coord = _coord(p)
+        if coord:
+            _add(coord[0], coord[1])
+
+    c = cluster_centroid(usable)
+    if c:
+        _add(c[0], c[1])
+    if start_lat is not None and start_lng is not None:
+        _add(start_lat, start_lng)
+
+    best: list[dict[str, Any]] | None = None
+    best_len = float("inf")
+    for lat, lng in start_coords:
+        route = two_opt(nearest_neighbor_order(usable, start_lat=lat, start_lng=lng))
+        length = tour_length_km(route)
+        if length < best_len:
+            best_len = length
+            best = route
+
+    return best if best is not None else list(usable)
+
+
+def cluster_diameter_km(pois: Sequence[dict[str, Any]]) -> float:
+    coords = [_coord(p) for p in pois if _coord(p) is not None]
+    if len(coords) < 2:
+        return 0.0
+    best = 0.0
+    for i, a in enumerate(coords):
+        assert a is not None
+        for b in coords[i + 1 :]:
+            assert b is not None
+            best = max(best, haversine_km(a[0], a[1], b[0], b[1]))
+    return best
+
+
+def trim_cluster_diameter(
+    cluster: Sequence[dict[str, Any]],
+    *,
+    max_diameter_km: float = 25.0,
+) -> list[dict[str, Any]]:
+    """Keep core around centroid if cluster is too spread out."""
+    pois = [p for p in cluster if _coord(p) is not None]
+    if len(pois) <= 2 or cluster_diameter_km(pois) <= max_diameter_km:
+        return list(pois)
+    c = cluster_centroid(pois)
+    if c is None:
+        return list(pois)
+    ranked = sorted(
+        pois,
+        key=lambda p: haversine_km(c[0], c[1], *(_coord(p) or c)),
+    )
+    kept: list[dict[str, Any]] = []
+    for p in ranked:
+        trial = kept + [p]
+        if len(trial) <= 2 or cluster_diameter_km(trial) <= max_diameter_km:
+            kept.append(p)
+    return kept or ranked[:2]
 
 
 def nearest_poi_to_point(
@@ -233,10 +327,12 @@ def assign_to_nearest_seed(
 def rebalance_clusters(
     clusters: list[list[dict[str, Any]]],
     *,
-    min_size: int = 2,
+    min_size: int = 1,
 ) -> list[list[dict[str, Any]]]:
     """
-    Move POIs from largest cluster into empty/tiny clusters so each day has something.
+    Soft fill: only move into *empty* clusters (avoid stretching days).
+    Prefer donor points closest to needy cluster's eventual neighbor seeds —
+    here: closest to donor centroid (core) so we don't steal far outliers.
     """
     if not clusters:
         return clusters
@@ -245,28 +341,31 @@ def rebalance_clusters(
     def size(i: int) -> int:
         return len(clusters[i])
 
-    # Fill empty / tiny from largest
     for i in range(len(clusters)):
-        while size(i) < min_size:
-            donor = max(range(len(clusters)), key=size)
-            if donor == i or size(donor) <= min_size:
-                break
-            # move farthest-from-donor-centroid point (or just last) to needy cluster
-            donor_c = cluster_centroid(clusters[donor])
-            if not donor_c or not clusters[donor]:
-                break
-            # pick point in donor farthest from donor centroid (edge of big cluster)
-            move_i = 0
-            move_d = -1.0
-            for j, poi in enumerate(clusters[donor]):
-                coord = _coord(poi)
-                if coord is None:
-                    continue
-                d = haversine_km(donor_c[0], donor_c[1], coord[0], coord[1])
-                if d > move_d:
-                    move_d = d
-                    move_i = j
-            clusters[i].append(clusters[donor].pop(move_i))
+        if size(i) >= min_size:
+            continue
+        # Only fill completely empty clusters once
+        if size(i) > 0:
+            continue
+        donor = max(range(len(clusters)), key=size)
+        if donor == i or size(donor) <= 2:
+            continue
+        donor_c = cluster_centroid(clusters[donor])
+        if not donor_c or not clusters[donor]:
+            continue
+        # Move a mid-distance point (not the farthest outlier)
+        scored = []
+        for j, poi in enumerate(clusters[donor]):
+            coord = _coord(poi)
+            if coord is None:
+                continue
+            d = haversine_km(donor_c[0], donor_c[1], coord[0], coord[1])
+            scored.append((d, j))
+        if not scored:
+            continue
+        scored.sort(key=lambda t: t[0])
+        move_i = scored[len(scored) // 2][1]
+        clusters[i].append(clusters[donor].pop(move_i))
 
     return clusters
 
@@ -317,15 +416,15 @@ def build_day_clusters(
     while len(clusters) < days and len(usable) > len(clusters):
         clusters.append([])
 
-    min_size = 1 if len(usable) < days * 2 else 2
-    clusters = rebalance_clusters(clusters, min_size=min_size)
+    clusters = rebalance_clusters(clusters, min_size=1)
+    clusters = [
+        trim_cluster_diameter(c, max_diameter_km=25.0) if c else [] for c in clusters
+    ]
     clusters = order_clusters_from_origin(
         clusters, origin_lat=origin_lat, origin_lng=origin_lng
     )
 
-    # Trim / pad to requested days
     if len(clusters) > days:
-        # merge overflow into last kept day
         kept = clusters[:days]
         for extra in clusters[days:]:
             kept[-1].extend(extra)

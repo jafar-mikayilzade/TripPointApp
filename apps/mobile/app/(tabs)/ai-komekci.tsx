@@ -189,70 +189,46 @@ export default function AiKomekciScreen() {
 
   const fetchRouteFromGoogle = async (planData: any) => {
     try {
-      if (!GOOGLE_MAPS_KEY) {
-        console.log('Google Maps key yoxdur — route atlanır');
-        // Xəta verməsin, sadəcə polyline olmadan davam et
-        // Yalnız marker-lər göstərilsin
-
-        const allCoords: Array<{ latitude: number; longitude: number }> = [];
-        const segments: RouteSegment[] = [];
-
-        planData.days?.forEach((day: any) => {
-          day.stops?.forEach((stop: any) => {
-            if (stop.lat && stop.lng) {
-              allCoords.push({
-                latitude: Number(stop.lat),
-                longitude: Number(stop.lng),
-              });
-            }
-          });
-        });
-
-        for (let i = 0; i < allCoords.length - 1; i++) {
-          segments.push({
-            coordinates: [allCoords[i], allCoords[i + 1]],
-            color: SEGMENT_COLORS[i % SEGMENT_COLORS.length],
-          });
-        }
-
-        setRouteSegments(segments);
-
-        if (allCoords.length > 0 && mapRef.current) {
-          mapRef.current.fitToCoordinates(allCoords, {
-            edgePadding: {
-              top: 60,
-              right: 40,
-              bottom: 40,
-              left: 40,
-            },
-            animated: true,
-          });
-        }
-        return;
-      }
-
-      const allStops: Array<{ lat: number; lng: number; name: string }> = [];
-
-      planData.days?.forEach((day: any) => {
-        day.stops?.forEach((stop: any) => {
+      // Build legs only WITHIN each day — never Day N last → Day N+1 first
+      const dayStopLists: Array<Array<{ lat: number; lng: number; name: string }>> = [];
+      (planData.days ?? []).forEach((day: any) => {
+        const stops: Array<{ lat: number; lng: number; name: string }> = [];
+        (day.stops ?? []).forEach((stop: any) => {
           if (stop.lat && stop.lng) {
-            allStops.push({
+            stops.push({
               lat: Number(stop.lat),
               lng: Number(stop.lng),
-              name: stop.name,
+              name: String(stop.name ?? ''),
             });
           }
         });
+        if (stops.length > 0) {
+          dayStopLists.push(stops);
+        }
       });
 
-      if (allStops.length < 2) {
-        const singleCoords = allStops.map((s) => ({
-          latitude: s.lat,
-          longitude: s.lng,
-        }));
-        setRouteSegments([]);
-        if (singleCoords.length > 0 && mapRef.current) {
-          mapRef.current.fitToCoordinates(singleCoords, {
+      const fitCoords: LatLng[] = dayStopLists.flatMap((stops) =>
+        stops.map((s) => ({ latitude: s.lat, longitude: s.lng }))
+      );
+
+      if (!GOOGLE_MAPS_KEY) {
+        const segments: RouteSegment[] = [];
+        let colorIdx = 0;
+        dayStopLists.forEach((stops) => {
+          for (let i = 0; i < stops.length - 1; i++) {
+            segments.push({
+              coordinates: [
+                { latitude: stops[i].lat, longitude: stops[i].lng },
+                { latitude: stops[i + 1].lat, longitude: stops[i + 1].lng },
+              ],
+              color: SEGMENT_COLORS[colorIdx % SEGMENT_COLORS.length],
+            });
+            colorIdx += 1;
+          }
+        });
+        setRouteSegments(segments);
+        if (fitCoords.length > 0 && mapRef.current) {
+          mapRef.current.fitToCoordinates(fitCoords, {
             edgePadding: { top: 60, right: 40, bottom: 40, left: 40 },
             animated: true,
           });
@@ -260,73 +236,61 @@ export default function AiKomekciScreen() {
         return;
       }
 
-      const allCoords: LatLng[] = [];
       const segments: RouteSegment[] = [];
       const durations: StopDuration[] = [];
+      const allCoords: LatLng[] = [];
+      let colorIdx = 0;
 
-      for (let i = 0; i < allStops.length - 1; i++) {
-        const origin = allStops[i];
-        const dest = allStops[i + 1];
+      for (const stops of dayStopLists) {
+        for (let i = 0; i < stops.length - 1; i++) {
+          const origin = stops[i];
+          const dest = stops[i + 1];
+          const url =
+            'https://maps.googleapis.com/maps/api/directions/json?' +
+            `origin=${origin.lat},${origin.lng}` +
+            `&destination=${dest.lat},${dest.lng}` +
+            '&mode=driving&language=az&key=' +
+            GOOGLE_MAPS_KEY;
 
-        const url =
-          'https://maps.googleapis.com/maps/api/directions/json?' +
-          'origin=' +
-          origin.lat +
-          ',' +
-          origin.lng +
-          '&destination=' +
-          dest.lat +
-          ',' +
-          dest.lng +
-          '&mode=driving' +
-          '&language=az' +
-          '&key=' +
-          GOOGLE_MAPS_KEY;
+          const response = await fetch(url);
+          const data = await response.json();
+          const color = SEGMENT_COLORS[colorIdx % SEGMENT_COLORS.length];
+          colorIdx += 1;
 
-        const response = await fetch(url);
-        const data = await response.json();
-
-        if (data.status === 'OK' && data.routes?.[0]) {
-          const route = data.routes[0];
-          const leg = route.legs?.[0];
-          const points = decodePolyline(route.overview_polyline.points);
-
-          const segmentCoords: LatLng[] = [
-            { latitude: origin.lat, longitude: origin.lng },
-            ...points,
-            { latitude: dest.lat, longitude: dest.lng },
-          ];
-
-          segments.push({
-            coordinates: segmentCoords,
-            color: SEGMENT_COLORS[i % SEGMENT_COLORS.length],
-          });
-          allCoords.push(...segmentCoords);
-
-          durations.push({
-            from: origin.name,
-            to: dest.name,
-            duration: leg?.duration?.text || '',
-            distance: leg?.distance?.text || '',
-          });
-        } else {
-          const fallback: LatLng[] = [
-            { latitude: origin.lat, longitude: origin.lng },
-            { latitude: dest.lat, longitude: dest.lng },
-          ];
-          segments.push({
-            coordinates: fallback,
-            color: SEGMENT_COLORS[i % SEGMENT_COLORS.length],
-          });
-          allCoords.push(...fallback);
+          if (data.status === 'OK' && data.routes?.[0]) {
+            const route = data.routes[0];
+            const leg = route.legs?.[0];
+            const points = decodePolyline(route.overview_polyline.points);
+            const segmentCoords: LatLng[] = [
+              { latitude: origin.lat, longitude: origin.lng },
+              ...points,
+              { latitude: dest.lat, longitude: dest.lng },
+            ];
+            segments.push({ coordinates: segmentCoords, color });
+            allCoords.push(...segmentCoords);
+            durations.push({
+              from: origin.name,
+              to: dest.name,
+              duration: leg?.duration?.text || '',
+              distance: leg?.distance?.text || '',
+            });
+          } else {
+            const fallback: LatLng[] = [
+              { latitude: origin.lat, longitude: origin.lng },
+              { latitude: dest.lat, longitude: dest.lng },
+            ];
+            segments.push({ coordinates: fallback, color });
+            allCoords.push(...fallback);
+          }
         }
       }
 
       setRouteSegments(segments);
       setStopDurations(durations);
 
-      if (allCoords.length > 0 && mapRef.current) {
-        mapRef.current.fitToCoordinates(allCoords, {
+      const toFit = allCoords.length > 0 ? allCoords : fitCoords;
+      if (toFit.length > 0 && mapRef.current) {
+        mapRef.current.fitToCoordinates(toFit, {
           edgePadding: { top: 60, right: 40, bottom: 40, left: 40 },
           animated: true,
         });
