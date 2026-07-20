@@ -1,6 +1,8 @@
 # TripPoint API (FastAPI worker)
 
-OSM / mock / Google Places sync → Supabase `pois` upsert.
+OSM / Google / hybrid / mock sync → Supabase `pois` upsert.
+
+**`DATA_SOURCE=hybrid`:** restaurant/hotel/hostel/guesthouse/home_restaurant → Google; nature/waterfall/mountain/lake/historical/monument/other → OSM. `category=all` hər ikisini merge + dedupe edir.
 
 ## Layout
 
@@ -59,7 +61,8 @@ Root `Dockerfile` və `railway.toml` GitHub-da olmalıdır.
    |------|--------|
    | `SUPABASE_URL` | Supabase project URL |
    | `SUPABASE_SERVICE_KEY` | service role key |
-   | `DATA_SOURCE` | `osm` |
+   | `DATA_SOURCE` | `hybrid` (və ya `osm` / `google`) |
+   | `GOOGLE_PLACES_API_KEY` | Places API key (`google` / `hybrid` üçün) |
 
 6. **Networking → Generate Domain**
 

@@ -14,6 +14,7 @@ from app.constants.regions import REGION_COORDINATES
 from app.db import supabase
 from app.services.places_clean import clean_place, to_db_region
 from app.services.places_google import fetch_places_from_google
+from app.services.places_hybrid import fetch_places_from_hybrid
 from app.services.places_mock import fetch_places_from_mock
 from app.services.places_osm import fetch_places_from_osm
 
@@ -109,6 +110,7 @@ def sync_places(region: str, category: str) -> JSONResponse:
         source_label = {
             "google": "Google Places API",
             "osm": "OpenStreetMap Overpass API",
+            "hybrid": "Google Places / OpenStreetMap",
         }.get(DATA_SOURCE, "external data source")
         return JSONResponse(
             status_code=502,
@@ -137,6 +139,13 @@ def _fetch_raw_places(
     category_key: str,
     db_region: str,
 ) -> list[dict[str, Any]]:
+    if DATA_SOURCE == "hybrid":
+        return fetch_places_from_hybrid(
+            latitude=coordinates["latitude"],
+            longitude=coordinates["longitude"],
+            category=category_key,
+            cache_key=f"{db_region}:{category_key}",
+        )
     if DATA_SOURCE == "google":
         return fetch_places_from_google(
             latitude=coordinates["latitude"],

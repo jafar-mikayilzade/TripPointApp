@@ -21,7 +21,7 @@ Filter: `status = approved`, `region` = `quba|qusar|seki|lerik|qabala` (**lowerc
 ### Sync (background)
 
 Mobile → `{API_URL}/api/sync-places?region=&category=`  
-→ FastAPI (`DATA_SOURCE=mock` / `osm` / `google`)  
+→ FastAPI (`DATA_SOURCE=mock` / `osm` / `google` / `hybrid`)  
 → clean/map to schema  
 → Supabase upsert `on_conflict=place_id` (**SERVICE_ROLE yalnız serverdə**)  
 → Mobile yenidən Supabase-dən oxuyur
@@ -78,7 +78,7 @@ Monorepo root-da `Dockerfile` + `railway.toml` API-ni Docker ilə build edir (Ra
 EXPO_PUBLIC_API_URL=https://YOUR-SERVICE.up.railway.app
 ```
 
-Server env: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `DATA_SOURCE=osm`  
+Server env: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `DATA_SOURCE=hybrid` (və ya `osm` / `google`), hybrid üçün `GOOGLE_PLACES_API_KEY`  
 Service role key yalnız Railway Variables-də — heç vaxt `EXPO_PUBLIC_*` içində olmamalıdır.
 
 Əgər `Railpack could not determine...` / `start.sh not found` görürsənsə: root `Dockerfile` push olunmayıb və ya Builder hələ Railpack-dir — Settings → Build → **Dockerfile** seç və Redeploy et.

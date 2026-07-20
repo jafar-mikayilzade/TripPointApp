@@ -12,9 +12,9 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
 
-# mock | osm | google
+# mock | osm | google | hybrid
 DATA_SOURCE = (os.getenv("DATA_SOURCE") or "mock").strip().lower()
-ALLOWED_DATA_SOURCES = {"mock", "osm", "google"}
+ALLOWED_DATA_SOURCES = {"mock", "osm", "google", "hybrid"}
 
 _DEFAULT_OVERPASS = (
     "https://overpass-api.de/api/interpreter,"
@@ -36,6 +36,8 @@ OSM_RESULT_LIMIT_ALL = 120
 OSM_PER_CATEGORY_LIMIT = 10
 OSM_HTTP_TIMEOUT_SECONDS = 20
 OSM_CACHE_TTL_SECONDS = 600
+# hybrid "all": name+coords dedupe radius (meters)
+HYBRID_DEDUPE_METERS = 90
 
 
 def validate_settings() -> None:
@@ -47,7 +49,7 @@ def validate_settings() -> None:
         raise RuntimeError(
             f"Invalid DATA_SOURCE={DATA_SOURCE!r}. Allowed: {sorted(ALLOWED_DATA_SOURCES)}"
         )
-    if DATA_SOURCE == "google" and not GOOGLE_PLACES_API_KEY:
+    if DATA_SOURCE in {"google", "hybrid"} and not GOOGLE_PLACES_API_KEY:
         raise RuntimeError(
-            "GOOGLE_PLACES_API_KEY is required when DATA_SOURCE=google"
+            f"GOOGLE_PLACES_API_KEY is required when DATA_SOURCE={DATA_SOURCE}"
         )

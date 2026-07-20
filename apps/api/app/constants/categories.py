@@ -20,6 +20,46 @@ APP_CATEGORIES = {
 # all = region sync; tourist_attraction = legacy alias
 ALLOWED_CATEGORIES = APP_CATEGORIES | {"all", "tourist_attraction"}
 
+# DATA_SOURCE=hybrid routing
+HYBRID_GOOGLE_CATEGORIES = frozenset(
+    {
+        "restaurant",
+        "hotel",
+        "hostel",
+        "guesthouse",
+        "home_restaurant",
+    }
+)
+HYBRID_OSM_CATEGORIES = frozenset(
+    {
+        "nature",
+        "waterfall",
+        "mountain",
+        "lake",
+        "historical",
+        "monument",
+        "other",
+    }
+)
+
+# Stable order for hybrid "all" sync
+HYBRID_GOOGLE_SYNC_ORDER = [
+    "restaurant",
+    "hotel",
+    "hostel",
+    "guesthouse",
+    "home_restaurant",
+]
+HYBRID_OSM_SYNC_ORDER = [
+    "nature",
+    "waterfall",
+    "mountain",
+    "lake",
+    "historical",
+    "monument",
+    "other",
+]
+
 GOOGLE_TYPE_MAP: dict[str, str] = {
     "restaurant": "restaurant",
     "cafe": "cafe",
