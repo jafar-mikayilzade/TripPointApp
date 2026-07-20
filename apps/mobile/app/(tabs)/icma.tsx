@@ -18,6 +18,7 @@ import {
   ListingDetailModal,
   type ListingWithCreator,
 } from '../../components/ListingDetailModal';
+import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { REGIONS } from '../../constants/regions';
 import { getErrorMessage } from '../../lib/errors';
 import { supabase } from '../../lib/supabase';
@@ -172,9 +173,12 @@ export default function IcmaScreen() {
           <Text style={styles.title}>icma</Text>
           <Text style={styles.subtitle}>Sakitcə planla · yoldaş tap</Text>
         </View>
-        <Pressable style={styles.addButton} onPress={() => setCreateVisible(true)} hitSlop={8}>
-          <FontAwesome name="plus" size={18} color={colors.textOnAccent} />
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable style={styles.addButton} onPress={() => setCreateVisible(true)} hitSlop={8}>
+            <FontAwesome name="plus" size={18} color={colors.textOnAccent} />
+          </Pressable>
+          <ProfileCornerButton />
+        </View>
       </View>
 
       <ScrollView
@@ -316,9 +320,6 @@ function ListingCard({
               <Text style={styles.avatarInitial}>{creatorName.charAt(0).toUpperCase()}</Text>
             </View>
           )}
-          <Text style={styles.creatorName} numberOfLines={1}>
-            {creatorName}
-          </Text>
         </View>
         {footRight ? (
           <Text style={styles.footMeta} numberOfLines={1}>
@@ -369,6 +370,11 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     paddingRight: 12,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   title: {
     fontSize: 34,
@@ -496,11 +502,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   creatorRow: {
-    flex: 1,
-    minWidth: 0,
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
   },
   avatar: {
     width: 22,
@@ -519,13 +523,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     color: colors.textSecondary,
-  },
-  creatorName: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textMuted,
   },
   footMeta: {
     flexShrink: 0,

@@ -28,12 +28,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AddPoiModal } from '../../components/AddPoiModal';
 import { AdminPoiCategoryModal } from '../../components/AdminPoiCategoryModal';
+import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
 import { useToast } from '../../components/Toast';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
 import {
   insertApprovedPoiFromGoogle,
   updatePoiCoordinates,
+  fetchGooglePlaceRating,
   type GoogleMapPoiPayload,
 } from '../../lib/adminMap';
 import {
@@ -47,7 +49,7 @@ import { supabase } from '../../lib/supabase';
 import { useIsAdmin } from '../../lib/useIsAdmin';
 import type { Poi, PoiCategory, PoiPhoto } from '../../types/database';
 
-import { colors } from '../../constants/theme';
+import { colors, shadows } from '../../constants/theme';
 
 type PoiListItem = Poi & {
   photoUrl: string | null;
@@ -128,6 +130,8 @@ export default function HomeScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [highlightedPoiId, setHighlightedPoiId] = useState<string | null>(null);
   const [selectedPoi, setSelectedPoi] = useState<Poi | null>(null);
+  /** Custom marker redraw (tracksViewChanges) — seçim dəyişəndə qısa müddət. */
+  const [markerTracksId, setMarkerTracksId] = useState<string | null>(null);
   const [addPoiVisible, setAddPoiVisible] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
@@ -223,7 +227,7 @@ export default function HomeScreen() {
         `
         )
         .eq('status', 'approved')
-        .order('created_at', { ascending: false });
+        .order('rating', { ascending: false, nullsFirst: false });
 
       if (selectedRegionId) {
         // Region id həmişə lowercase (quba); DB-də köhnə "Quba" olsa belə tapılsın
@@ -250,20 +254,36 @@ export default function HomeScreen() {
       console.log('POI sayı:', data?.length);
 
       const rows = (data ?? []) as PoiQueryRow[];
-      setPois(
-        rows.map((poi) => {
-          const photos = [...(poi.poi_photos ?? [])]
-            .filter((photo) => !('status' in photo) || photo.status === 'approved')
-            .sort((a, b) => a.order_index - b.order_index);
-          const { poi_photos: _ignored, ...rest } = poi;
-          return {
-            ...rest,
-            photoUrl: photos[0]?.photo_url ?? null,
-            averageRating: null,
-            ratingCount: 0,
-          };
-        })
-      );
+      const mapped = rows.map((poi) => {
+        const photos = [...(poi.poi_photos ?? [])]
+          .filter((photo) => !('status' in photo) || photo.status === 'approved')
+          .sort((a, b) => a.order_index - b.order_index);
+        const { poi_photos: _ignored, ...rest } = poi;
+        return {
+          ...rest,
+          photoUrl: photos[0]?.photo_url ?? null,
+          averageRating:
+            typeof rest.rating === 'number' && Number.isFinite(rest.rating)
+              ? rest.rating
+              : null,
+          ratingCount:
+            typeof rest.rating_count === 'number' && Number.isFinite(rest.rating_count)
+              ? rest.rating_count
+              : 0,
+        };
+      });
+
+      // Hamısı + kateqoriya filterində eyni: reytinq ↓, sonra rəy sayı ↓
+      mapped.sort((a, b) => {
+        const ra = a.averageRating ?? -1;
+        const rb = b.averageRating ?? -1;
+        if (rb !== ra) {
+          return rb - ra;
+        }
+        return (b.ratingCount ?? 0) - (a.ratingCount ?? 0);
+      });
+
+      setPois(mapped);
     } catch (err: unknown) {
       console.log('Catch xətası:', err);
       if (!silent) {
@@ -305,6 +325,12 @@ export default function HomeScreen() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!markerTracksId) return;
+    const t = setTimeout(() => setMarkerTracksId(null), 700);
+    return () => clearTimeout(t);
+  }, [markerTracksId]);
 
   useEffect(() => {
     fetchPois();
@@ -432,23 +458,47 @@ export default function HomeScreen() {
     }
   };
 
-  function selectPoi(poi: Poi) {
-    setSelectedPoi(poi);
-    setHighlightedPoiId(poi.id);
+  function centerMapOnPoi(poi: { id: string; lat: number; lng: number }) {
+    setMarkerTracksId(poi.id);
     mapRef.current?.animateToRegion(
       {
         latitude: poi.lat,
         longitude: poi.lng,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
+        // Cluster açılması + marker mərkəzdə oxunaqlı olsun
+        latitudeDelta: 0.008,
+        longitudeDelta: 0.008,
       },
-      600
+      450
     );
+  }
+
+  function scrollListToPoi(poiId: string) {
+    const index = pois.findIndex((p) => p.id === poiId);
+    if (index < 0) return;
+    requestAnimationFrame(() => {
+      try {
+        listRef.current?.scrollToIndex({
+          index,
+          animated: true,
+          viewPosition: 0.2,
+        });
+      } catch {
+        // FlatList hələ layout olmayıbsa onScrollToIndexFailed işləyir
+      }
+    });
+  }
+
+  function selectPoi(poi: Poi) {
+    setSelectedPoi(poi);
+    setHighlightedPoiId(poi.id);
+    centerMapOnPoi(poi);
+    scrollListToPoi(poi.id);
   }
 
   function clearSelectedPoi() {
     setSelectedPoi(null);
     setHighlightedPoiId(null);
+    setMarkerTracksId(null);
 
     if (selectedRegion) {
       mapRef.current?.animateToRegion(
@@ -481,19 +531,10 @@ export default function HomeScreen() {
 
   function handleMarkerPress(poi: PoiListItem) {
     if (selectedPoi?.id === poi.id) {
-      setSelectedPoi(null);
-    } else {
-      setSelectedPoi(poi);
-      mapRef.current?.animateToRegion(
-        {
-          latitude: poi.lat,
-          longitude: poi.lng,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        },
-        600
-      );
+      clearSelectedPoi();
+      return;
     }
+    selectPoi(poi);
   }
 
   function handleCardPress(poi: PoiListItem) {
@@ -549,11 +590,34 @@ export default function HomeScreen() {
       return;
     }
 
-    setPendingGooglePoi({
+    const base: GoogleMapPoiPayload = {
       placeId: placeId ?? '',
       name: name?.trim() || '',
       latitude: coordinate.latitude,
       longitude: coordinate.longitude,
+      rating: null,
+      ratingCount: null,
+      suggestedCategory: null,
+    };
+    setPendingGooglePoi(base);
+
+    if (!placeId) {
+      return;
+    }
+
+    void fetchGooglePlaceRating(placeId).then((details) => {
+      setPendingGooglePoi((current) => {
+        if (!current || current.placeId !== placeId) {
+          return current;
+        }
+        return {
+          ...current,
+          name: details.name?.trim() || current.name,
+          rating: details.rating,
+          ratingCount: details.ratingCount,
+          suggestedCategory: details.suggestedCategory,
+        };
+      });
     });
   }
 
@@ -603,6 +667,8 @@ export default function HomeScreen() {
         lng: pendingGooglePoi.longitude,
         placeId: pendingGooglePoi.placeId || undefined,
         userId: user.id,
+        rating: pendingGooglePoi.rating ?? null,
+        ratingCount: pendingGooglePoi.ratingCount ?? null,
       });
 
       if (error || !data) {
@@ -613,13 +679,28 @@ export default function HomeScreen() {
       const listItem: PoiListItem = {
         ...data,
         photoUrl: null,
-        averageRating: null,
-        ratingCount: 0,
+        averageRating:
+          typeof data.rating === 'number' && Number.isFinite(data.rating) ? data.rating : null,
+        ratingCount:
+          typeof data.rating_count === 'number' && Number.isFinite(data.rating_count)
+            ? data.rating_count
+            : 0,
       };
 
-      setPois((current) => [listItem, ...current.filter((p) => p.id !== data.id)]);
-      setSelectedPoi(data);
+      setPois((current) => {
+        const next = [listItem, ...current.filter((p) => p.id !== data.id)];
+        next.sort((a, b) => {
+          const ra = a.averageRating ?? -1;
+          const rb = b.averageRating ?? -1;
+          if (rb !== ra) {
+            return rb - ra;
+          }
+          return (b.ratingCount ?? 0) - (a.ratingCount ?? 0);
+        });
+        return next;
+      });
       setPendingGooglePoi(null);
+      selectPoi(listItem);
       showToast(`Əlavə olundu: ${data.name}`);
     } catch (err) {
       showToast(getErrorMessage(err));
@@ -669,13 +750,29 @@ export default function HomeScreen() {
                   </Marker>
                 ) : null}
 
-                {pois.map((poi) => (
+                {pois.map((poi) => {
+                  const isSelected =
+                    selectedPoi?.id === poi.id || highlightedPoiId === poi.id;
+                  const hasSelection = selectedPoi != null || highlightedPoiId != null;
+                  const isDimmed = hasSelection && !isSelected;
+
+                  return (
                   <Marker
                     key={poi.id}
                     coordinate={{ latitude: poi.lat, longitude: poi.lng }}
                     title={poi.name}
                     description={getCategoryLabel(poi.category)}
-                    pinColor={isAdmin ? colors.success : undefined}
+                    pinColor={
+                      isAdmin
+                        ? isSelected
+                          ? colors.accent
+                          : isDimmed
+                            ? '#C8C8CC'
+                            : colors.success
+                        : undefined
+                    }
+                    zIndex={isSelected ? 1000 : isDimmed ? 1 : 10}
+                    opacity={isDimmed && !isAdmin ? 0.45 : 1}
                     onPress={() => handleMarkerPress(poi)}
                     draggable={isAdmin}
                     onDragStart={
@@ -692,21 +789,23 @@ export default function HomeScreen() {
                           }
                         : undefined
                     }
-                    tracksViewChanges={isAdmin ? draggingPoiId === poi.id : false}
+                    tracksViewChanges={
+                      draggingPoiId === poi.id || markerTracksId != null
+                    }
                   >
                     {/* Admin sürüşdürmədə custom child ghost marker yaradır — yalnız pin */}
                     {isAdmin ? null : (
                       <View
                         style={[
                           styles.poiMarkerBubble,
-                          (selectedPoi?.id === poi.id || highlightedPoiId === poi.id) &&
-                            styles.poiMarkerBubbleHighlighted,
+                          isSelected && styles.poiMarkerBubbleHighlighted,
+                          isDimmed && styles.poiMarkerBubbleDimmed,
                         ]}
                       >
                         <Text
                           style={[
                             styles.poiMarkerEmoji,
-                            selectedPoi?.id === poi.id && styles.poiMarkerEmojiSelected,
+                            isSelected && styles.poiMarkerEmojiSelected,
                           ]}
                         >
                           {getCategoryEmoji(poi.category)}
@@ -714,7 +813,8 @@ export default function HomeScreen() {
                       </View>
                     )}
                   </Marker>
-                ))}
+                  );
+                })}
               </MapView>
 
               {isAdmin ? (
@@ -750,6 +850,8 @@ export default function HomeScreen() {
                 </Text>
                 <Text style={styles.dropdownCaret}>▼</Text>
               </TouchableOpacity>
+
+              <ProfileCornerButton style={styles.profileCorner} />
 
               <TouchableOpacity
                 style={styles.addPoiButton}
@@ -814,13 +916,20 @@ export default function HomeScreen() {
                           });
                         }, 100);
                       }}
-                      renderItem={({ item }) => (
+                      renderItem={({ item }) => {
+                        const isSelected =
+                          selectedPoi?.id === item.id || highlightedPoiId === item.id;
+                        const hasSelection =
+                          selectedPoi != null || highlightedPoiId != null;
+                        return (
                         <MemoPoiListCard
                           item={item}
-                          highlighted={highlightedPoiId === item.id}
+                          highlighted={isSelected}
+                          dimmed={hasSelection && !isSelected}
                           userLocation={userLocation}
                           onPress={() => handleCardPress(item)}
                         />
+                        );
                       }}
                       ListEmptyComponent={
                         <View style={styles.emptyWrap}>
@@ -939,7 +1048,13 @@ export default function HomeScreen() {
 }
 
 function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
-  const [averageRating, setAverageRating] = useState<number | null>(null);
+  const initialRating =
+    typeof (poi as PoiListItem).averageRating === 'number'
+      ? (poi as PoiListItem).averageRating
+      : typeof poi.rating === 'number' && Number.isFinite(poi.rating)
+        ? poi.rating
+        : null;
+  const [averageRating, setAverageRating] = useState<number | null>(initialRating);
   const [userScore, setUserScore] = useState<number | null>(null);
   const [submittingScore, setSubmittingScore] = useState(false);
   const [ratingError, setRatingError] = useState<string | null>(null);
@@ -949,6 +1064,13 @@ function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
 
   useEffect(() => {
     let active = true;
+    const fallback =
+      typeof (poi as PoiListItem).averageRating === 'number'
+        ? (poi as PoiListItem).averageRating
+        : typeof poi.rating === 'number' && Number.isFinite(poi.rating)
+          ? poi.rating
+          : null;
+    setAverageRating(fallback);
 
     (async () => {
       setRatingError(null);
@@ -973,7 +1095,8 @@ function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
 
       const rows = data ?? [];
       if (rows.length === 0) {
-        setAverageRating(null);
+        // İcma reytinqi yoxdursa Google/xarici rating (pois.rating)
+        setAverageRating(fallback);
       } else {
         const sum = rows.reduce((acc, row) => acc + row.score, 0);
         setAverageRating(sum / rows.length);
@@ -989,7 +1112,7 @@ function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
     return () => {
       active = false;
     };
-  }, [poi.id]);
+  }, [poi]);
 
   async function handleSubmitScore(score: number) {
     if (submittingScore) {
@@ -1117,11 +1240,13 @@ function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
 function PoiListCard({
   item,
   highlighted,
+  dimmed,
   userLocation,
   onPress,
 }: {
   item: PoiListItem;
   highlighted: boolean;
+  dimmed?: boolean;
   userLocation: { latitude: number; longitude: number } | null;
   onPress: () => void;
 }) {
@@ -1138,7 +1263,11 @@ function PoiListCard({
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.card, highlighted && styles.cardHighlighted]}
+      style={[
+        styles.card,
+        highlighted && styles.cardHighlighted,
+        dimmed && styles.cardDimmed,
+      ]}
     >
       <View style={styles.cardEmojiWrap}>
         <Text style={styles.cardEmoji}>{emoji}</Text>
@@ -1328,8 +1457,15 @@ const styles = StyleSheet.create({
   },
   poiMarkerBubbleHighlighted: {
     borderColor: colors.accent,
-    borderWidth: 2,
-    transform: [{ scale: 1.25 }],
+    borderWidth: 3,
+    backgroundColor: colors.accentSoft,
+    transform: [{ scale: 1.45 }],
+    shadowOpacity: 0.35,
+    elevation: 8,
+  },
+  poiMarkerBubbleDimmed: {
+    opacity: 0.4,
+    borderColor: colors.border,
   },
   poiMarkerBubbleAdmin: {
     borderColor: colors.danger,
@@ -1461,7 +1597,7 @@ const styles = StyleSheet.create({
   addPoiButton: {
     position: 'absolute',
     top: 12,
-    right: 12,
+    right: 60,
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -1473,6 +1609,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     elevation: 5,
     zIndex: 10,
+  },
+  profileCorner: {
+    position: 'absolute',
+    top: 14,
+    right: 12,
+    zIndex: 12,
+    ...shadows.card,
   },
   addPoiButtonText: {
     color: colors.textOnAccent,
@@ -1541,6 +1684,13 @@ const styles = StyleSheet.create({
   },
   cardHighlighted: {
     backgroundColor: colors.accentSoft,
+    borderWidth: 2,
+    borderColor: colors.accent,
+    shadowOpacity: 0.12,
+    elevation: 6,
+  },
+  cardDimmed: {
+    opacity: 0.48,
   },
   cardEmojiWrap: {
     width: 48,

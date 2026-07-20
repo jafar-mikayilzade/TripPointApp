@@ -94,12 +94,19 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="sevimliler"
+        options={{
+          title: 'Sevimlilər',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="bookmark-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="profil"
         options={{
+          href: null,
           title: 'Profil',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-outline" size={size + 1} color={color} />
-          ),
         }}
       />
     </Tabs>

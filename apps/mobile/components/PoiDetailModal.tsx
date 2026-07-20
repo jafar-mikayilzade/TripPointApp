@@ -1,4 +1,3 @@
-import { Image } from 'expo-image';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useState } from 'react';
@@ -6,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  Image,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -104,12 +104,22 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
         setErrorMessage(getErrorMessage(ratingsResult.error));
       } else {
         const rows = ratingsResult.data ?? [];
-        setRatingCount(rows.length);
         if (rows.length === 0) {
-          setAverageRating(null);
+          // Fall back to Google/external rating on the POI row
+          const external =
+            typeof poi!.rating === 'number' && Number.isFinite(poi!.rating)
+              ? poi!.rating
+              : null;
+          setAverageRating(external);
+          setRatingCount(
+            typeof poi!.rating_count === 'number' && Number.isFinite(poi!.rating_count)
+              ? poi!.rating_count
+              : 0
+          );
         } else {
           const sum = rows.reduce((acc, row) => acc + row.score, 0);
           setAverageRating(sum / rows.length);
+          setRatingCount(rows.length);
         }
 
         if (user) {
@@ -315,14 +325,7 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
                 style={styles.gallery}
               >
                 {photos.map((url) => (
-                  <Image
-                    key={url}
-                    source={{ uri: url }}
-                    style={styles.galleryImage}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                    recyclingKey={url}
-                  />
+                  <Image key={url} source={{ uri: url }} style={styles.galleryImage} />
                 ))}
               </ScrollView>
             ) : (

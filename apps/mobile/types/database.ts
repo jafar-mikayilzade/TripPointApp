@@ -73,6 +73,10 @@ export type Poi = {
   address: string | null;
   phone: string | null;
   website: string | null;
+  /** External (Google) rating 1–5; OSM usually null */
+  rating: number | null;
+  rating_count: number | null;
+  place_id?: string | null;
   submitted_by: string;
   created_at: string;
   updated_at: string;

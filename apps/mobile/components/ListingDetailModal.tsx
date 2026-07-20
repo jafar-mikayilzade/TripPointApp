@@ -19,6 +19,7 @@ import {
 
 import { REGIONS } from '../constants/regions';
 import { FavoriteButton } from './FavoriteButton';
+import { TransientHint } from './TransientHint';
 import { notifyAdminsViaWhatsApp } from '../lib/adminNotify';
 import { getErrorMessage } from '../lib/errors';
 import {
@@ -66,6 +67,28 @@ function getParticipantProfile(row: ParticipantRow): ParticipantProfile | null {
     return null;
   }
   return Array.isArray(row.profiles) ? (row.profiles[0] ?? null) : row.profiles;
+}
+
+function CreatorStarRating({ value, loading }: { value: number | null; loading: boolean }) {
+  if (loading) {
+    return <Text style={styles.ratingLoading}>…</Text>;
+  }
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  const filled = Math.min(5, Math.max(1, Math.round(value)));
+  return (
+    <View style={styles.ratingRow}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <FontAwesome
+          key={n}
+          name={n <= filled ? 'star' : 'star-o'}
+          size={11}
+          color={colors.warning}
+        />
+      ))}
+    </View>
+  );
 }
 
 const STATUS_META: Record<
@@ -140,6 +163,8 @@ export function ListingDetailModal({
   const [routePois, setRoutePois] = useState<string[]>([]);
   const [routeListOpen, setRouteListOpen] = useState(false);
   const [loadingExtras, setLoadingExtras] = useState(false);
+  const [infoToast, setInfoToast] = useState<string | null>(null);
+  const [infoToastKey, setInfoToastKey] = useState(0);
 
   const [showJoinForm, setShowJoinForm] = useState(false);
   const [joinMessage, setJoinMessage] = useState('');
@@ -203,6 +228,35 @@ export function ListingDetailModal({
     setShowParticipants(true);
     await fetchParticipants();
   }
+
+  function showInfoToast(message: string) {
+    setInfoToast(message);
+    setInfoToastKey((key) => key + 1);
+  }
+
+  useEffect(() => {
+    if (!visible) {
+      setInfoToast(null);
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible || !routeListOpen || loadingExtras) {
+      return;
+    }
+    if (routePois.length === 0) {
+      showInfoToast('Yer siyahısı yoxdur');
+    }
+  }, [visible, routeListOpen, loadingExtras, routePois.length]);
+
+  useEffect(() => {
+    if (!visible || !showParticipants || loadingParticipants) {
+      return;
+    }
+    if (participants.length === 0) {
+      showInfoToast('Hələ iştirakçı yoxdur');
+    }
+  }, [visible, showParticipants, loadingParticipants, participants.length]);
 
   useEffect(() => {
     if (!visible || !listing) {
@@ -557,67 +611,61 @@ export function ListingDetailModal({
               {listing.title}
             </Text>
 
-            <Pressable
-              style={styles.creatorRow}
-              onPress={() => {
-                if (!listing.creator?.id) {
-                  return;
-                }
-                onClose();
-                router.push({
-                  pathname: '/(tabs)/profil',
-                  params: { userId: listing.creator.id },
-                });
-              }}
-            >
-              {listing.creator?.avatar_url ? (
-                <Image source={{ uri: listing.creator.avatar_url }} style={styles.avatar} />
-              ) : (
-                <View style={styles.avatarPlaceholder}>
-                  <Text style={styles.avatarInitial}>{creatorName.charAt(0).toUpperCase()}</Text>
-                </View>
-              )}
-              <View style={styles.creatorInfo}>
-                <Text style={styles.creatorName}>{creatorName}</Text>
-                <View style={styles.ratingRow}>
-                  <FontAwesome name="star" size={12} color={colors.warning} />
-                  <Text style={styles.ratingText}>
-                    {loadingExtras
-                      ? '...'
-                      : creatorRating === null
-                        ? 'Reytinq yoxdur'
-                        : creatorRating.toFixed(1)}
+            <View style={styles.creatorActionsRow}>
+              <Pressable
+                style={styles.creatorLeft}
+                onPress={() => {
+                  if (!listing.creator?.id) {
+                    return;
+                  }
+                  onClose();
+                  router.push({
+                    pathname: '/(tabs)/profil',
+                    params: { userId: listing.creator.id },
+                  });
+                }}
+                accessibilityLabel="Profilə bax"
+              >
+                {listing.creator?.avatar_url ? (
+                  <Image source={{ uri: listing.creator.avatar_url }} style={styles.avatar} />
+                ) : (
+                  <View style={styles.avatarPlaceholder}>
+                    <Text style={styles.avatarInitial}>{creatorName.charAt(0).toUpperCase()}</Text>
+                  </View>
+                )}
+                <CreatorStarRating value={creatorRating} loading={loadingExtras} />
+              </Pressable>
+
+              <View style={styles.sideActions}>
+                <Pressable
+                  style={[
+                    styles.sideActionBtn,
+                    styles.whatsappButton,
+                    !contactDisplayPhone && styles.whatsappButtonDisabled,
+                  ]}
+                  onPress={openWhatsApp}
+                >
+                  <FontAwesome name="whatsapp" size={12} color={colors.textOnAccent} />
+                  <Text style={styles.sideActionText}>
+                    {contactDisplayPhone ? 'Whatsappa yaz' : 'Nömrə yox'}
                   </Text>
-                </View>
+                </Pressable>
+
+                <Pressable
+                  style={[styles.sideActionBtn, styles.splitBillButton]}
+                  onPress={() => {
+                    onClose();
+                    router.push({
+                      pathname: '/split-bill',
+                      params: { listingId: listing.id },
+                    } as never);
+                  }}
+                >
+                  <FontAwesome name="money" size={11} color={colors.textOnAccent} />
+                  <Text style={styles.sideActionText}>Xərc bölüşdür</Text>
+                </Pressable>
               </View>
-            </Pressable>
-
-            <Pressable
-              style={[
-                styles.whatsappButton,
-                !contactDisplayPhone && styles.whatsappButtonDisabled,
-              ]}
-              onPress={openWhatsApp}
-            >
-              <FontAwesome name="whatsapp" size={16} color={colors.textOnAccent} />
-              <Text style={styles.whatsappButtonText}>
-                {contactDisplayPhone ? 'WhatsApp ilə yaz' : 'Nömrə yoxdur'}
-              </Text>
-            </Pressable>
-
-            <Pressable
-              style={styles.splitBillButton}
-              onPress={() => {
-                onClose();
-                router.push({
-                  pathname: '/split-bill',
-                  params: { listingId: listing.id },
-                } as never);
-              }}
-            >
-              <FontAwesome name="money" size={14} color={colors.textOnAccent} />
-              <Text style={styles.splitBillButtonText}>Xərc bölüşdür</Text>
-            </Pressable>
+            </View>
 
             <Text style={styles.sectionLabel}>Məlumat</Text>
 
@@ -642,9 +690,7 @@ export function ListingDetailModal({
                 {routeListOpen ? (
                   loadingExtras ? (
                     <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
-                  ) : routePois.length === 0 ? (
-                    <Text style={styles.muted}>Yer siyahısı yoxdur</Text>
-                  ) : (
+                  ) : routePois.length === 0 ? null : (
                     routePois.map((name, index) => (
                       <Text key={`${name}-${index}`} style={styles.poiItem}>
                         • {name}
@@ -675,9 +721,7 @@ export function ListingDetailModal({
                 {routeListOpen ? (
                   loadingExtras ? (
                     <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
-                  ) : routePois.length === 0 ? (
-                    <Text style={styles.muted}>Yer siyahısı yoxdur</Text>
-                  ) : (
+                  ) : routePois.length === 0 ? null : (
                     routePois.map((name, index) => (
                       <Text key={`${name}-${index}`} style={styles.poiItem}>
                         • {name}
@@ -866,9 +910,7 @@ export function ListingDetailModal({
                   <View style={styles.participantsBlock}>
                     {loadingParticipants ? (
                       <ActivityIndicator color={colors.accent} />
-                    ) : participants.length === 0 ? (
-                      <Text style={styles.muted}>Hələ iştirakçı yoxdur</Text>
-                    ) : (
+                    ) : participants.length === 0 ? null : (
                       participants.map((participant) => {
                         const profile = getParticipantProfile(participant);
                         const name = profile?.full_name?.trim() || 'İstifadəçi';
@@ -978,6 +1020,15 @@ export function ListingDetailModal({
               </View>
             ) : null}
           </ScrollView>
+
+          <View style={styles.toastHost} pointerEvents="none">
+            <TransientHint
+              key={infoToastKey}
+              message={infoToast ?? ''}
+              active={!!infoToast}
+              onHidden={() => setInfoToast(null)}
+            />
+          </View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -997,6 +1048,15 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     paddingTop: 12,
     paddingBottom: 28,
+    overflow: 'hidden',
+  },
+  toastHost: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 36,
+    zIndex: 30,
+    alignItems: 'center',
   },
   closeButton: {
     width: 36,
@@ -1038,21 +1098,27 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingRight: 36,
   },
-  creatorRow: {
+  creatorActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 12,
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 16,
+  },
+  creatorLeft: {
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
   },
   avatarPlaceholder: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1062,57 +1128,46 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.chipText,
   },
-  creatorInfo: {
-    flex: 1,
-  },
-  creatorName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-  },
   ratingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
+    gap: 2,
   },
-  ratingText: {
-    fontSize: 12,
-    color: colors.textSecondary,
+  ratingLoading: {
+    fontSize: 11,
+    color: colors.textMuted,
   },
-  whatsappButton: {
+  sideActions: {
+    flexShrink: 0,
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    gap: 6,
+    marginLeft: 'auto',
+  },
+  sideActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 5,
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    minWidth: 128,
+  },
+  sideActionText: {
+    color: colors.textOnAccent,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  whatsappButton: {
     backgroundColor: colors.whatsapp,
-    borderRadius: 16,
-    paddingVertical: 12,
-    marginBottom: 16,
   },
   whatsappButtonDisabled: {
     backgroundColor: colors.textMuted,
     opacity: 0.9,
   },
-  whatsappButtonText: {
-    color: colors.textOnAccent,
-    fontWeight: '700',
-    fontSize: 14,
-  },
   splitBillButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
     backgroundColor: colors.accent,
-    borderRadius: 16,
-    paddingVertical: 12,
-    marginBottom: 16,
-  },
-  splitBillButtonText: {
-    color: colors.textOnAccent,
-    fontWeight: '700',
-    fontSize: 14,
   },
   sectionLabel: {
     fontSize: 11,

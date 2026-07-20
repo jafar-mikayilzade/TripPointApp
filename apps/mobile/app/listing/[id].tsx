@@ -6,11 +6,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   ListingDetailModal,
   type ListingWithCreator,
-} from '../components/ListingDetailModal';
-import { colors } from '../constants/theme';
-import { getErrorMessage } from '../lib/errors';
-import { supabase } from '../lib/supabase';
-import type { Listing, Profile } from '../types/database';
+} from '../../components/ListingDetailModal';
+import { colors } from '../../constants/theme';
+import { getErrorMessage } from '../../lib/errors';
+import { supabase } from '../../lib/supabase';
+import type { Listing, Profile } from '../../types/database';
 
 /**
  * Deep link: trippoint://listing/<uuid>

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import random
 from typing import Any
 
 from app.constants.categories import APP_CATEGORIES
@@ -12,10 +11,6 @@ from app.constants.regions import REGION_DB_ID
 def to_db_region(region: str) -> str:
     key = region.strip().lower()
     return REGION_DB_ID.get(key, key)
-
-
-def default_rating() -> float:
-    return round(random.uniform(4.1, 4.5), 1)
 
 
 def category_from_osm_tags(tags: dict[str, Any]) -> str:
@@ -100,14 +95,29 @@ def clean_place(
     if db_category in IGNORED_SYNC_CATEGORIES or str(category).strip().lower() in IGNORED_SYNC_CATEGORIES:
         return None
 
-    rating = place.get("rating")
-    if rating is None:
-        rating = default_rating()
-    else:
+    # Google Nearby Search returns rating + user_ratings_total.
+    # OSM almost never has comparable star ratings → keep NULL (never invent).
+    rating: float | None = None
+    raw_rating = place.get("rating")
+    if raw_rating is not None:
         try:
-            rating = float(rating)
+            value = float(raw_rating)
+            if 0 < value <= 5:
+                rating = round(value, 2)
         except (TypeError, ValueError):
-            rating = default_rating()
+            rating = None
+
+    rating_count: int | None = None
+    raw_count = place.get("user_ratings_total")
+    if raw_count is None:
+        raw_count = place.get("rating_count")
+    if raw_count is not None:
+        try:
+            count = int(raw_count)
+            if count >= 0:
+                rating_count = count
+        except (TypeError, ValueError):
+            rating_count = None
 
     row: dict[str, Any] = {
         "name": str(name).strip(),
@@ -118,6 +128,7 @@ def clean_place(
         "lng": float(longitude),
         "place_id": str(place_id),
         "rating": rating,
+        "rating_count": rating_count,
     }
 
     description = place.get("description")

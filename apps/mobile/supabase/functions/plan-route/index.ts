@@ -1,3 +1,8 @@
+/**
+ * DEPRECATED as primary planner.
+ * Mobile now calls FastAPI POST /api/plan-route (Haversine NN + optional Claude tips).
+ * This Edge Function remains as offline/fallback when EXPO_PUBLIC_API_URL is unreachable.
+ */
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 
 const corsHeaders = {
@@ -74,6 +79,8 @@ ${JSON.stringify(
     description: p.description,
     lat: p.lat,
     lng: p.lng,
+    rating: p.rating ?? null,
+    rating_count: p.rating_count ?? null,
   }))
 )}
 
@@ -85,6 +92,8 @@ ${JSON.stringify(
     description: p.description,
     lat: p.lat,
     lng: p.lng,
+    rating: p.rating ?? null,
+    rating_count: p.rating_count ?? null,
   }))
 )}
 
@@ -97,6 +106,8 @@ ${JSON.stringify(
     description: p.description,
     lat: p.lat,
     lng: p.lng,
+    rating: p.rating ?? null,
+    rating_count: p.rating_count ?? null,
   }))
 )}
 
@@ -123,7 +134,13 @@ MÜTLƏQ RIAYƏT EDİLMƏLİ QAYDALAR:
    - Nahar fasiləsi: 12:30-13:30 arası
      (restoran/kafe stopu buraya düşsün)
 
-4. NÜMUNƏ DÜZGÜN SIRA (1 gün, 5 stop):
+4. REYTİNQ ÜSTÜNLÜYÜ:
+   - rating (1–5) və rating_count verilir.
+   - Eyni kateqoriyada mümkün qədər YÜKSƏK rating seç.
+   - rating null olan yerləri yalnız yaxşı alternativ yoxdursa götür.
+   - Coğrafi yaxınlıq qaydasını pozma; yaxın + yüksək rating idealdir.
+
+5. NÜMUNƏ DÜZGÜN SIRA (1 gün, 5 stop):
    09:00 - Yer A (yaxın mərkəzə)
    11:00 - Yer B (A-ya yaxın)
    13:00 - Restoran C (B-yə yaxın, nahar)

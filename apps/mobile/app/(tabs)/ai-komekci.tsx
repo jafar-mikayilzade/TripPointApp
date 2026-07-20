@@ -1,10 +1,10 @@
 import Constants from 'expo-constants';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -21,10 +21,14 @@ import MapView, {
   type Region as MapRegion,
 } from '../../components/AppMap';
 import { DropdownButton } from '../../components/DropdownButton';
+import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
 import { getCategoryEmoji } from '../../lib/categoryUtils';
 import { getErrorMessage } from '../../lib/errors';
-import { shareRoutePdf, shareRouteText } from '../../lib/shareRoute';
+import { collectRouteStops, openRouteInGoogleMaps } from '../../lib/openNavigation';
+import { fetchRouteCandidates } from '../../lib/routeCandidates';
+import { planRoute as requestPlanRoute } from '../../lib/planRoute';
+import { shareRouteText } from '../../lib/shareRoute';
 import { supabase } from '../../lib/supabase';
 import {
   applyWeatherPoiFilter,
@@ -40,6 +44,18 @@ import {
 import { colors } from '../../constants/theme';
 
 const DAY_COLORS = [colors.accent, colors.success, colors.warning, colors.accentPressed, colors.danger];
+
+/** Distinct colors per leg A→B, B→C, … (high contrast on map tiles) */
+const SEGMENT_COLORS = [
+  '#E85D04',
+  '#9B5DE5',
+  '#00A8E8',
+  '#F15BB5',
+  '#2EC4B6',
+  '#EF233C',
+  '#4361EE',
+  '#F77F00',
+];
 
 const REGION_COORDS: Record<string, { latitude: number; longitude: number }> = {
   quba: { latitude: 41.3625, longitude: 48.5128 },
@@ -95,6 +111,11 @@ type StopDuration = {
 };
 
 type LatLng = { latitude: number; longitude: number };
+
+type RouteSegment = {
+  coordinates: LatLng[];
+  color: string;
+};
 
 type MapRef = {
   animateToRegion: (region: MapRegion, duration?: number) => void;
@@ -158,7 +179,7 @@ export default function AiKomekciScreen() {
   const [weatherAdvice, setWeatherAdvice] = useState<WeatherAdvice | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [routeCoordinates, setRouteCoordinates] = useState<LatLng[]>([]);
+  const [routeSegments, setRouteSegments] = useState<RouteSegment[]>([]);
   const [stopDurations, setStopDurations] = useState<StopDuration[]>([]);
   const mapRef = useRef<MapRef | null>(null);
   const GOOGLE_MAPS_KEY =
@@ -174,6 +195,7 @@ export default function AiKomekciScreen() {
         // Yalnız marker-lər göstərilsin
 
         const allCoords: Array<{ latitude: number; longitude: number }> = [];
+        const segments: RouteSegment[] = [];
 
         planData.days?.forEach((day: any) => {
           day.stops?.forEach((stop: any) => {
@@ -186,7 +208,14 @@ export default function AiKomekciScreen() {
           });
         });
 
-        setRouteCoordinates(allCoords);
+        for (let i = 0; i < allCoords.length - 1; i++) {
+          segments.push({
+            coordinates: [allCoords[i], allCoords[i + 1]],
+            color: SEGMENT_COLORS[i % SEGMENT_COLORS.length],
+          });
+        }
+
+        setRouteSegments(segments);
 
         if (allCoords.length > 0 && mapRef.current) {
           mapRef.current.fitToCoordinates(allCoords, {
@@ -221,7 +250,7 @@ export default function AiKomekciScreen() {
           latitude: s.lat,
           longitude: s.lng,
         }));
-        setRouteCoordinates(singleCoords);
+        setRouteSegments([]);
         if (singleCoords.length > 0 && mapRef.current) {
           mapRef.current.fitToCoordinates(singleCoords, {
             edgePadding: { top: 60, right: 40, bottom: 40, left: 40 },
@@ -232,6 +261,7 @@ export default function AiKomekciScreen() {
       }
 
       const allCoords: LatLng[] = [];
+      const segments: RouteSegment[] = [];
       const durations: StopDuration[] = [];
 
       for (let i = 0; i < allStops.length - 1; i++) {
@@ -261,17 +291,17 @@ export default function AiKomekciScreen() {
           const leg = route.legs?.[0];
           const points = decodePolyline(route.overview_polyline.points);
 
-          if (i === 0) {
-            allCoords.push({
-              latitude: origin.lat,
-              longitude: origin.lng,
-            });
-          }
-          allCoords.push(...points);
-          allCoords.push({
-            latitude: dest.lat,
-            longitude: dest.lng,
+          const segmentCoords: LatLng[] = [
+            { latitude: origin.lat, longitude: origin.lng },
+            ...points,
+            { latitude: dest.lat, longitude: dest.lng },
+          ];
+
+          segments.push({
+            coordinates: segmentCoords,
+            color: SEGMENT_COLORS[i % SEGMENT_COLORS.length],
           });
+          allCoords.push(...segmentCoords);
 
           durations.push({
             from: origin.name,
@@ -279,10 +309,20 @@ export default function AiKomekciScreen() {
             duration: leg?.duration?.text || '',
             distance: leg?.distance?.text || '',
           });
+        } else {
+          const fallback: LatLng[] = [
+            { latitude: origin.lat, longitude: origin.lng },
+            { latitude: dest.lat, longitude: dest.lng },
+          ];
+          segments.push({
+            coordinates: fallback,
+            color: SEGMENT_COLORS[i % SEGMENT_COLORS.length],
+          });
+          allCoords.push(...fallback);
         }
       }
 
-      setRouteCoordinates(allCoords);
+      setRouteSegments(segments);
       setStopDurations(durations);
 
       if (allCoords.length > 0 && mapRef.current) {
@@ -314,111 +354,120 @@ export default function AiKomekciScreen() {
         return;
       }
 
-      const { data: poisRaw, error: poisError } = await supabase
-        .from('pois')
-        .select('id, name, category, description, lat, lng, region')
-        .eq('status', 'approved')
-        .eq('region', selectedRegion.toLowerCase())
-        .limit(40);
+      const weather = await fetchRegionWeather(selectedRegion, selectedDays);
+      setWeatherAdvice(weather);
 
-      if (poisError) {
-        throw poisError;
+      // Prefer Python-ranked high-rating candidates; fallback to Supabase + local sort
+      let restaurants: any[] = [];
+      let accommodations: any[] = [];
+      let attractions: any[] = [];
+
+      const ranked = await fetchRouteCandidates(selectedRegion, 12);
+      if (
+        ranked &&
+        (ranked.restaurants.length > 0 ||
+          ranked.accommodations.length > 0 ||
+          ranked.attractions.length > 0)
+      ) {
+        const flat = applyWeatherPoiFilter(
+          [...ranked.restaurants, ...ranked.accommodations, ...ranked.attractions],
+          weather
+        );
+        const keep = new Set(flat.map((p) => p.id));
+        restaurants = ranked.restaurants.filter((p) => keep.has(p.id));
+        accommodations = ranked.accommodations.filter((p) => keep.has(p.id));
+        attractions = ranked.attractions.filter((p) => keep.has(p.id));
+      } else {
+        const { data: poisRaw, error: poisError } = await supabase
+          .from('pois')
+          .select('id, name, category, description, lat, lng, region, rating, rating_count')
+          .eq('status', 'approved')
+          .eq('region', selectedRegion.toLowerCase())
+          .order('rating', { ascending: false, nullsFirst: false })
+          .limit(80);
+
+        if (poisError) {
+          throw poisError;
+        }
+
+        if (!poisRaw || poisRaw.length === 0) {
+          setError('Bu bölgədə hələ yer əlavə edilməyib. Başqa rayon seçin.');
+          return;
+        }
+
+        const pois = applyWeatherPoiFilter(poisRaw, weather);
+        const byRating = (a: any, b: any) => {
+          const ra = typeof a.rating === 'number' ? a.rating : -1;
+          const rb = typeof b.rating === 'number' ? b.rating : -1;
+          if (rb !== ra) {
+            return rb - ra;
+          }
+          const ca = typeof a.rating_count === 'number' ? a.rating_count : 0;
+          const cb = typeof b.rating_count === 'number' ? b.rating_count : 0;
+          return cb - ca;
+        };
+
+        restaurants = pois
+          .filter((p) => ['restaurant', 'home_restaurant', 'cafe'].includes(p.category))
+          .sort(byRating)
+          .slice(0, 12);
+        accommodations = pois
+          .filter((p) => ['hotel', 'hostel', 'guesthouse'].includes(p.category))
+          .sort(byRating)
+          .slice(0, 12);
+        attractions = pois
+          .filter((p) =>
+            [
+              'nature',
+              'waterfall',
+              'mountain',
+              'lake',
+              'historical',
+              'monument',
+              'other',
+            ].includes(p.category)
+          )
+          .sort(byRating)
+          .slice(0, 12);
       }
 
-      if (!poisRaw || poisRaw.length === 0) {
+      if (
+        restaurants.length + accommodations.length + attractions.length === 0
+      ) {
         setError('Bu bölgədə hələ yer əlavə edilməyib. Başqa rayon seçin.');
         return;
       }
 
-      const weather = await fetchRegionWeather(selectedRegion, selectedDays);
-      setWeatherAdvice(weather);
-      const pois = applyWeatherPoiFilter(poisRaw, weather);
-
-      const restaurants = pois.filter((p) =>
-        ['restaurant', 'home_restaurant', 'cafe'].includes(p.category)
-      );
-      const accommodations = pois.filter((p) =>
-        ['hotel', 'hostel', 'guesthouse'].includes(p.category)
-      );
-      const attractions = pois.filter((p) =>
-        [
-          'nature',
-          'waterfall',
-          'mountain',
-          'lake',
-          'historical',
-          'monument',
-          'other',
-        ].includes(p.category)
-      );
-
-      const response = await supabase.functions.invoke('plan-route', {
-        body: {
-          region: selectedRegion,
-          days: selectedDays,
-          budget: selectedBudget,
-          interests: selectedInterests,
-          groupType: selectedGroup ?? 'tek',
-          weather: weather
-            ? {
-                prefer_indoor: weather.prefer_indoor,
-                summary_az: weather.summary_az,
-                exclude_categories: weather.exclude_categories,
-                prefer_categories: weather.prefer_categories,
-              }
-            : null,
-          pois: {
-            restaurants,
-            accommodations,
-            attractions,
-          },
+      const planFromApi = await requestPlanRoute({
+        region: selectedRegion,
+        days: selectedDays,
+        budget: selectedBudget,
+        interests: selectedInterests,
+        groupType: selectedGroup ?? 'tek',
+        weather: weather
+          ? {
+              prefer_indoor: weather.prefer_indoor,
+              summary_az: weather.summary_az,
+              exclude_categories: weather.exclude_categories,
+              prefer_categories: weather.prefer_categories,
+            }
+          : null,
+        pois: {
+          restaurants,
+          accommodations,
+          attractions,
         },
       });
 
-      if (response.error) {
-        throw response.error;
-      }
+      let planData: any = {
+        ...planFromApi,
+        days: planFromApi.days.map((day) => ({
+          ...day,
+          stops: Array.isArray(day.stops) ? day.stops : [],
+        })),
+      };
 
-      const rawData = response.data;
-
-      let planData: any = null;
-
-      if (typeof rawData === 'string') {
-        let cleaned = rawData.trim();
-        if (cleaned.startsWith('```json')) {
-          cleaned = cleaned
-            .replace(/^```json\n?/, '')
-            .replace(/\n?```$/, '')
-            .trim();
-        } else if (cleaned.startsWith('```')) {
-          cleaned = cleaned
-            .replace(/^```\n?/, '')
-            .replace(/\n?```$/, '')
-            .trim();
-        }
-        planData = JSON.parse(cleaned);
-      } else {
-        planData = rawData;
-      }
-
-      if (planData?.error) {
-        throw new Error(String(planData.error));
-      }
-
-      if (!planData?.days || !Array.isArray(planData.days)) {
-        setError('Marşrut düzgün formada gəlmədi. Yenidən cəhd edin.');
-        setLoading(false);
-        return;
-      }
-
-      planData.days = planData.days.map((day: any) => ({
-        ...day,
-        stops: Array.isArray(day.stops)
-          ? day.stops
-          : Array.isArray(day.pois)
-            ? day.pois
-            : [],
-      }));
+      const trustServerOrder = planFromApi.source === 'fastapi_geo';
 
       const regionCoord = selectedRegion
         ? REGION_COORDS[selectedRegion.toLowerCase()]
@@ -432,6 +481,30 @@ export default function AiKomekciScreen() {
         summary: planData.summary ?? 'Marşrut hazırlandı.',
         days: planData.days.map((day: any) => {
           const rawStops = Array.isArray(day.stops) ? day.stops : [];
+
+          if (trustServerOrder) {
+            return {
+              ...day,
+              stops: rawStops
+                .map((stop: any, index: number) => ({
+                  ...stop,
+                  poi_id: String(stop.poi_id ?? stop.id ?? ''),
+                  name: String(stop.name ?? 'Yer'),
+                  lat: Number(stop.lat),
+                  lng: Number(stop.lng),
+                  category: String(stop.category ?? 'other'),
+                  time: String(stop.time ?? ''),
+                  visiting_time: String(stop.time ?? ''),
+                  sequence_order: index + 1,
+                  duration: stop.duration,
+                  tip: stop.tip,
+                }))
+                .filter(
+                  (s: any) => Number.isFinite(s.lat) && Number.isFinite(s.lng)
+                ),
+            };
+          }
+
           const pois: POI[] = rawStops
             .map((stop: any) => ({
               id: String(stop.poi_id ?? stop.id ?? ''),
@@ -533,6 +606,19 @@ export default function AiKomekciScreen() {
                   return null;
                 }
 
+                const totalDays = plan.days?.length ?? 1;
+                const isSingleDay = totalDays <= 1;
+                const isFirstStop = dayIdx === 0 && stopIdx === 0;
+                const lastDayIdx = totalDays - 1;
+                const lastDayStops = plan.days?.[lastDayIdx]?.stops || [];
+                const isLastStop =
+                  dayIdx === lastDayIdx && stopIdx === lastDayStops.length - 1;
+
+                const sequenceNumber = stop.sequence_order ?? stopIdx + 1;
+                const label = isSingleDay
+                  ? String(sequenceNumber)
+                  : `${dayIdx + 1}.${sequenceNumber}`;
+
                 return (
                   <Marker
                     key={`${dayIdx}-${stopIdx}-${stop.poi_id || stopIdx}`}
@@ -547,26 +633,43 @@ export default function AiKomekciScreen() {
                     <View
                       style={[
                         styles.markerBubble,
-                        { backgroundColor: DAY_COLORS[dayIdx % DAY_COLORS.length] },
+                        isFirstStop && styles.markerBubbleStart,
+                        isLastStop && !isFirstStop && styles.markerBubbleFinish,
+                        !isFirstStop &&
+                          !isLastStop && {
+                            backgroundColor: DAY_COLORS[dayIdx % DAY_COLORS.length],
+                          },
                       ]}
                     >
-                      <Text style={styles.markerText}>
-                        {dayIdx + 1}.{stop.sequence_order ?? stopIdx + 1}
-                      </Text>
+                      {isFirstStop || isLastStop ? (
+                        <View style={styles.markerInner}>
+                          <FontAwesome
+                            name={isFirstStop ? 'flag' : 'flag-checkered'}
+                            size={10}
+                            color="#fff"
+                          />
+                          <Text style={styles.markerText}>{label}</Text>
+                        </View>
+                      ) : (
+                        <Text style={styles.markerText}>{label}</Text>
+                      )}
                     </View>
                   </Marker>
                 );
               })
             )}
 
-            {routeCoordinates.length > 1 ? (
-              <Polyline
-                coordinates={routeCoordinates}
-                strokeColor={colors.accent}
-                strokeWidth={3}
-                lineDashPattern={[1]}
-              />
-            ) : null}
+            {routeSegments.map((segment, idx) =>
+              segment.coordinates.length > 1 ? (
+                <Polyline
+                  key={`seg-${idx}`}
+                  coordinates={segment.coordinates}
+                  strokeColor={segment.color}
+                  strokeWidth={4}
+                  lineDashPattern={[12, 8]}
+                />
+              ) : null
+            )}
           </MapView>
 
           <View style={styles.headerBadges}>
@@ -582,7 +685,7 @@ export default function AiKomekciScreen() {
                 onPress={() => {
                   setPlan(null);
                   setWeatherAdvice(null);
-                  setRouteCoordinates([]);
+                  setRouteSegments([]);
                   setStopDurations([]);
                 }}
                 style={styles.resetBadge}
@@ -593,26 +696,7 @@ export default function AiKomekciScreen() {
               </TouchableOpacity>
             ) : null}
           </View>
-
-          {stopDurations.length > 0 ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.durationScroll}
-              contentContainerStyle={styles.durationScrollContent}
-            >
-              {stopDurations.map((leg, idx) => (
-                <View key={`${leg.from}-${leg.to}-${idx}`} style={styles.durationChip}>
-                  <Text style={styles.durationPrimary} numberOfLines={1}>
-                    🚗 {leg.duration}
-                  </Text>
-                  <Text style={styles.durationSecondary} numberOfLines={1}>
-                    {leg.distance}
-                  </Text>
-                </View>
-              ))}
-            </ScrollView>
-          ) : null}
+          <ProfileCornerButton style={styles.profileCorner} />
         </View>
           }
           bottom={
@@ -747,18 +831,15 @@ export default function AiKomekciScreen() {
                     <Text style={styles.shareButtonText}>Paylaş</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.shareButton, styles.shareButtonSecondary]}
-                    onPress={() =>
-                      void shareRoutePdf(
-                        plan,
-                        selectedRegion ?? 'region',
-                        weatherAdvice?.summary_az
-                      ).catch((err) => Alert.alert('PDF', getErrorMessage(err)))
-                    }
+                    style={styles.navButton}
+                    onPress={() => {
+                      const stops = collectRouteStops(plan);
+                      void openRouteInGoogleMaps(stops).catch((err) =>
+                        Alert.alert('Naviqasiya', getErrorMessage(err))
+                      );
+                    }}
                   >
-                    <Text style={[styles.shareButtonText, styles.shareButtonTextSecondary]}>
-                      PDF
-                    </Text>
+                    <Text style={styles.navButtonText}>Naviqasiyanı başlat</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -828,19 +909,6 @@ export default function AiKomekciScreen() {
                             </Text>
                           </View>
                         ) : null}
-
-                        <TouchableOpacity
-                          onPress={() =>
-                            Linking.openURL(
-                              `https://maps.google.com/?q=${stop.lat},${stop.lng}`
-                            )
-                          }
-                          style={styles.mapsLink}
-                        >
-                          <Text style={styles.mapsLinkText}>
-                            🗺️ Google Maps-də aç
-                          </Text>
-                        </TouchableOpacity>
                       </View>
                     </View>
                   ))}
@@ -888,7 +956,26 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     elevation: 5,
     minWidth: 32,
+    minHeight: 28,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markerBubbleStart: {
+    backgroundColor: '#2F9E44',
+    borderRadius: 16,
+    minWidth: 34,
+    minHeight: 34,
+  },
+  markerBubbleFinish: {
+    backgroundColor: '#C92A2A',
+    borderRadius: 16,
+    minWidth: 34,
+    minHeight: 34,
+  },
+  markerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   markerText: {
     color: 'white',
@@ -899,11 +986,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 12,
     left: 12,
-    right: 12,
+    right: 60,
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
     gap: 8,
+  },
+  profileCorner: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    zIndex: 12,
   },
   aiBadge: {
     backgroundColor: colors.accent,
@@ -939,33 +1032,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
     flexShrink: 1,
-  },
-  durationScroll: {
-    position: 'absolute',
-    bottom: 8,
-    left: 0,
-    right: 0,
-  },
-  durationScrollContent: {
-    paddingHorizontal: 8,
-    gap: 8,
-  },
-  durationChip: {
-    backgroundColor: colors.accent,
-    borderRadius: 10,
-    padding: 6,
-    maxWidth: 120,
-    marginRight: 8,
-    overflow: 'hidden',
-  },
-  durationPrimary: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  durationSecondary: {
-    color: 'white',
-    fontSize: 9,
   },
   panel: {
     flex: 1,
@@ -1099,24 +1165,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     marginTop: 12,
+    alignItems: 'stretch',
   },
   shareButton: {
-    flex: 1,
+    flex: 0.85,
     backgroundColor: colors.accent,
     borderRadius: 12,
     paddingVertical: 10,
     alignItems: 'center',
-  },
-  shareButtonSecondary: {
-    backgroundColor: colors.accentSoft,
+    justifyContent: 'center',
   },
   shareButtonText: {
     color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 13,
   },
-  shareButtonTextSecondary: {
-    color: colors.accentPressed,
+  navButton: {
+    flex: 1.35,
+    backgroundColor: '#E85D04',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 13,
   },
   dayBlock: {
     marginBottom: 16,
@@ -1232,13 +1308,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.accent,
     flexShrink: 1,
-  },
-  mapsLink: {
-    marginTop: 6,
-  },
-  mapsLinkText: {
-    fontSize: 11,
-    color: colors.accent,
   },
   dayNotes: {
     fontSize: 12,

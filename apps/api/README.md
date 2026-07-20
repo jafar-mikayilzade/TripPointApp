@@ -63,6 +63,12 @@ Root `Dockerfile` və `railway.toml` GitHub-da olmalıdır.
    | `SUPABASE_SERVICE_KEY` | service role key |
    | `DATA_SOURCE` | `hybrid` (və ya `osm` / `google`) |
    | `GOOGLE_PLACES_API_KEY` | Places API key (`google` / `hybrid` üçün) |
+   | `OPENWEATHER_API_KEY` | optional — `/api/weather` |
+   | `ANTHROPIC_API_KEY` | optional — `/api/plan-route` tips only; without it template tips are used |
+
+### Plan route
+
+`POST /api/plan-route` — Haversine NN + 2-opt sıra, vaxt slotları serverdə; Claude yalnız summary/tip (əgər key varsa).
 
 6. **Networking → Generate Domain**
 

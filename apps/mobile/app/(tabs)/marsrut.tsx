@@ -13,9 +13,12 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
 import { getCategoryEmoji } from '../../lib/categoryUtils';
-import { supabase } from '../../lib/supabase';
+import { getErrorMessage } from '../../lib/errors';
+import { planRoute as requestPlanRoute } from '../../lib/planRoute';
+import { fetchRouteCandidates } from '../../lib/routeCandidates';
 
 import { colors } from '../../constants/theme';
 
@@ -130,79 +133,34 @@ export default function MarsrutScreen() {
         return;
       }
 
-      // 1. Real POI-ləri Supabase-dən al
-      const { data: pois, error: poisError } = await supabase
-        .from('pois')
-        .select('id, name, category, description, lat, lng, region')
-        .eq('status', 'approved')
-        .eq('region', regionId.toLowerCase())
-        .limit(30);
+      // Prefer FastAPI ranked candidates; API can also load from DB if omitted
+      let restaurants: any[] = [];
+      let accommodations: any[] = [];
+      let attractions: any[] = [];
 
-      if (poisError) {
-        throw poisError;
+      const ranked = await fetchRouteCandidates(regionId, 12);
+      if (
+        ranked &&
+        (ranked.restaurants.length > 0 ||
+          ranked.accommodations.length > 0 ||
+          ranked.attractions.length > 0)
+      ) {
+        restaurants = ranked.restaurants;
+        accommodations = ranked.accommodations;
+        attractions = ranked.attractions;
       }
 
-      if (!pois || pois.length === 0) {
-        setErrorMessage(
-          'Bu bölgədə hələ yer əlavə edilməyib. Başqa rayon seçin.'
-        );
-        return;
-      }
-
-      // 2. POI-ləri kateqoriyaya görə qruplaşdır
-      const restaurants = pois.filter((p) =>
-        ['restaurant', 'home_restaurant'].includes(p.category)
-      );
-      const accommodations = pois.filter((p) =>
-        ['hotel', 'hostel', 'guesthouse'].includes(p.category)
-      );
-      const attractions = pois.filter((p) =>
-        [
-          'nature',
-          'waterfall',
-          'mountain',
-          'lake',
-          'historical',
-          'monument',
-          'other',
-        ].includes(p.category)
-      );
-
-      // 3. OpenAI-a göndər
-      const response = await supabase.functions.invoke('plan-route', {
-        body: {
-          region: regionId,
-          days,
-          budget,
-          interests,
-          groupType: group ?? 'solo',
-          pois: {
-            restaurants,
-            accommodations,
-            attractions,
-          },
-        },
+      const data = await requestPlanRoute({
+        region: regionId,
+        days,
+        budget,
+        interests,
+        groupType: group ?? 'solo',
+        pois:
+          restaurants.length + accommodations.length + attractions.length > 0
+            ? { restaurants, accommodations, attractions }
+            : undefined,
       });
-
-      if (response.error) {
-        throw response.error;
-      }
-
-      const data = response.data as {
-        summary?: string;
-        days?: PlanDay[];
-        total_cost?: string;
-        best_time?: string;
-        error?: string;
-      };
-
-      if (data?.error) {
-        throw new Error(data.error);
-      }
-
-      if (!data?.days || !Array.isArray(data.days)) {
-        throw new Error('Marşrut cavabı gözlənilən formatda deyil.');
-      }
 
       const regionLabel = REGIONS.find((r) => r.id === regionId)?.label ?? regionId;
       const budgetLabel = BUDGET_OPTIONS.find((b) => b.value === budget)?.label ?? budget;
@@ -216,8 +174,20 @@ export default function MarsrutScreen() {
       setPlan({
         summary: data.summary ?? `${regionLabel} üçün marşrut hazırlandı.`,
         days: data.days.map((day) => ({
-          ...day,
-          stops: Array.isArray(day.stops) ? day.stops : [],
+          day: day.day,
+          title: day.title,
+          estimated_cost: day.estimated_cost,
+          notes: day.notes,
+          stops: (day.stops ?? []).map((stop) => ({
+            time: String(stop.time ?? ''),
+            poi_id: String(stop.poi_id ?? stop.id ?? ''),
+            name: String(stop.name ?? 'Yer'),
+            category: String(stop.category ?? 'other'),
+            duration: String(stop.duration ?? ''),
+            lat: Number(stop.lat),
+            lng: Number(stop.lng),
+            tip: String(stop.tip ?? ''),
+          })),
         })),
         total_cost: data.total_cost,
         best_time: data.best_time,
@@ -227,11 +197,8 @@ export default function MarsrutScreen() {
         interestLabels,
         groupLabel,
       });
-    } catch (err: any) {
-      const errMsg =
-        err?.message || err?.error?.message || JSON.stringify(err) || 'Naməlum xəta';
-      console.log('PLAN ROUTE XƏTA:', errMsg);
-      setErrorMessage('Debug: ' + errMsg);
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -250,6 +217,10 @@ export default function MarsrutScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
       >
         <View style={[styles.container, { paddingTop: insets.top }]}>
+          <View style={styles.topBar}>
+            <View style={styles.topBarSpacer} />
+            <ProfileCornerButton />
+          </View>
           <ScrollView
             style={styles.flex}
             contentContainerStyle={styles.resultContent}
@@ -334,6 +305,10 @@ export default function MarsrutScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
     >
       <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.topBar}>
+          <View style={styles.topBarSpacer} />
+          <ProfileCornerButton />
+        </View>
         <ScrollView
           style={styles.flex}
           contentContainerStyle={styles.formContent}
@@ -493,6 +468,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.bg,
     overflow: 'hidden',
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingBottom: 4,
+  },
+  topBarSpacer: {
+    flex: 1,
   },
   formContent: {
     paddingHorizontal: 16,

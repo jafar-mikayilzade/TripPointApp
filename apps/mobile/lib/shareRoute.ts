@@ -1,6 +1,4 @@
 import { Share, Platform } from 'react-native';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
 
 type RouteStop = {
   time?: string;
@@ -23,14 +21,6 @@ type PlannedRoute = {
   total_cost?: string;
   best_time?: string;
 };
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 export function formatRouteShareText(
   route: PlannedRoute,
@@ -63,39 +53,7 @@ export function formatRouteShareText(
   return lines.join('\n');
 }
 
-function buildRouteHtml(route: PlannedRoute, region: string, weatherNote?: string | null): string {
-  const daysHtml = (route.days ?? [])
-    .map((day) => {
-      const stops = (day.stops ?? [])
-        .map(
-          (s) =>
-            `<li><strong>${escapeHtml(s.time ?? '')}</strong> ${escapeHtml(s.name ?? '')}</li>`
-        )
-        .join('');
-      return `<h2>Gün ${day.day ?? ''} — ${escapeHtml(day.title ?? '')}</h2><ul>${stops}</ul>`;
-    })
-    .join('');
-
-  return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"/>
-<style>
-  body { font-family: -apple-system, sans-serif; padding: 24px; color: #1a1a1c; }
-  h1 { font-size: 22px; margin-bottom: 8px; }
-  h2 { font-size: 16px; margin-top: 18px; }
-  p { color: #555; }
-  ul { padding-left: 18px; }
-  li { margin: 4px 0; }
-</style></head>
-<body>
-  <h1>TripPoint — ${escapeHtml(region)}</h1>
-  <p>${escapeHtml(route.summary ?? '')}</p>
-  ${weatherNote ? `<p>${escapeHtml(weatherNote)}</p>` : ''}
-  ${daysHtml}
-  ${route.total_cost ? `<p><strong>Ümumi:</strong> ${escapeHtml(route.total_cost)}</p>` : ''}
-</body></html>`;
-}
-
-/** Share as text (WhatsApp / system sheet) — zero server cost. */
+/** Share as text (WhatsApp / system sheet) — no extra native modules. */
 export async function shareRouteText(
   route: PlannedRoute,
   region: string,
@@ -107,22 +65,59 @@ export async function shareRouteText(
   );
 }
 
-/** Export PDF locally then open share sheet (WhatsApp qrupu və s.). */
+/**
+ * PDF when expo-print is in the native binary; otherwise falls back to text share.
+ * Lazy-requires native modules so older dev-clients still boot.
+ */
 export async function shareRoutePdf(
   route: PlannedRoute,
   region: string,
   weatherNote?: string | null
 ): Promise<void> {
-  const html = buildRouteHtml(route, region, weatherNote);
-  const { uri } = await Print.printToFileAsync({ html });
-  const canShare = await Sharing.isAvailableAsync();
-  if (!canShare) {
-    await shareRouteText(route, region, weatherNote);
-    return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Print = require('expo-print') as typeof import('expo-print');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Sharing = require('expo-sharing') as typeof import('expo-sharing');
+
+    const escapeHtml = (value: string) =>
+      value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    const daysHtml = (route.days ?? [])
+      .map((day) => {
+        const stops = (day.stops ?? [])
+          .map(
+            (s) =>
+              `<li><strong>${escapeHtml(s.time ?? '')}</strong> ${escapeHtml(s.name ?? '')}</li>`
+          )
+          .join('');
+        return `<h2>Gün ${day.day ?? ''} — ${escapeHtml(day.title ?? '')}</h2><ul>${stops}</ul>`;
+      })
+      .join('');
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body>
+      <h1>TripPoint — ${escapeHtml(region)}</h1>
+      <p>${escapeHtml(route.summary ?? '')}</p>
+      ${weatherNote ? `<p>${escapeHtml(weatherNote)}</p>` : ''}
+      ${daysHtml}
+    </body></html>`;
+
+    const { uri } = await Print.printToFileAsync({ html });
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Marşrutu paylaş',
+        UTI: 'com.adobe.pdf',
+      });
+      return;
+    }
+  } catch {
+    // Native module missing in current dev-client — text share still works
   }
-  await Sharing.shareAsync(uri, {
-    mimeType: 'application/pdf',
-    dialogTitle: 'Marşrutu paylaş',
-    UTI: 'com.adobe.pdf',
-  });
+
+  await shareRouteText(route, region, weatherNote);
 }

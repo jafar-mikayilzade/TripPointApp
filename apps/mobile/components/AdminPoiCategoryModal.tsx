@@ -31,17 +31,18 @@ export function AdminPoiCategoryModal({
   onCancel,
   onConfirm,
 }: Props) {
-  const [category, setCategory] = useState<PoiCategory>('restaurant');
+  const [category, setCategory] = useState<PoiCategory | null>(null);
   const [name, setName] = useState('');
 
   useEffect(() => {
     if (visible && poi) {
       setName(poi.name?.trim() || '');
-      setCategory('restaurant');
+      setCategory(poi.suggestedCategory ?? null);
     }
   }, [visible, poi]);
 
-  const canConfirm = Boolean(poi) && name.trim().length >= 2 && !loading;
+  const canConfirm = Boolean(poi) && name.trim().length >= 2 && category != null && !loading;
+  const suggested = poi?.suggestedCategory ?? null;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
@@ -53,6 +54,26 @@ export function AdminPoiCategoryModal({
               {poi.latitude.toFixed(5)}, {poi.longitude.toFixed(5)}
             </Text>
           ) : null}
+
+          {poi?.rating != null && poi.rating > 0 ? (
+            <Text style={styles.ratingHint}>
+              ★ {poi.rating.toFixed(1)}
+              {poi.ratingCount != null && poi.ratingCount > 0
+                ? ` · ${poi.ratingCount} rəy`
+                : ''}
+            </Text>
+          ) : null}
+
+          {suggested ? (
+            <Text style={styles.suggestHint}>
+              Təklif olunan kateqoriya: {getCategoryEmoji(suggested)}{' '}
+              {getCategoryLabel(suggested)} — dəyişə bilərsiniz
+            </Text>
+          ) : (
+            <Text style={styles.suggestHintMuted}>
+              Kateqoriya bilinmədi — öz kateqoriyanızı seçin
+            </Text>
+          )}
 
           <Text style={styles.label}>Ad</Text>
           <TextInput
@@ -91,7 +112,7 @@ export function AdminPoiCategoryModal({
             </Pressable>
             <Pressable
               style={[styles.confirmBtn, !canConfirm && styles.disabled]}
-              onPress={() => onConfirm(category, name.trim())}
+              onPress={() => category && onConfirm(category, name.trim())}
               disabled={!canConfirm}
             >
               {loading ? (
@@ -132,6 +153,23 @@ const styles = StyleSheet.create({
   },
   coords: {
     marginTop: 6,
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  ratingHint: {
+    marginTop: 8,
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.warning,
+  },
+  suggestHint: {
+    marginTop: 8,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.accent,
+  },
+  suggestHintMuted: {
+    marginTop: 8,
     fontSize: 12,
     color: colors.textMuted,
   },

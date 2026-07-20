@@ -15,7 +15,9 @@ type Props = {
   size?: number;
 };
 
-export function FavoriteButton({ targetType, targetId, size = 20 }: Props) {
+const FAVORITE_YELLOW = '#E8B84A';
+
+export function FavoriteButton({ targetType, targetId, size = 22 }: Props) {
   const [favorited, setFavorited] = useState(false);
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
@@ -52,17 +54,17 @@ export function FavoriteButton({ targetType, targetId, size = 20 }: Props) {
         e.stopPropagation?.();
         void onPress();
       }}
-      hitSlop={10}
-      style={styles.btn}
+      hitSlop={8}
+      style={[styles.btn, favorited && styles.btnActive]}
       accessibilityLabel={favorited ? 'Sevimlidən çıxar' : 'Sevimlilərə əlavə et'}
     >
       {busy || !ready ? (
-        <ActivityIndicator size="small" color={colors.accent} />
+        <ActivityIndicator size="small" color={FAVORITE_YELLOW} />
       ) : (
         <FontAwesome
           name={favorited ? 'bookmark' : 'bookmark-o'}
           size={size}
-          color={favorited ? colors.accent : colors.textSecondary}
+          color={favorited ? FAVORITE_YELLOW : colors.textSecondary}
         />
       )}
     </Pressable>
@@ -71,9 +73,17 @@ export function FavoriteButton({ targetType, targetId, size = 20 }: Props) {
 
 const styles = StyleSheet.create({
   btn: {
-    minWidth: 28,
-    minHeight: 28,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 2,
+    borderColor: FAVORITE_YELLOW,
+    backgroundColor: '#FFF9EB',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  btnActive: {
+    backgroundColor: '#FFF3D0',
+    borderColor: '#D4A017',
   },
 });

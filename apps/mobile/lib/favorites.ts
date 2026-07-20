@@ -84,3 +84,34 @@ export async function listFavoriteIds(
 
   return new Set((data ?? []).map((row) => row.target_id));
 }
+
+/** İstifadəçinin sevimli listing id-ləri (yaradılma tarixinə görə). */
+export async function listFavoriteListingIdsOrdered(): Promise<string[]> {
+  return listFavoriteIdsOrdered('listing');
+}
+
+/** İstifadəçinin sevimli POI id-ləri. */
+export async function listFavoritePoiIdsOrdered(): Promise<string[]> {
+  return listFavoriteIdsOrdered('poi');
+}
+
+async function listFavoriteIdsOrdered(targetType: FavoriteTargetType): Promise<string[]> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('favorites')
+    .select('target_id, created_at')
+    .eq('user_id', user.id)
+    .eq('target_type', targetType)
+    .order('created_at', { ascending: false });
+
+  if (error || !data) {
+    return [];
+  }
+  return data.map((row) => row.target_id);
+}

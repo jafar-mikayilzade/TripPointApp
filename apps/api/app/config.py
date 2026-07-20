@@ -17,6 +17,10 @@ GOOGLE_PLACES_API_KEY = _raw_google_key.strip('"').strip("'") or None
 _raw_ow_key = (os.getenv("OPENWEATHER_API_KEY") or "").strip()
 OPENWEATHER_API_KEY = _raw_ow_key.strip('"').strip("'") or None
 
+# Optional — plan-route tips only; itinerary works without it
+_raw_anthropic = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+ANTHROPIC_API_KEY = _raw_anthropic.strip('"').strip("'") or None
+
 # mock | osm | google | hybrid
 DATA_SOURCE = (os.getenv("DATA_SOURCE") or "mock").strip().lower()
 ALLOWED_DATA_SOURCES = {"mock", "osm", "google", "hybrid"}
