@@ -76,6 +76,10 @@ def resolve_db_category(place: dict[str, Any], requested: str) -> str:
     return "other"
 
 
+# Temporarily drop cafes from sync (low tourism signal in regional OSM data)
+IGNORED_SYNC_CATEGORIES = frozenset({"cafe"})
+
+
 def clean_place(
     place: dict[str, Any],
     region: str,
@@ -92,6 +96,10 @@ def clean_place(
     if not place_id or not name or latitude is None or longitude is None:
         return None
 
+    db_category = resolve_db_category(place, category)
+    if db_category in IGNORED_SYNC_CATEGORIES or str(category).strip().lower() in IGNORED_SYNC_CATEGORIES:
+        return None
+
     rating = place.get("rating")
     if rating is None:
         rating = default_rating()
@@ -103,7 +111,7 @@ def clean_place(
 
     row: dict[str, Any] = {
         "name": str(name).strip(),
-        "category": resolve_db_category(place, category),
+        "category": db_category,
         "status": "approved",
         "region": to_db_region(region),
         "lat": float(latitude),

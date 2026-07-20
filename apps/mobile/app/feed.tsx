@@ -28,6 +28,8 @@ import { confirmDelete, deletePost } from '../lib/userContentDelete';
 import { uploadImage } from '../lib/uploadImage';
 import type { Poi, Post, PostPhoto, Profile } from '../types/database';
 
+import { colors } from '../constants/theme';
+
 type FeedPost = Post & {
   author: Pick<Profile, 'id' | 'full_name' | 'avatar_url'> | null;
   photos: PostPhoto[];
@@ -499,7 +501,7 @@ export default function FeedScreen() {
               hitSlop={8}
             >
               {deletingPostId === item.id ? (
-                <ActivityIndicator color="#DC2626" size="small" />
+                <ActivityIndicator color={colors.danger} size="small" />
               ) : (
                 <Text style={styles.deleteText}>Sil</Text>
               )}
@@ -579,7 +581,7 @@ export default function FeedScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()} hitSlop={8}>
-          <FontAwesome name="chevron-left" size={14} color="#2563EB" />
+          <FontAwesome name="chevron-left" size={14} color={colors.accent} />
           <Text style={styles.backText}>Geri</Text>
         </Pressable>
         <Pressable style={styles.shareButton} onPress={openShareModal}>
@@ -592,7 +594,7 @@ export default function FeedScreen() {
 
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#2563EB" />
+          <ActivityIndicator size="large" color={colors.accent} />
         </View>
       ) : (
         <FlatList
@@ -634,7 +636,7 @@ export default function FeedScreen() {
               {shareError ? <Text style={styles.errorBanner}>{shareError}</Text> : null}
 
               <Pressable style={styles.imagePickButton} onPress={handlePickImages}>
-                <FontAwesome name="camera" size={14} color="#2563EB" />
+                <FontAwesome name="camera" size={14} color={colors.accent} />
                 <Text style={styles.imagePickText}>Şəkil seç (max {MAX_IMAGES})</Text>
               </Pressable>
 
@@ -664,7 +666,7 @@ export default function FeedScreen() {
                 value={caption}
                 onChangeText={setCaption}
                 placeholder="Səyahətindən danış..."
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor={colors.textMuted}
                 multiline
                 textAlignVertical="top"
               />
@@ -697,10 +699,10 @@ export default function FeedScreen() {
                     value={poiQuery}
                     onChangeText={setPoiQuery}
                     placeholder="POI axtar..."
-                    placeholderTextColor="#9CA3AF"
+                    placeholderTextColor={colors.textMuted}
                   />
                   {searchingPois ? (
-                    <ActivityIndicator color="#2563EB" style={{ marginTop: 8 }} />
+                    <ActivityIndicator color={colors.accent} style={{ marginTop: 8 }} />
                   ) : null}
                   {poiResults.map((poi) => (
                     <Pressable
@@ -787,7 +789,7 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg,
   },
   centered: {
     flex: 1,
@@ -807,24 +809,24 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   backText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '600',
   },
   shareButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   shareButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 13,
   },
   title: {
     fontSize: 24,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
     paddingHorizontal: 16,
     marginBottom: 8,
   },
@@ -833,12 +835,15 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   card: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 14,
+    borderRadius: 24,
     padding: 12,
     marginBottom: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
   },
   authorRow: {
     flexDirection: 'row',
@@ -855,14 +860,14 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitial: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   authorInfo: {
     flex: 1,
@@ -870,15 +875,15 @@ const styles = StyleSheet.create({
   authorName: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   dateText: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     marginTop: 2,
   },
   deleteText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontWeight: '700',
     fontSize: 13,
   },
@@ -890,17 +895,17 @@ const styles = StyleSheet.create({
     height: 220,
     borderRadius: 12,
     marginRight: 8,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
   },
   caption: {
     fontSize: 14,
-    color: '#111827',
+    color: colors.text,
     lineHeight: 20,
     marginBottom: 8,
   },
   poiLink: {
     fontSize: 13,
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '700',
     marginBottom: 6,
   },
@@ -919,7 +924,7 @@ const styles = StyleSheet.create({
   },
   ratingLabel: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   starsRow: {
@@ -928,15 +933,15 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     textAlign: 'center',
-    color: '#9CA3AF',
+    color: colors.textMuted,
     marginTop: 48,
     fontSize: 14,
   },
   errorBanner: {
     marginHorizontal: 16,
     marginBottom: 8,
-    backgroundColor: '#FEE2E2',
-    color: '#B91C1C',
+    backgroundColor: colors.dangerSoft,
+    color: colors.dangerText,
     borderRadius: 8,
     padding: 10,
     fontSize: 13,
@@ -948,12 +953,12 @@ const styles = StyleSheet.create({
   },
   modalSheet: {
     maxHeight: '92%',
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
   },
   mapSheet: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     paddingBottom: 16,
@@ -969,10 +974,10 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
   },
   closeText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '600',
   },
   modalContent: {
@@ -983,8 +988,8 @@ const styles = StyleSheet.create({
   imagePickButton: {
     borderWidth: 1,
     borderColor: '#BFDBFE',
-    backgroundColor: '#EFF6FF',
-    borderRadius: 10,
+    backgroundColor: colors.accentSoft,
+    borderRadius: 16,
     paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -993,7 +998,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   imagePickText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '700',
   },
   previewWrap: {
@@ -1021,42 +1026,42 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     fontSize: 13,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 11,
     fontSize: 15,
-    color: '#111827',
+    color: colors.text,
   },
   textArea: {
     minHeight: 90,
   },
   locationButton: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
+    borderColor: colors.border,
+    borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.surfaceMuted,
   },
   locationButtonText: {
-    color: '#111827',
+    color: colors.text,
     fontWeight: '700',
   },
   coordsText: {
     marginTop: 8,
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   selectedPoi: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: '#2563EB',
-    backgroundColor: '#EFF6FF',
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 12,
@@ -1067,16 +1072,16 @@ const styles = StyleSheet.create({
   selectedPoiText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     flex: 1,
   },
   removeText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontWeight: '700',
   },
   poiRow: {
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -1085,18 +1090,18 @@ const styles = StyleSheet.create({
   poiName: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#111827',
+    color: colors.text,
   },
   submitButton: {
     marginTop: 18,
     marginBottom: 20,
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
   },
   submitText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 15,
   },

@@ -8,9 +8,8 @@ OSM_CATEGORY_FILTERS: dict[str, list[str]] = {
     "restaurant": [
         'node["amenity"="restaurant"]["name"]',
     ],
-    "cafe": [
-        'node["amenity"="cafe"]["name"]',
-    ],
+    # Disabled: amenity=cafe is noisy for tourism (tea houses, game cafes, etc.)
+    "cafe": [],
     "hotel": [
         'nwr["tourism"="hotel"]["name"]',
     ],
@@ -73,7 +72,6 @@ OSM_CATEGORY_FILTERS: dict[str, list[str]] = {
     # Legacy bulk selector — unused by balanced all-sync, kept for tooling
     "all": [
         'node["amenity"="restaurant"]["name"]',
-        'node["amenity"="cafe"]["name"]',
         'nwr["tourism"="hotel"]["name"]',
         'nwr["tourism"="hostel"]["name"]',
         'nwr["tourism"="guest_house"]["name"]',

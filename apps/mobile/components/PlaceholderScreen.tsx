@@ -2,6 +2,8 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import type { ComponentProps } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { colors } from '../constants/theme';
+
 interface PlaceholderScreenProps {
   icon: ComponentProps<typeof FontAwesome>['name'];
   title: string;
@@ -11,7 +13,7 @@ interface PlaceholderScreenProps {
 export function PlaceholderScreen({ icon, title, description }: PlaceholderScreenProps) {
   return (
     <View style={styles.container}>
-      <FontAwesome name={icon} size={48} color="#2563EB" style={styles.icon} />
+      <FontAwesome name={icon} size={48} color={colors.accent} style={styles.icon} />
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.description}>{description}</Text>
     </View>
@@ -23,7 +25,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg,
     paddingHorizontal: 32,
   },
   icon: {
@@ -32,13 +34,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 8,
     textAlign: 'center',
   },
   description: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.textSecondary,
     textAlign: 'center',
   },
 });

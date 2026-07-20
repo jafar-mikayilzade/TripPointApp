@@ -42,6 +42,20 @@ def sync_places(region: str, category: str) -> JSONResponse:
             },
         )
 
+    # Cafe sync disabled for now
+    if category_key == "cafe":
+        return JSONResponse(
+            content={
+                "success": True,
+                "data_source": DATA_SOURCE,
+                "region": to_db_region(region_key),
+                "category": category_key,
+                "fetched": 0,
+                "upserted": 0,
+                "message": "Category 'cafe' is temporarily disabled.",
+            }
+        )
+
     coordinates = REGION_COORDINATES[region_key]
     db_region = to_db_region(region_key)
 

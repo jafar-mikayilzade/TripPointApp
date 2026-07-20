@@ -8,6 +8,7 @@ import { markEmailVerified } from '../../lib/emailVerification';
 import { ensureProfile } from '../../lib/ensureProfile';
 import { supabase } from '../../lib/supabase';
 
+import { colors } from '../../constants/theme';
 /**
  * Email təsdiq deep link: trippoint://auth/callback?...
  * "Unmatched Route" əvəzinə TripPoint ekranı göstərir və sessiyanı qurur.
@@ -77,7 +78,7 @@ export default function AuthCallbackScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.brand}>TripPoint</Text>
-      {status === 'loading' ? <ActivityIndicator size="large" color="#2563EB" /> : null}
+      {status === 'loading' ? <ActivityIndicator size="large" color={colors.accent} /> : null}
       <Text style={[styles.message, status === 'error' && styles.error]}>{message}</Text>
       {status === 'error' ? (
         <Pressable style={styles.button} onPress={() => router.replace('/auth/login')}>
@@ -104,7 +105,7 @@ function buildUrlFromParams(params: Record<string, string | string[] | undefined
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 28,
@@ -112,28 +113,28 @@ const styles = StyleSheet.create({
   brand: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 24,
   },
   message: {
     marginTop: 16,
     fontSize: 15,
-    color: '#374151',
+    color: colors.chipText,
     textAlign: 'center',
     lineHeight: 22,
   },
   error: {
-    color: '#B91C1C',
+    color: colors.dangerText,
   },
   button: {
     marginTop: 24,
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingHorizontal: 18,
     paddingVertical: 12,
   },
   buttonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
   },
 });

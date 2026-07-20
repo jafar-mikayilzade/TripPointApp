@@ -31,6 +31,8 @@ import type {
 import { PhoneField } from './PhoneField';
 import { SimpleDateTimeField } from './SimpleDateTimeField';
 
+import { colors } from '../constants/theme';
+
 interface CreateListingModalProps {
   visible: boolean;
   onClose: () => void;
@@ -433,7 +435,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   value={originText}
                   onChangeText={(text) => setOriginText(sanitizeLettersOnlyInput(text))}
                   placeholder="Bakı"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                 />
 
                 <FieldLabel text="Haraya" required />
@@ -442,7 +444,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   value={destinationText}
                   onChangeText={(text) => setDestinationText(sanitizeLettersOnlyInput(text))}
                   placeholder="Quba"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                 />
 
                 <FieldLabel text="Başlıq" required />
@@ -451,7 +453,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   value={title}
                   editable={false}
                   placeholder="Bakı Quba istiqamətində gedirəm"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                 />
 
                 <FieldLabel text="Tarix və saat" required />
@@ -481,7 +483,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   value={price}
                   onChangeText={setPrice}
                   placeholder="AZN"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                   keyboardType="decimal-pad"
                   editable={!isFree}
                 />
@@ -515,7 +517,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   value={title}
                   onChangeText={(text) => setTitle(sanitizeLettersOnlyInput(text))}
                   placeholder="Quba weekend turu"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                 />
 
                 <FieldLabel text="Region" required />
@@ -556,7 +558,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   value={price}
                   onChangeText={setPrice}
                   placeholder="AZN"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                   keyboardType="decimal-pad"
                 />
 
@@ -566,7 +568,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   value={description}
                   onChangeText={setDescription}
                   placeholder="Tur haqqında..."
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                   multiline
                   textAlignVertical="top"
                 />
@@ -589,7 +591,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                 {poiPickerOpen ? (
                   <View style={styles.poiPickerBox}>
                     {loadingPois ? (
-                      <ActivityIndicator color="#2563EB" />
+                      <ActivityIndicator color={colors.accent} />
                     ) : approvedPois.length === 0 ? (
                       <Text style={styles.muted}>Bu regionda təsdiqlənmiş yer yoxdur</Text>
                     ) : (
@@ -648,7 +650,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   value={title}
                   onChangeText={(text) => setTitle(sanitizeLettersOnlyInput(text))}
                   placeholder="Offroad jeep turu"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                 />
 
                 <FieldLabel text="Xidmət kateqoriyası" required />
@@ -713,7 +715,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                       value={price}
                       onChangeText={setPrice}
                       placeholder="AZN"
-                      placeholderTextColor="#9CA3AF"
+                      placeholderTextColor={colors.textMuted}
                       keyboardType="decimal-pad"
                     />
                   </>
@@ -733,7 +735,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   value={description}
                   onChangeText={setDescription}
                   placeholder="Xidmət haqqında..."
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                   multiline
                   textAlignVertical="top"
                 />
@@ -797,7 +799,7 @@ const styles = StyleSheet.create({
   },
   sheet: {
     maxHeight: '92%',
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingTop: 12,
@@ -817,10 +819,10 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   closeText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '600',
   },
   content: {
@@ -836,14 +838,17 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   typeCard: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 14,
+    borderRadius: 24,
     padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.surface,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
   },
   typeEmoji: {
     fontSize: 28,
@@ -854,35 +859,35 @@ const styles = StyleSheet.create({
   typeTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   typeSubtitle: {
     marginTop: 2,
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   label: {
     marginTop: 14,
     marginBottom: 6,
     fontSize: 13,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   required: {
-    color: '#DC2626',
+    color: colors.danger,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 11,
     fontSize: 15,
-    color: '#111827',
+    color: colors.text,
   },
   inputDisabled: {
-    backgroundColor: '#F3F4F6',
-    color: '#9CA3AF',
+    backgroundColor: colors.chip,
+    color: colors.textMuted,
   },
   textArea: {
     minHeight: 90,
@@ -901,18 +906,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 16,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
   },
   chipSelected: {
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.accent,
   },
   chipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
   },
   chipTextSelected: {
-    color: '#fff',
+    color: colors.textOnAccent,
   },
   checkboxRow: {
     flexDirection: 'row',
@@ -925,20 +930,20 @@ const styles = StyleSheet.create({
     height: 18,
     borderRadius: 4,
     borderWidth: 1,
-    borderColor: '#9CA3AF',
+    borderColor: colors.textMuted,
   },
   checkboxChecked: {
-    backgroundColor: '#2563EB',
-    borderColor: '#2563EB',
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
   checkboxLabel: {
     fontSize: 14,
-    color: '#374151',
+    color: colors.chipText,
     fontWeight: '600',
   },
   poiRow: {
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 12,
@@ -948,35 +953,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   poiRowSelected: {
-    borderColor: '#2563EB',
-    backgroundColor: '#EFF6FF',
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
   },
   poiName: {
     flex: 1,
     fontSize: 14,
-    color: '#111827',
+    color: colors.text,
     fontWeight: '600',
   },
   poiCheck: {
     fontSize: 16,
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '700',
   },
   muted: {
-    color: '#9CA3AF',
+    color: colors.textMuted,
     fontSize: 13,
   },
   poiToggle: {
     borderWidth: 1,
     borderColor: '#BFDBFE',
-    backgroundColor: '#EFF6FF',
+    backgroundColor: colors.accentSoft,
     borderRadius: 10,
     paddingVertical: 12,
     paddingHorizontal: 12,
     marginTop: 4,
   },
   poiToggleText: {
-    color: '#1D4ED8',
+    color: colors.accentPressed,
     fontWeight: '700',
     fontSize: 14,
   },
@@ -995,18 +1000,18 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
   },
   pagerBtnDisabled: {
     opacity: 0.4,
   },
   pagerBtnText: {
-    color: '#374151',
+    color: colors.chipText,
     fontWeight: '700',
     fontSize: 13,
   },
   pagerMeta: {
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '600',
     fontSize: 13,
   },
@@ -1017,8 +1022,8 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: Platform.OS === 'ios' ? 24 : 14,
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-    backgroundColor: '#fff',
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface,
   },
   footerActions: {
     flexDirection: 'row',
@@ -1029,19 +1034,19 @@ const styles = StyleSheet.create({
   backButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
+    borderColor: colors.border,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
   },
   backButtonText: {
-    color: '#374151',
+    color: colors.chipText,
     fontWeight: '700',
   },
   submitButton: {
     flex: 2,
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
   },
@@ -1049,13 +1054,13 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   submitButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 15,
   },
   errorText: {
-    backgroundColor: '#FEE2E2',
-    color: '#B91C1C',
+    backgroundColor: colors.dangerSoft,
+    color: colors.dangerText,
     borderRadius: 8,
     padding: 10,
     marginBottom: 8,

@@ -29,6 +29,8 @@ import { supabase } from '../lib/supabase';
 import { uploadImage } from '../lib/uploadImage';
 import type { Poi } from '../types/database';
 
+import { colors } from '../constants/theme';
+
 interface PoiDetailModalProps {
   poi: Poi | null;
   visible: boolean;
@@ -293,13 +295,13 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
       >
         <View style={styles.sheet}>
           <Pressable onPress={onClose} style={styles.closeButton} hitSlop={12}>
-            <FontAwesome name="times" size={18} color="#111827" />
+            <FontAwesome name="times" size={18} color={colors.text} />
           </Pressable>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
             {loadingPhotos ? (
               <View style={styles.galleryPlaceholder}>
-                <ActivityIndicator color="#2563EB" />
+                <ActivityIndicator color={colors.accent} />
               </View>
             ) : photos.length > 0 ? (
               <ScrollView
@@ -324,10 +326,10 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
               disabled={uploadingPhoto}
             >
               {uploadingPhoto ? (
-                <ActivityIndicator color="#2563EB" />
+                <ActivityIndicator color={colors.accent} />
               ) : (
                 <>
-                  <FontAwesome name="camera" size={14} color="#2563EB" />
+                  <FontAwesome name="camera" size={14} color={colors.accent} />
                   <Text style={styles.addPhotoText}>Şəkil əlavə et (təsdiq gözləyir)</Text>
                 </>
               )}
@@ -347,7 +349,7 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
             </View>
 
             {loadingRating ? (
-              <ActivityIndicator color="#2563EB" style={styles.inlineLoader} />
+              <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
             ) : (
               <View style={styles.ratingRow}>
                 <FontAwesome name="star" size={16} color="#F59E0B" />
@@ -371,14 +373,14 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
                   style={styles.secondaryButton}
                   onPress={() => openUrl(`tel:${poi.phone}`)}
                 >
-                  <FontAwesome name="phone" size={14} color="#2563EB" />
+                  <FontAwesome name="phone" size={14} color={colors.accent} />
                   <Text style={styles.secondaryButtonText}>Zəng et</Text>
                 </Pressable>
               ) : null}
 
               {poi.website ? (
                 <Pressable style={styles.secondaryButton} onPress={() => openUrl(poi.website!)}>
-                  <FontAwesome name="globe" size={14} color="#2563EB" />
+                  <FontAwesome name="globe" size={14} color={colors.accent} />
                   <Text style={styles.secondaryButtonText}>Vebsayta get</Text>
                 </Pressable>
               ) : null}
@@ -408,12 +410,12 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
                     <FontAwesome
                       name={filled ? 'star' : 'star-o'}
                       size={28}
-                      color={filled ? '#F59E0B' : '#D1D5DB'}
+                      color={filled ? '#F59E0B' : colors.border}
                     />
                   </Pressable>
                 );
               })}
-              {submittingScore ? <ActivityIndicator color="#2563EB" /> : null}
+              {submittingScore ? <ActivityIndicator color={colors.accent} /> : null}
             </View>
           </ScrollView>
         </View>
@@ -430,7 +432,7 @@ const styles = StyleSheet.create({
   },
   sheet: {
     maxHeight: '90%',
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingTop: 12,
@@ -444,7 +446,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -467,7 +469,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
     marginBottom: 16,
   },
   placeholderEmoji: {
@@ -480,13 +482,13 @@ const styles = StyleSheet.create({
     gap: 8,
     borderWidth: 1,
     borderColor: '#BFDBFE',
-    backgroundColor: '#EFF6FF',
-    borderRadius: 10,
+    backgroundColor: colors.accentSoft,
+    borderRadius: 16,
     paddingVertical: 10,
     marginBottom: 14,
   },
   addPhotoText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '700',
     fontSize: 13,
   },
@@ -496,7 +498,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 10,
     paddingRight: 40,
   },
@@ -517,7 +519,7 @@ const styles = StyleSheet.create({
   },
   regionText: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '500',
   },
   ratingRow: {
@@ -529,11 +531,11 @@ const styles = StyleSheet.create({
   ratingValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   ratingCount: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   inlineLoader: {
     alignSelf: 'flex-start',
@@ -542,7 +544,7 @@ const styles = StyleSheet.create({
   description: {
     fontSize: 15,
     lineHeight: 22,
-    color: '#374151',
+    color: colors.chipText,
     marginBottom: 16,
   },
   actions: {
@@ -555,12 +557,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     borderWidth: 1,
-    borderColor: '#2563EB',
-    borderRadius: 10,
+    borderColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 12,
   },
   secondaryButtonText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -569,19 +571,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 13,
   },
   primaryButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontSize: 14,
     fontWeight: '600',
   },
   rateLabel: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 10,
   },
   starsRow: {
@@ -590,12 +592,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   errorText: {
-    color: '#B91C1C',
+    color: colors.dangerText,
     fontSize: 13,
     marginBottom: 10,
   },
   successText: {
-    color: '#15803D',
+    color: colors.success,
     fontSize: 13,
     marginBottom: 10,
     fontWeight: '600',

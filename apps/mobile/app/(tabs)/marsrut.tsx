@@ -17,6 +17,8 @@ import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
 import { getCategoryEmoji } from '../../lib/categoryUtils';
 import { supabase } from '../../lib/supabase';
 
+import { colors } from '../../constants/theme';
+
 type DayOption = 1 | 2 | 3 | 4;
 type BudgetOption = 'budget' | 'mid' | 'premium';
 type InterestId = 'nature' | 'history' | 'food' | 'family' | 'active' | 'photo';
@@ -149,7 +151,7 @@ export default function MarsrutScreen() {
 
       // 2. POI-ləri kateqoriyaya görə qruplaşdır
       const restaurants = pois.filter((p) =>
-        ['restaurant', 'cafe', 'home_restaurant'].includes(p.category)
+        ['restaurant', 'home_restaurant'].includes(p.category)
       );
       const accommodations = pois.filter((p) =>
         ['hotel', 'hostel', 'guesthouse'].includes(p.category)
@@ -489,7 +491,7 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg,
     overflow: 'hidden',
   },
   formContent: {
@@ -505,25 +507,25 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
     marginTop: 8,
   },
   subtitle: {
     marginTop: 6,
     marginBottom: 18,
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.textSecondary,
     lineHeight: 20,
   },
   label: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
     marginBottom: 8,
     marginTop: 8,
   },
   required: {
-    color: '#DC2626',
+    color: colors.danger,
   },
   chipRow: {
     paddingBottom: 8,
@@ -533,20 +535,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 20,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
     marginRight: 8,
     overflow: 'hidden',
   },
   chipSelected: {
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.accent,
   },
   chipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
   },
   chipTextSelected: {
-    color: '#fff',
+    color: colors.textOnAccent,
   },
   interestGrid: {
     flexDirection: 'row',
@@ -558,30 +560,30 @@ const styles = StyleSheet.create({
     width: '48%',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#fff',
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     paddingVertical: 14,
     paddingHorizontal: 12,
     overflow: 'hidden',
   },
   interestChipSelected: {
-    borderColor: '#2563EB',
-    backgroundColor: '#EFF6FF',
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
   },
   interestText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
     textAlign: 'center',
     flexShrink: 1,
   },
   interestTextSelected: {
-    color: '#1D4ED8',
+    color: colors.accentPressed,
   },
   primaryButton: {
     marginTop: 24,
     marginBottom: 20,
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.accent,
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
@@ -591,7 +593,7 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   primaryButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -599,33 +601,36 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#2563EB',
+    borderColor: colors.accent,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     overflow: 'hidden',
   },
   secondaryButtonText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontSize: 15,
     fontWeight: '700',
   },
   errorText: {
-    backgroundColor: '#FEE2E2',
-    color: '#B91C1C',
-    borderRadius: 8,
+    backgroundColor: colors.dangerSoft,
+    color: colors.dangerText,
+    borderRadius: 16,
     padding: 10,
     marginBottom: 8,
     fontSize: 13,
     overflow: 'hidden',
   },
   summaryCard: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
+    borderRadius: 24,
     padding: 14,
     marginBottom: 16,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.surface,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
     gap: 8,
     overflow: 'hidden',
   },
@@ -634,20 +639,18 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 11,
-    color: '#9CA3AF',
+    color: colors.textMuted,
     fontWeight: '600',
     textTransform: 'uppercase',
   },
   summaryValue: {
     fontSize: 14,
-    color: '#111827',
+    color: colors.text,
     fontWeight: '600',
     flexShrink: 1,
   },
   dayCard: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
+    borderRadius: 24,
     padding: 14,
     marginBottom: 12,
     overflow: 'hidden',
@@ -655,18 +658,18 @@ const styles = StyleSheet.create({
   dayTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 8,
     flexShrink: 1,
   },
   dayMeta: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     marginBottom: 4,
   },
   dayNotes: {
     fontSize: 13,
-    color: '#4B5563',
+    color: colors.textSecondary,
     marginBottom: 10,
     fontStyle: 'italic',
     flexShrink: 1,
@@ -675,7 +678,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: colors.chip,
   },
   stopTimeCol: {
     width: 50,
@@ -683,13 +686,13 @@ const styles = StyleSheet.create({
   },
   stopTime: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   stopTimeline: {
     width: 2,
     flex: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
     marginTop: 4,
   },
   stopBody: {
@@ -709,19 +712,19 @@ const styles = StyleSheet.create({
   stopName: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     flex: 1,
     minWidth: 0,
     flexShrink: 1,
   },
   stopDuration: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     marginTop: 2,
   },
   stopTip: {
     fontSize: 13,
-    color: '#374151',
+    color: colors.chipText,
     marginTop: 4,
     fontStyle: 'italic',
     flexShrink: 1,
@@ -731,6 +734,6 @@ const styles = StyleSheet.create({
   },
   mapsLinkText: {
     fontSize: 12,
-    color: '#2563EB',
+    color: colors.accent,
   },
 });

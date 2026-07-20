@@ -22,6 +22,8 @@ import { uploadImage } from '../lib/uploadImage';
 import type { Poi, TravelPrivacy } from '../types/database';
 import { SimpleDateTimeField } from './SimpleDateTimeField';
 
+import { colors } from '../constants/theme';
+
 interface AddTravelHistoryModalProps {
   visible: boolean;
   onClose: () => void;
@@ -286,7 +288,7 @@ export function AddTravelHistoryModal({ visible, onClose, onCreated }: AddTravel
               value={title}
               onChangeText={setTitle}
               placeholder="Quba-Qusar səfəri"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={colors.textMuted}
             />
 
             <Text style={styles.label}>
@@ -315,9 +317,9 @@ export function AddTravelHistoryModal({ visible, onClose, onCreated }: AddTravel
                   value={poiQuery}
                   onChangeText={setPoiQuery}
                   placeholder="POI axtar..."
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                 />
-                {searchingPois ? <ActivityIndicator color="#2563EB" style={{ marginTop: 8 }} /> : null}
+                {searchingPois ? <ActivityIndicator color={colors.accent} style={{ marginTop: 8 }} /> : null}
                 {poiResults.map((poi) => (
                   <Pressable
                     key={poi.id}
@@ -341,14 +343,14 @@ export function AddTravelHistoryModal({ visible, onClose, onCreated }: AddTravel
               value={notes}
               onChangeText={setNotes}
               placeholder="Səyahət haqqında qeydlər..."
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={colors.textMuted}
               multiline
               textAlignVertical="top"
             />
 
             <Text style={styles.label}>Şəkillər (max {MAX_IMAGES})</Text>
             <Pressable style={styles.imageButton} onPress={handlePickImages}>
-              <FontAwesome name="camera" size={14} color="#2563EB" />
+              <FontAwesome name="camera" size={14} color={colors.accent} />
               <Text style={styles.imageButtonText}>Şəkil əlavə et</Text>
             </Pressable>
             {images.length > 0 ? (
@@ -414,7 +416,7 @@ const styles = StyleSheet.create({
   },
   sheet: {
     maxHeight: '92%',
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingTop: 12,
@@ -429,10 +431,10 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   closeText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '600',
   },
   content: {
@@ -445,27 +447,27 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     fontSize: 13,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   required: {
-    color: '#DC2626',
+    color: colors.danger,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 11,
     fontSize: 15,
-    color: '#111827',
+    color: colors.text,
   },
   textArea: {
     minHeight: 90,
   },
   selectedPoi: {
     borderWidth: 1,
-    borderColor: '#2563EB',
-    backgroundColor: '#EFF6FF',
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 12,
@@ -476,16 +478,16 @@ const styles = StyleSheet.create({
   selectedPoiText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     flex: 1,
   },
   clearPoi: {
-    color: '#DC2626',
+    color: colors.danger,
     fontWeight: '700',
   },
   poiRow: {
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -494,18 +496,18 @@ const styles = StyleSheet.create({
   poiName: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#111827',
+    color: colors.text,
   },
   poiRegion: {
     marginTop: 2,
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   imageButton: {
     borderWidth: 1,
     borderColor: '#BFDBFE',
-    backgroundColor: '#EFF6FF',
-    borderRadius: 10,
+    backgroundColor: colors.accentSoft,
+    borderRadius: 16,
     paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -513,7 +515,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   imageButtonText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '700',
   },
   imageRow: {
@@ -546,26 +548,26 @@ const styles = StyleSheet.create({
   privacyChip: {
     flex: 1,
     borderRadius: 10,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
     paddingVertical: 12,
     alignItems: 'center',
   },
   privacySelected: {
-    backgroundColor: '#111827',
+    backgroundColor: colors.text,
   },
   privacyText: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   privacyTextSelected: {
-    color: '#fff',
+    color: colors.textOnAccent,
   },
   submitButton: {
     marginTop: 20,
     marginBottom: 20,
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
   },
@@ -573,13 +575,13 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   submitText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 15,
   },
   errorText: {
-    backgroundColor: '#FEE2E2',
-    color: '#B91C1C',
+    backgroundColor: colors.dangerSoft,
+    color: colors.dangerText,
     borderRadius: 8,
     padding: 10,
     marginBottom: 8,

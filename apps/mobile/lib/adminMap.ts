@@ -5,7 +5,6 @@ import type { Poi, PoiCategory } from '../types/database';
 
 export const ADMIN_POI_CATEGORIES: PoiCategory[] = [
   'restaurant',
-  'cafe',
   'hostel',
   'hotel',
   'home_restaurant',

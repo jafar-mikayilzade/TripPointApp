@@ -9,7 +9,6 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +20,7 @@ import MapView, {
   type Region as MapRegion,
 } from '../../components/AppMap';
 import { DropdownButton } from '../../components/DropdownButton';
+import { ResizableSplit } from '../../components/ResizableSplit';
 import { getCategoryEmoji } from '../../lib/categoryUtils';
 import { getErrorMessage } from '../../lib/errors';
 import { supabase } from '../../lib/supabase';
@@ -30,7 +30,9 @@ import {
   type POI,
 } from '../../utils/routeOptimizer';
 
-const DAY_COLORS = ['#7C3AED', '#2563EB', '#059669', '#D97706', '#DC2626'];
+import { colors } from '../../constants/theme';
+
+const DAY_COLORS = [colors.accent, colors.accent, '#059669', '#D97706', colors.danger];
 
 const REGION_COORDS: Record<string, { latitude: number; longitude: number }> = {
   quba: { latitude: 41.3625, longitude: 48.5128 },
@@ -140,9 +142,6 @@ function decodePolyline(encoded: string): LatLng[] {
 }
 
 export default function AiKomekciScreen() {
-  const { height: windowHeight } = useWindowDimensions();
-  const mapHeight = Math.min(300, Math.max(180, Math.round(windowHeight * 0.34)));
-
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [selectedDays, setSelectedDays] = useState<number>(1);
   const [selectedBudget, setSelectedBudget] = useState<string | null>(null);
@@ -324,7 +323,7 @@ export default function AiKomekciScreen() {
       }
 
       const restaurants = pois.filter((p) =>
-        ['restaurant', 'cafe', 'home_restaurant'].includes(p.category)
+        ['restaurant', 'home_restaurant'].includes(p.category)
       );
       const accommodations = pois.filter((p) =>
         ['hotel', 'hostel', 'guesthouse'].includes(p.category)
@@ -487,7 +486,13 @@ export default function AiKomekciScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
     >
       <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <View style={[styles.mapSection, { height: mapHeight }]}>
+        <ResizableSplit
+          storageKey="ai-map-split-ratio"
+          initialTopRatio={0.34}
+          minTopRatio={0.2}
+          maxTopRatio={0.75}
+          top={
+        <View style={styles.mapSection}>
           <MapView
             ref={mapRef as never}
             style={styles.map}
@@ -537,7 +542,7 @@ export default function AiKomekciScreen() {
             {routeCoordinates.length > 1 ? (
               <Polyline
                 coordinates={routeCoordinates}
-                strokeColor="#7C3AED"
+                strokeColor={colors.accent}
                 strokeWidth={3}
                 lineDashPattern={[1]}
               />
@@ -588,7 +593,8 @@ export default function AiKomekciScreen() {
             </ScrollView>
           ) : null}
         </View>
-
+          }
+          bottom={
         <View style={styles.panel}>
           {!plan ? (
             <ScrollView
@@ -795,6 +801,8 @@ export default function AiKomekciScreen() {
             </ScrollView>
           )}
         </View>
+          }
+        />
       </SafeAreaView>
     </KeyboardAvoidingView>
   );
@@ -806,9 +814,10 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
   },
   mapSection: {
+    flex: 1,
     width: '100%',
     overflow: 'hidden',
     position: 'relative',
@@ -845,7 +854,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   aiBadge: {
-    backgroundColor: '#7C3AED',
+    backgroundColor: colors.accent,
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -870,13 +879,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     flexShrink: 1,
     maxWidth: '100%',
   },
   resetBadgeText: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.textSecondary,
     flexShrink: 1,
   },
   durationScroll: {
@@ -909,9 +918,7 @@ const styles = StyleSheet.create({
   panel: {
     flex: 1,
     minHeight: 0,
-    backgroundColor: '#FAFAFA',
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
+    backgroundColor: colors.surfaceMuted,
     overflow: 'hidden',
   },
   formContent: {
@@ -933,14 +940,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   errorText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontSize: 13,
     flexShrink: 1,
   },
   sectionLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
     marginBottom: 8,
   },
   interestWrap: {
@@ -956,14 +963,14 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#D1D5DB',
+    borderColor: colors.border,
     backgroundColor: 'white',
     maxWidth: '100%',
     overflow: 'hidden',
   },
   interestChipSelected: {
-    borderColor: '#7C3AED',
-    backgroundColor: '#F5F3FF',
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
   },
   interestEmoji: {
     fontSize: 14,
@@ -971,14 +978,14 @@ const styles = StyleSheet.create({
   interestLabel: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#4B5563',
+    color: colors.textSecondary,
     flexShrink: 1,
   },
   interestLabelSelected: {
-    color: '#7C3AED',
+    color: colors.accent,
   },
   submitButton: {
-    backgroundColor: '#7C3AED',
+    backgroundColor: colors.accent,
     borderRadius: 16,
     paddingVertical: 14,
     paddingHorizontal: 12,
@@ -1004,12 +1011,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   summaryCard: {
-    backgroundColor: '#F5F3FF',
-    borderRadius: 12,
+    backgroundColor: colors.accentSoft,
+    borderRadius: 24,
     padding: 12,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#DDD6FE',
     overflow: 'hidden',
   },
   summaryText: {
@@ -1026,7 +1031,7 @@ const styles = StyleSheet.create({
   },
   summaryMeta: {
     fontSize: 12,
-    color: '#7C3AED',
+    color: colors.accent,
     fontWeight: '600',
     flexShrink: 1,
     minWidth: 0,
@@ -1055,14 +1060,14 @@ const styles = StyleSheet.create({
   dayTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     flex: 1,
     minWidth: 0,
     flexShrink: 1,
   },
   dayCost: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     flexShrink: 1,
     minWidth: 0,
     maxWidth: '35%',
@@ -1077,7 +1082,7 @@ const styles = StyleSheet.create({
   },
   stopTime: {
     fontSize: 11,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   stopTimeline: {
@@ -1091,11 +1096,9 @@ const styles = StyleSheet.create({
     minWidth: 0,
     paddingLeft: 10,
     backgroundColor: 'white',
-    borderRadius: 10,
+    borderRadius: 16,
     padding: 10,
     marginLeft: 4,
-    borderWidth: 1,
-    borderColor: '#F3F4F6',
     overflow: 'hidden',
   },
   stopTitleRow: {
@@ -1109,19 +1112,19 @@ const styles = StyleSheet.create({
   stopName: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     flex: 1,
     minWidth: 0,
     flexShrink: 1,
   },
   stopDuration: {
     fontSize: 11,
-    color: '#9CA3AF',
+    color: colors.textMuted,
     marginTop: 2,
   },
   stopTip: {
     fontSize: 12,
-    color: '#4B5563',
+    color: colors.textSecondary,
     marginTop: 4,
     fontStyle: 'italic',
     flexShrink: 1,
@@ -1133,19 +1136,19 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 6,
     padding: 6,
-    backgroundColor: '#F5F3FF',
+    backgroundColor: colors.accentSoft,
     borderRadius: 8,
     overflow: 'hidden',
   },
   stopLegPrimary: {
     fontSize: 11,
-    color: '#7C3AED',
+    color: colors.accent,
     fontWeight: '600',
     flexShrink: 1,
   },
   stopLegSecondary: {
     fontSize: 11,
-    color: '#7C3AED',
+    color: colors.accent,
     flexShrink: 1,
   },
   mapsLink: {
@@ -1153,11 +1156,11 @@ const styles = StyleSheet.create({
   },
   mapsLinkText: {
     fontSize: 11,
-    color: '#2563EB',
+    color: colors.accent,
   },
   dayNotes: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontStyle: 'italic',
     marginTop: 4,
     marginLeft: 56,

@@ -27,7 +27,7 @@ _OSM_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 # Stable order for balanced "all" sync
 ALL_SYNC_CATEGORIES: list[str] = [
     "restaurant",
-    "cafe",
+    # cafe ignored for now — noisy OSM amenity=cafe (tea houses, etc.)
     "hotel",
     "hostel",
     "guesthouse",

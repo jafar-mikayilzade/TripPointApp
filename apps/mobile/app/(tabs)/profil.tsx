@@ -54,6 +54,8 @@ import type {
   UserRole,
 } from '../../types/database';
 
+import { colors } from '../../constants/theme';
+
 type ProfileTab = 'travels' | 'listings' | 'reviews';
 
 type TravelRow = TravelHistory & {
@@ -65,17 +67,17 @@ type ReviewRow = Rating & {
 };
 
 const ROLE_META: Record<UserRole, { label: string; color: string }> = {
-  user: { label: 'Səyahətçi', color: '#6B7280' },
-  guide: { label: 'Tur Bələdçisi', color: '#16A34A' },
-  business_owner: { label: 'Biznes Sahibi', color: '#2563EB' },
-  local_provider: { label: 'Yerli Xidmət', color: '#FF6B35' },
-  admin: { label: 'Admin', color: '#DC2626' },
+  user: { label: 'Səyahətçi', color: colors.textSecondary },
+  guide: { label: 'Tur Bələdçisi', color: colors.success },
+  business_owner: { label: 'Biznes Sahibi', color: colors.accent },
+  local_provider: { label: 'Yerli Xidmət', color: '#C96B45' },
+  admin: { label: 'Admin', color: colors.danger },
 };
 
 const TYPE_META: Record<ListingType, { label: string; emoji: string; color: string }> = {
-  carpool: { label: 'Carpool', emoji: '🚗', color: '#2196F3' },
-  tour: { label: 'Tur', emoji: '🗺', color: '#4CAF50' },
-  local_service: { label: 'Yerli xidmət', emoji: '🏔', color: '#FF6B35' },
+  carpool: { label: 'Carpool', emoji: '🚗', color: '#5B8DEF' },
+  tour: { label: 'Tur', emoji: '🗺', color: '#1B7A4E' },
+  local_service: { label: 'Yerli xidmət', emoji: '🏔', color: '#C96B45' },
 };
 
 const TABS: { id: ProfileTab; label: string }[] = [
@@ -608,7 +610,7 @@ export default function ProfilScreen() {
         keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
       >
         <View style={[styles.centered, { paddingTop: insets.top }]}>
-          <ActivityIndicator size="large" color="#2563EB" />
+          <ActivityIndicator size="large" color={colors.accent} />
         </View>
       </KeyboardAvoidingView>
     );
@@ -645,7 +647,7 @@ export default function ProfilScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         {paramUserId ? (
           <Pressable style={styles.backRow} onPress={() => router.back()} hitSlop={8}>
-            <FontAwesome name="chevron-left" size={14} color="#2563EB" />
+            <FontAwesome name="chevron-left" size={14} color={colors.accent} />
             <Text style={styles.backText}>Geri</Text>
           </Pressable>
         ) : null}
@@ -714,7 +716,7 @@ export default function ProfilScreen() {
                 disabled={deletingAccount}
               >
                 {deletingAccount ? (
-                  <ActivityIndicator color="#B91C1C" />
+                  <ActivityIndicator color={colors.dangerText} />
                 ) : (
                   <Text style={styles.deleteAccountButtonText}>Hesabı sil</Text>
                 )}
@@ -766,7 +768,7 @@ export default function ProfilScreen() {
         </View>
 
         {tabLoading ? (
-          <ActivityIndicator color="#2563EB" style={{ marginTop: 24 }} />
+          <ActivityIndicator color={colors.accent} style={{ marginTop: 24 }} />
         ) : (
           <View style={styles.tabContent}>
             {activeTab === 'travels' ? (
@@ -885,7 +887,7 @@ export default function ProfilScreen() {
               value={editName}
               onChangeText={(text) => setEditName(sanitizeFullNameInput(text))}
               placeholder="Ad Soyad"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={colors.textMuted}
             />
 
             <Text style={styles.fieldLabel}>Bio</Text>
@@ -894,7 +896,7 @@ export default function ProfilScreen() {
               value={editBio}
               onChangeText={setEditBio}
               placeholder="Haqqında..."
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={colors.textMuted}
               multiline
               textAlignVertical="top"
             />
@@ -1063,13 +1065,13 @@ function ProfileListingCard({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg,
   },
   centered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     paddingHorizontal: 24,
   },
   content: {
@@ -1084,7 +1086,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   backText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '600',
   },
   headerBlock: {
@@ -1101,20 +1103,20 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitial: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   name: {
     marginTop: 12,
     fontSize: 24,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
   },
   roleBadge: {
     marginTop: 8,
@@ -1134,13 +1136,13 @@ const styles = StyleSheet.create({
   },
   ratingText: {
     fontSize: 13,
-    color: '#4B5563',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   bio: {
     marginTop: 10,
     fontSize: 14,
-    color: '#4B5563',
+    color: colors.textSecondary,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -1152,7 +1154,7 @@ const styles = StyleSheet.create({
   },
   statBox: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
@@ -1160,12 +1162,12 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
   },
   statLabel: {
     marginTop: 2,
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   actionRow: {
@@ -1181,7 +1183,7 @@ const styles = StyleSheet.create({
   splitBillButton: {
     width: '100%',
     backgroundColor: '#0F766E',
-    borderRadius: 10,
+    borderRadius: 16,
     paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1190,8 +1192,8 @@ const styles = StyleSheet.create({
   },
   adminModButton: {
     width: '100%',
-    backgroundColor: '#7C3AED',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1199,49 +1201,49 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   splitBillButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
   },
   primaryButton: {
     flex: 1,
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
   },
   primaryButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
   },
   dangerButton: {
     flex: 1,
-    backgroundColor: '#FEE2E2',
-    borderRadius: 10,
+    backgroundColor: colors.dangerSoft,
+    borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
   },
   dangerButtonText: {
-    color: '#B91C1C',
+    color: colors.dangerText,
     fontWeight: '700',
   },
   deleteAccountButton: {
     width: '100%',
     borderWidth: 1,
     borderColor: '#FECACA',
-    borderRadius: 10,
+    borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
     backgroundColor: '#FFF7F7',
   },
   deleteAccountButtonText: {
-    color: '#B91C1C',
+    color: colors.dangerText,
     fontWeight: '700',
   },
   whatsappButton: {
     marginTop: 16,
     width: '100%',
     backgroundColor: '#25D366',
-    borderRadius: 10,
+    borderRadius: 16,
     paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1249,32 +1251,32 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   whatsappButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
   },
   secondaryButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
+    borderColor: colors.border,
+    borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
   },
   secondaryButtonText: {
-    color: '#374151',
+    color: colors.chipText,
     fontWeight: '700',
   },
   disabled: {
     opacity: 0.6,
   },
   errorText: {
-    color: '#B91C1C',
+    color: colors.dangerText,
     textAlign: 'center',
     marginBottom: 12,
   },
   errorBanner: {
-    backgroundColor: '#FEE2E2',
-    color: '#B91C1C',
+    backgroundColor: colors.dangerSoft,
+    color: colors.dangerText,
     borderRadius: 8,
     padding: 10,
     marginTop: 10,
@@ -1286,16 +1288,14 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 8,
   },
   guideCard: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
+    borderRadius: 24,
     padding: 12,
     marginBottom: 8,
-    backgroundColor: '#F0FDF4',
+    backgroundColor: colors.successSoft,
   },
   tabRow: {
     flexDirection: 'row',
@@ -1306,26 +1306,26 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
     alignItems: 'center',
   },
   tabChipSelected: {
-    backgroundColor: '#111827',
+    backgroundColor: colors.text,
   },
   tabText: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   tabTextSelected: {
-    color: '#fff',
+    color: colors.textOnAccent,
   },
   tabContent: {
     marginTop: 14,
   },
   addTravelButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 12,
     marginBottom: 12,
     flexDirection: 'row',
@@ -1334,37 +1334,40 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   addTravelButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 14,
   },
   listCard: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
+    borderRadius: 24,
     padding: 12,
     marginBottom: 10,
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
   },
   cardTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 4,
   },
   cardDescription: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.textSecondary,
     marginBottom: 6,
   },
   metaLine: {
     fontSize: 12,
-    color: '#4B5563',
+    color: colors.textSecondary,
     marginTop: 2,
   },
   emptyText: {
     textAlign: 'center',
-    color: '#9CA3AF',
+    color: colors.textMuted,
     marginTop: 24,
     fontSize: 14,
   },
@@ -1386,13 +1389,13 @@ const styles = StyleSheet.create({
   },
   reviewComment: {
     fontSize: 14,
-    color: '#111827',
+    color: colors.text,
     lineHeight: 20,
   },
   reviewAuthor: {
     marginTop: 8,
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   deleteTextButton: {
@@ -1401,7 +1404,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   deleteText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontWeight: '700',
     fontSize: 13,
   },
@@ -1411,25 +1414,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FECACA',
     backgroundColor: '#FEF2F2',
-    borderRadius: 10,
+    borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
   },
   deleteOutlineButtonText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontWeight: '700',
     fontSize: 15,
   },
   modalCloseButton: {
     marginTop: 10,
     width: '100%',
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
   },
   modalCloseButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 15,
   },
@@ -1439,7 +1442,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalSheet: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 16,
@@ -1448,7 +1451,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 10,
   },
   fieldLabel: {
@@ -1456,16 +1459,16 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     fontSize: 13,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 11,
     fontSize: 15,
-    color: '#111827',
+    color: colors.text,
   },
   textArea: {
     minHeight: 90,

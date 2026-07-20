@@ -27,6 +27,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AddPoiModal } from '../../components/AddPoiModal';
 import { AdminPoiCategoryModal } from '../../components/AdminPoiCategoryModal';
+import { ResizableSplit } from '../../components/ResizableSplit';
 import { useToast } from '../../components/Toast';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
 import {
@@ -44,6 +45,8 @@ import { createDebouncedSyncPlaces } from '../../lib/syncPlaces';
 import { supabase } from '../../lib/supabase';
 import { useIsAdmin } from '../../lib/useIsAdmin';
 import type { Poi, PoiCategory, PoiPhoto } from '../../types/database';
+
+import { colors } from '../../constants/theme';
 
 type PoiListItem = Poi & {
   photoUrl: string | null;
@@ -67,7 +70,6 @@ const LOCATION_OPTIONS: { label: string; value: string | null }[] = [
 const CATEGORY_OPTIONS: { label: string; value: string | null }[] = [
   { label: '🗺️ Hamısı', value: null },
   { label: '🍽️ Restoran', value: 'restaurant' },
-  { label: '☕ Kafe', value: 'cafe' },
   { label: '🏨 Otel', value: 'hotel' },
   { label: '🛏️ Hostel', value: 'hostel' },
   { label: '🏠 Ev restoranı', value: 'home_restaurant' },
@@ -230,6 +232,9 @@ export default function HomeScreen() {
       if (categoryFilter && categoryFilter !== 'all') {
         query = query.eq('category', categoryFilter);
       }
+
+      // Cafe temporarily ignored (low tourism value / noisy OSM tags)
+      query = query.neq('category', 'cafe');
 
       const { data, error } = await query.limit(50);
 
@@ -629,189 +634,196 @@ export default function HomeScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
     >
       <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.split}>
-          <View style={styles.mapPane}>
-            <MapView
-              ref={mapRef as never}
-              style={styles.map}
-              provider={Platform.OS === 'web' ? undefined : PROVIDER_GOOGLE}
-              initialRegion={mapRegion}
-              showsUserLocation={false}
-              showsMyLocationButton={false}
-              onPoiClick={isAdmin ? handleGooglePoiClick : undefined}
-              onPress={isAdmin && Platform.OS === 'web' ? handleAdminMapPress : undefined}
-            >
-              {userLocation ? (
-                <Marker
-                  coordinate={userLocation}
-                  title="Siz buradasınız"
-                  pinColor="#2563EB"
-                >
-                  <View style={styles.userMarker}>
-                    <View style={styles.userMarkerDot} />
-                    <Text style={styles.userMarkerLabel}>Siz buradasınız</Text>
-                  </View>
-                </Marker>
-              ) : null}
+        <ResizableSplit
+          storageKey="home-map-split-ratio"
+          initialTopRatio={0.5}
+          minTopRatio={0.22}
+          maxTopRatio={0.78}
+          top={
+            <View style={styles.mapPane}>
+              <MapView
+                ref={mapRef as never}
+                style={styles.map}
+                provider={Platform.OS === 'web' ? undefined : PROVIDER_GOOGLE}
+                initialRegion={mapRegion}
+                showsUserLocation={false}
+                showsMyLocationButton={false}
+                onPoiClick={isAdmin ? handleGooglePoiClick : undefined}
+                onPress={isAdmin && Platform.OS === 'web' ? handleAdminMapPress : undefined}
+              >
+                {userLocation ? (
+                  <Marker
+                    coordinate={userLocation}
+                    title="Siz buradasınız"
+                    pinColor={colors.accent}
+                  >
+                    <View style={styles.userMarker}>
+                      <View style={styles.userMarkerDot} />
+                      <Text style={styles.userMarkerLabel}>Siz buradasınız</Text>
+                    </View>
+                  </Marker>
+                ) : null}
 
-              {pois.map((poi) => (
-                <Marker
-                  key={poi.id}
-                  coordinate={{ latitude: poi.lat, longitude: poi.lng }}
-                  title={poi.name}
-                  description={getCategoryLabel(poi.category)}
-                  pinColor={isAdmin ? '#16A34A' : undefined}
-                  onPress={() => handleMarkerPress(poi)}
-                  draggable={isAdmin}
-                  onDragStart={
-                    isAdmin
-                      ? () => {
-                          setDraggingPoiId(poi.id);
-                        }
-                      : undefined
-                  }
-                  onDragEnd={
-                    isAdmin
-                      ? (event) => {
-                          void handleAdminMarkerDragEnd(poi.id, event);
-                        }
-                      : undefined
-                  }
-                  tracksViewChanges={isAdmin ? draggingPoiId === poi.id : false}
-                >
-                  {/* Admin sürüşdürmədə custom child ghost marker yaradır — yalnız pin */}
-                  {isAdmin ? null : (
-                    <View
-                      style={[
-                        styles.poiMarkerBubble,
-                        (selectedPoi?.id === poi.id || highlightedPoiId === poi.id) &&
-                          styles.poiMarkerBubbleHighlighted,
-                      ]}
-                    >
-                      <Text
+                {pois.map((poi) => (
+                  <Marker
+                    key={poi.id}
+                    coordinate={{ latitude: poi.lat, longitude: poi.lng }}
+                    title={poi.name}
+                    description={getCategoryLabel(poi.category)}
+                    pinColor={isAdmin ? colors.success : undefined}
+                    onPress={() => handleMarkerPress(poi)}
+                    draggable={isAdmin}
+                    onDragStart={
+                      isAdmin
+                        ? () => {
+                            setDraggingPoiId(poi.id);
+                          }
+                        : undefined
+                    }
+                    onDragEnd={
+                      isAdmin
+                        ? (event) => {
+                            void handleAdminMarkerDragEnd(poi.id, event);
+                          }
+                        : undefined
+                    }
+                    tracksViewChanges={isAdmin ? draggingPoiId === poi.id : false}
+                  >
+                    {/* Admin sürüşdürmədə custom child ghost marker yaradır — yalnız pin */}
+                    {isAdmin ? null : (
+                      <View
                         style={[
-                          styles.poiMarkerEmoji,
-                          selectedPoi?.id === poi.id && styles.poiMarkerEmojiSelected,
+                          styles.poiMarkerBubble,
+                          (selectedPoi?.id === poi.id || highlightedPoiId === poi.id) &&
+                            styles.poiMarkerBubbleHighlighted,
                         ]}
                       >
-                        {getCategoryEmoji(poi.category)}
-                      </Text>
-                    </View>
-                  )}
-                </Marker>
-              ))}
-            </MapView>
-
-            {isAdmin ? (
-              <View style={styles.adminBadge} pointerEvents="none">
-                <Text style={styles.adminBadgeText}>
-                  {Platform.OS === 'web'
-                    ? 'ADMIN · sürüşdür / xəritəyə və ya Google məkanına klik'
-                    : 'ADMIN · sürüşdür / Google məkanına klik'}
-                </Text>
-              </View>
-            ) : null}
-
-            <TouchableOpacity
-              style={styles.locationDropdown}
-              onPress={() => setShowLocationPicker(true)}
-            >
-              <Text style={styles.dropdownEmoji}>📍</Text>
-              <Text style={styles.dropdownLabel} numberOfLines={1}>
-                {locationButtonLabel}
-              </Text>
-              <Text style={styles.dropdownCaret}>▼</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.categoryDropdown}
-              onPress={() => setShowCategoryPicker(true)}
-            >
-              <Text style={styles.dropdownEmoji}>
-                {selectedCategory ? getCategoryEmoji(selectedCategory) : '🗂️'}
-              </Text>
-              <Text style={styles.dropdownLabel} numberOfLines={1}>
-                {categoryButtonLabel}
-              </Text>
-              <Text style={styles.dropdownCaret}>▼</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.addPoiButton}
-              onPress={() => setAddPoiVisible(true)}
-              accessibilityLabel="Yeni yer əlavə et"
-            >
-              <Text style={styles.addPoiButtonText}>+</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.locateButton}
-              onPress={goToCurrentLocation}
-              accessibilityLabel="Cari məkana qayıt"
-            >
-              <Text style={styles.locateButtonText}>📍</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.listPane}>
-            {selectedPoi ? (
-              <SelectedPoiPanel poi={selectedPoi} onBack={clearSelectedPoi} />
-            ) : (
-              <>
-                <View style={styles.listHeader}>
-                  <Text style={styles.listTitle}>{loading ? 'Yüklənir...' : listTitle}</Text>
-                  <TouchableOpacity
-                    onPress={() => router.push('/feed' as never)}
-                    hitSlop={8}
-                    accessibilityLabel="Paylaş"
-                  >
-                    <Text style={styles.shareHeaderButton}>📷 Paylaş</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {loading ? (
-                  <ActivityIndicator color="#2563EB" style={styles.loader} />
-                ) : errorMessage ? (
-                  <Text style={styles.errorText}>{errorMessage}</Text>
-                ) : (
-                  <FlatList
-                    ref={listRef}
-                    data={pois}
-                    keyExtractor={(item) => item.id}
-                    style={{ flex: 1 }}
-                    showsVerticalScrollIndicator={false}
-                    contentContainerStyle={styles.listContent}
-                    onScrollToIndexFailed={(info) => {
-                      setTimeout(() => {
-                        listRef.current?.scrollToIndex({
-                          index: info.index,
-                          animated: true,
-                          viewPosition: 0.1,
-                        });
-                      }, 100);
-                    }}
-                    renderItem={({ item }) => (
-                      <PoiListCard
-                        item={item}
-                        highlighted={highlightedPoiId === item.id}
-                        userLocation={userLocation}
-                        onPress={() => handleCardPress(item)}
-                      />
-                    )}
-                    ListEmptyComponent={
-                      <View style={styles.emptyWrap}>
-                        <Text style={styles.emptyTitle}>Bu filterlə yer tapılmadı 🔍</Text>
-                        <Text style={styles.emptySubtitle}>
-                          Fərqli rayon və ya kateqoriya seçin
+                        <Text
+                          style={[
+                            styles.poiMarkerEmoji,
+                            selectedPoi?.id === poi.id && styles.poiMarkerEmojiSelected,
+                          ]}
+                        >
+                          {getCategoryEmoji(poi.category)}
                         </Text>
                       </View>
-                    }
-                  />
-                )}
-              </>
-            )}
-          </View>
-        </View>
+                    )}
+                  </Marker>
+                ))}
+              </MapView>
+
+              {isAdmin ? (
+                <View style={styles.adminBadge} pointerEvents="none">
+                  <Text style={styles.adminBadgeText}>
+                    {Platform.OS === 'web'
+                      ? 'ADMIN · sürüşdür / xəritəyə və ya Google məkanına klik'
+                      : 'ADMIN · sürüşdür / Google məkanına klik'}
+                  </Text>
+                </View>
+              ) : null}
+
+              <TouchableOpacity
+                style={styles.locationDropdown}
+                onPress={() => setShowLocationPicker(true)}
+              >
+                <Text style={styles.dropdownEmoji}>📍</Text>
+                <Text style={styles.dropdownLabel} numberOfLines={1}>
+                  {locationButtonLabel}
+                </Text>
+                <Text style={styles.dropdownCaret}>▼</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.categoryDropdown}
+                onPress={() => setShowCategoryPicker(true)}
+              >
+                <Text style={styles.dropdownEmoji}>
+                  {selectedCategory ? getCategoryEmoji(selectedCategory) : '🗂️'}
+                </Text>
+                <Text style={styles.dropdownLabel} numberOfLines={1}>
+                  {categoryButtonLabel}
+                </Text>
+                <Text style={styles.dropdownCaret}>▼</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.addPoiButton}
+                onPress={() => setAddPoiVisible(true)}
+                accessibilityLabel="Yeni yer əlavə et"
+              >
+                <Text style={styles.addPoiButtonText}>+</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.locateButton}
+                onPress={goToCurrentLocation}
+                accessibilityLabel="Cari məkana qayıt"
+              >
+                <Text style={styles.locateButtonText}>📍</Text>
+              </TouchableOpacity>
+            </View>
+          }
+          bottom={
+            <View style={styles.listPane}>
+              {selectedPoi ? (
+                <SelectedPoiPanel poi={selectedPoi} onBack={clearSelectedPoi} />
+              ) : (
+                <>
+                  <View style={styles.listHeader}>
+                    <Text style={styles.listTitle}>{loading ? 'Yüklənir...' : listTitle}</Text>
+                    <TouchableOpacity
+                      onPress={() => router.push('/feed' as never)}
+                      hitSlop={8}
+                      accessibilityLabel="Paylaş"
+                    >
+                      <Text style={styles.shareHeaderButton}>📷 Paylaş</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {loading ? (
+                    <ActivityIndicator color={colors.accent} style={styles.loader} />
+                  ) : errorMessage ? (
+                    <Text style={styles.errorText}>{errorMessage}</Text>
+                  ) : (
+                    <FlatList
+                      ref={listRef}
+                      data={pois}
+                      keyExtractor={(item) => item.id}
+                      style={{ flex: 1 }}
+                      showsVerticalScrollIndicator={false}
+                      contentContainerStyle={styles.listContent}
+                      onScrollToIndexFailed={(info) => {
+                        setTimeout(() => {
+                          listRef.current?.scrollToIndex({
+                            index: info.index,
+                            animated: true,
+                            viewPosition: 0.1,
+                          });
+                        }, 100);
+                      }}
+                      renderItem={({ item }) => (
+                        <PoiListCard
+                          item={item}
+                          highlighted={highlightedPoiId === item.id}
+                          userLocation={userLocation}
+                          onPress={() => handleCardPress(item)}
+                        />
+                      )}
+                      ListEmptyComponent={
+                        <View style={styles.emptyWrap}>
+                          <Text style={styles.emptyTitle}>Bu filterlə yer tapılmadı 🔍</Text>
+                          <Text style={styles.emptySubtitle}>
+                            Fərqli rayon və ya kateqoriya seçin
+                          </Text>
+                        </View>
+                      }
+                    />
+                  )}
+                </>
+              )}
+            </View>
+          }
+        />
 
         <AddPoiModal
           visible={addPoiVisible}
@@ -1151,17 +1163,14 @@ function PoiListCard({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-  },
-  split: {
-    flex: 1,
+    backgroundColor: colors.bg,
   },
   mapPane: {
     flex: 1,
     position: 'relative',
   },
   map: {
-    flex: 1,
+    ...StyleSheet.absoluteFill,
   },
   locationDropdown: {
     position: 'absolute',
@@ -1170,13 +1179,14 @@ const styles = StyleSheet.create({
     zIndex: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
     elevation: 4,
     gap: 4,
     maxWidth: 140,
@@ -1205,12 +1215,12 @@ const styles = StyleSheet.create({
   dropdownLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#1F2937',
+    color: colors.text,
     flexShrink: 1,
   },
   dropdownCaret: {
     fontSize: 10,
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   pickerOverlay: {
     flex: 1,
@@ -1218,7 +1228,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   pickerSheet: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '70%',
@@ -1232,16 +1242,16 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: colors.border,
   },
   pickerTitle: {
     fontSize: 17,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   pickerClose: {
     fontSize: 18,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   pickerRow: {
@@ -1251,16 +1261,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: colors.chip,
   },
   pickerRowLabel: {
     fontSize: 14,
-    color: '#1F2937',
+    color: colors.text,
     fontWeight: '500',
   },
   pickerCheck: {
     fontSize: 16,
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '700',
   },
   userMarker: {
@@ -1270,7 +1280,7 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.accent,
     borderWidth: 3,
     borderColor: '#fff',
     shadowColor: '#000',
@@ -1283,8 +1293,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 10,
     fontWeight: '700',
-    color: '#1D4ED8',
-    backgroundColor: '#EFF6FF',
+    color: colors.accentPressed,
+    backgroundColor: colors.accentSoft,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
@@ -1302,12 +1312,12 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   poiMarkerBubbleHighlighted: {
-    borderColor: '#2563EB',
+    borderColor: colors.accent,
     borderWidth: 2,
     transform: [{ scale: 1.25 }],
   },
   poiMarkerBubbleAdmin: {
-    borderColor: '#DC2626',
+    borderColor: colors.danger,
     borderStyle: 'dashed',
   },
   adminBadge: {
@@ -1321,7 +1331,7 @@ const styles = StyleSheet.create({
     zIndex: 5,
   },
   adminBadgeText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.2,
@@ -1352,10 +1362,10 @@ const styles = StyleSheet.create({
   backButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#2563EB',
+    color: colors.accent,
   },
   categoryBadge: {
-    backgroundColor: '#EFF6FF',
+    backgroundColor: colors.accentSoft,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -1363,12 +1373,12 @@ const styles = StyleSheet.create({
   categoryBadgeText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#1D4ED8',
+    color: colors.accentPressed,
   },
   detailName: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 8,
   },
   detailMetaRow: {
@@ -1379,13 +1389,13 @@ const styles = StyleSheet.create({
   },
   detailMeta: {
     fontSize: 13,
-    color: '#4B5563',
+    color: colors.textSecondary,
     fontWeight: '500',
   },
   detailDescription: {
     fontSize: 13,
     lineHeight: 19,
-    color: '#6B7280',
+    color: colors.textSecondary,
     marginBottom: 14,
   },
   detailActions: {
@@ -1395,20 +1405,20 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   actionButton: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 10,
+    backgroundColor: colors.chip,
+    borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   actionButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#111827',
+    color: colors.text,
   },
   ratingPrompt: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
     marginBottom: 8,
   },
   starRow: {
@@ -1418,7 +1428,7 @@ const styles = StyleSheet.create({
   },
   starButton: {
     fontSize: 28,
-    color: '#D1D5DB',
+    color: colors.border,
   },
   starButtonFilled: {
     color: '#F59E0B',
@@ -1426,12 +1436,12 @@ const styles = StyleSheet.create({
   ratingError: {
     marginTop: 8,
     fontSize: 12,
-    color: '#B91C1C',
+    color: colors.dangerText,
   },
   shareHeaderButton: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   addPoiButton: {
     position: 'absolute',
@@ -1440,7 +1450,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -1471,16 +1481,14 @@ const styles = StyleSheet.create({
     elevation: 5,
     zIndex: 10,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
   },
   locateButtonText: {
     fontSize: 20,
   },
   listPane: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#E5E7EB',
+    backgroundColor: colors.surface,
     paddingTop: 8,
   },
   listHeader: {
@@ -1494,7 +1502,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginRight: 8,
   },
   listContent: {
@@ -1505,23 +1513,25 @@ const styles = StyleSheet.create({
     height: 80,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
+    backgroundColor: colors.surface,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
+    borderRadius: 24,
     paddingHorizontal: 10,
     paddingVertical: 8,
     marginBottom: 8,
   },
   cardHighlighted: {
-    borderColor: '#2563EB',
-    backgroundColor: '#EFF6FF',
+    backgroundColor: colors.accentSoft,
   },
   cardEmojiWrap: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1543,7 +1553,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   cardMetaRight: {
     alignItems: 'flex-end',
@@ -1559,30 +1569,30 @@ const styles = StyleSheet.create({
   ratingText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
   },
   distanceText: {
     marginTop: 2,
     fontSize: 11,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '500',
   },
   cardCategory: {
     marginTop: 2,
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   cardDescription: {
     marginTop: 2,
     fontSize: 12,
-    color: '#9CA3AF',
+    color: colors.textMuted,
   },
   loader: {
     marginTop: 24,
   },
   errorText: {
     marginHorizontal: 14,
-    color: '#B91C1C',
+    color: colors.dangerText,
     fontSize: 13,
   },
   emptyWrap: {
@@ -1591,14 +1601,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   emptyTitle: {
-    color: '#374151',
+    color: colors.chipText,
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
   },
   emptySubtitle: {
     marginTop: 6,
-    color: '#9CA3AF',
+    color: colors.textMuted,
     fontSize: 13,
     textAlign: 'center',
   },

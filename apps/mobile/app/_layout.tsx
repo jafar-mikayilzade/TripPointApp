@@ -14,6 +14,8 @@ import { getErrorMessage } from '../lib/errors';
 import { configureGoogleSignIn, signOutEverywhere } from '../lib/googleAuth';
 import { supabase } from '../lib/supabase';
 
+import { colors } from '../constants/theme';
+
 const SESSION_TIMEOUT_MS = 8000;
 
 export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
@@ -153,7 +155,7 @@ export default function RootLayout() {
   if (isLoading) {
     return (
       <View style={styles.loader}>
-        <ActivityIndicator size="large" color="#2563EB" />
+        <ActivityIndicator size="large" color={colors.accent} />
         <Text style={styles.loadingText}>Yüklənir...</Text>
       </View>
     );
@@ -181,33 +183,33 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     paddingHorizontal: 24,
   },
   loadingText: {
     marginTop: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   errorTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 8,
   },
   errorText: {
-    color: '#B91C1C',
+    color: colors.dangerText,
     textAlign: 'center',
     marginBottom: 16,
   },
   retryButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
   retryText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
   },
 });

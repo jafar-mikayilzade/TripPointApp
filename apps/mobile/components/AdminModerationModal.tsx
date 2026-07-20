@@ -24,6 +24,8 @@ import { confirmDelete } from '../lib/userContentDelete';
 import { supabase } from '../lib/supabase';
 import type { ListingReport, Poi, PoiPhoto } from '../types/database';
 
+import { colors } from '../constants/theme';
+
 type ModTab = 'pois' | 'photos' | 'reports';
 
 type ReportRow = ListingReport & {
@@ -241,7 +243,7 @@ export function AdminModerationModal({ visible, onClose }: AdminModerationModalP
           <View style={styles.header}>
             <Text style={styles.title}>Admin nəzarəti</Text>
             <Pressable onPress={onClose} hitSlop={12}>
-              <FontAwesome name="times" size={18} color="#6B7280" />
+              <FontAwesome name="times" size={18} color={colors.textSecondary} />
             </Pressable>
           </View>
 
@@ -268,7 +270,7 @@ export function AdminModerationModal({ visible, onClose }: AdminModerationModalP
           {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
 
           {loading ? (
-            <ActivityIndicator color="#2563EB" style={{ marginTop: 24 }} />
+            <ActivityIndicator color={colors.accent} style={{ marginTop: 24 }} />
           ) : (
             <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
               {tab === 'pois'
@@ -413,7 +415,7 @@ const styles = StyleSheet.create({
   },
   sheet: {
     maxHeight: '88%',
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 16,
@@ -427,7 +429,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
   },
   tabs: {
     flexDirection: 'row',
@@ -438,19 +440,19 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 8,
     borderRadius: 8,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
     alignItems: 'center',
   },
   tabActive: {
-    backgroundColor: '#111827',
+    backgroundColor: colors.text,
   },
   tabText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   tabTextActive: {
-    color: '#fff',
+    color: colors.textOnAccent,
   },
   list: {
     paddingBottom: 28,
@@ -458,32 +460,35 @@ const styles = StyleSheet.create({
   },
   empty: {
     textAlign: 'center',
-    color: '#9CA3AF',
+    color: colors.textMuted,
     marginTop: 28,
   },
   card: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
+    borderRadius: 24,
     padding: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
   },
   cardTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   meta: {
     marginTop: 4,
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   thumb: {
     width: '100%',
     height: 140,
     borderRadius: 8,
     marginBottom: 8,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
   },
   row: {
     flexDirection: 'row',
@@ -497,17 +502,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   approve: {
-    backgroundColor: '#16A34A',
+    backgroundColor: colors.success,
   },
   reject: {
-    backgroundColor: '#FEE2E2',
+    backgroundColor: colors.dangerSoft,
   },
   btnText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
   },
   btnTextDark: {
-    color: '#B91C1C',
+    color: colors.dangerText,
     fontWeight: '700',
   },
   linkBtn: {
@@ -515,13 +520,13 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   linkText: {
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '600',
     fontSize: 13,
   },
   error: {
-    backgroundColor: '#FEE2E2',
-    color: '#B91C1C',
+    backgroundColor: colors.dangerSoft,
+    color: colors.dangerText,
     padding: 8,
     borderRadius: 8,
     marginBottom: 8,
@@ -530,19 +535,19 @@ const styles = StyleSheet.create({
   editBox: {
     borderWidth: 1,
     borderColor: '#BFDBFE',
-    backgroundColor: '#EFF6FF',
+    backgroundColor: colors.accentSoft,
     borderRadius: 12,
     padding: 12,
     marginTop: 8,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.border,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
     marginTop: 8,
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
   },
   textArea: {
     minHeight: 72,

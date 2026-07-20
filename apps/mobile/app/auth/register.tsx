@@ -28,6 +28,8 @@ import {
 import { signInWithGoogle } from '../../lib/googleAuth';
 import { supabase } from '../../lib/supabase';
 
+import { colors } from '../../constants/theme';
+
 export default function RegisterScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const passwordBlockY = useRef(0);
@@ -389,7 +391,7 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
   },
   scrollContent: {
     flexGrow: 1,
@@ -401,17 +403,17 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 24,
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
   },
   title: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.textSecondary,
     marginBottom: 24,
   },
   passwordHints: {
@@ -425,7 +427,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   passwordHintsOk: {
-    backgroundColor: '#F0FDF4',
+    backgroundColor: colors.successSoft,
     borderColor: '#BBF7D0',
   },
   passwordHint: {
@@ -434,10 +436,10 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   passwordHintUnmet: {
-    color: '#DC2626',
+    color: colors.danger,
   },
   passwordHintMet: {
-    color: '#16A34A',
+    color: colors.success,
   },
   passwordFocusSpacer: {
     height: 220,
@@ -445,23 +447,23 @@ const styles = StyleSheet.create({
   confirmBody: {
     marginTop: 12,
     fontSize: 15,
-    color: '#374151',
+    color: colors.chipText,
     lineHeight: 22,
   },
   confirmEmail: {
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   confirmHint: {
     marginTop: 12,
     marginBottom: 20,
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.textSecondary,
     lineHeight: 20,
   },
   button: {
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 8,
@@ -473,7 +475,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   secondaryButtonText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '600',
     fontSize: 14,
   },
@@ -481,7 +483,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontSize: 15,
     fontWeight: '600',
   },
@@ -494,10 +496,10 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
   },
   dividerText: {
-    color: '#9CA3AF',
+    color: colors.textMuted,
     fontSize: 13,
   },
   googleButton: {
@@ -506,7 +508,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 12,
     borderWidth: 1.5,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingVertical: 14,
     backgroundColor: 'white',
@@ -518,7 +520,7 @@ const styles = StyleSheet.create({
   googleIcon: {
     width: 20,
     height: 20,
-    borderRadius: 10,
+    borderRadius: 16,
     backgroundColor: '#4285F4',
     justifyContent: 'center',
     alignItems: 'center',
@@ -531,16 +533,16 @@ const styles = StyleSheet.create({
   googleButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
   },
   footer: {
     marginTop: 20,
     textAlign: 'center',
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontSize: 14,
   },
   footerLink: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '600',
   },
 });

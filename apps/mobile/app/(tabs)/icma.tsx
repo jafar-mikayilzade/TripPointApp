@@ -24,6 +24,8 @@ import { getErrorMessage } from '../../lib/errors';
 import { supabase } from '../../lib/supabase';
 import type { Listing, ListingType, Profile } from '../../types/database';
 
+import { colors } from '../../constants/theme';
+
 type ListingFilter = 'all' | ListingType;
 
 const FILTERS: { id: ListingFilter; label: string }[] = [
@@ -34,9 +36,9 @@ const FILTERS: { id: ListingFilter; label: string }[] = [
 ];
 
 const TYPE_META: Record<ListingType, { label: string; emoji: string; color: string }> = {
-  carpool: { label: 'Carpool', emoji: '🚗', color: '#2196F3' },
-  tour: { label: 'Tur', emoji: '🗺', color: '#4CAF50' },
-  local_service: { label: 'Yerli xidmət', emoji: '🏔', color: '#FF6B35' },
+  carpool: { label: 'Carpool', emoji: '🚗', color: '#5B8DEF' },
+  tour: { label: 'Tur', emoji: '🗺', color: '#1B7A4E' },
+  local_service: { label: 'Yerli xidmət', emoji: '🏔', color: '#C96B45' },
 };
 
 function formatDate(value: string | null): string {
@@ -157,15 +159,18 @@ export default function IcmaScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1 }}
+      style={{ flex: 1, backgroundColor: colors.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
     >
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={styles.title}>İcma</Text>
+        <View style={styles.titleBlock}>
+          <Text style={styles.title}>İcma</Text>
+          <Text style={styles.subtitle}>Elanlar və turlar</Text>
+        </View>
         <Pressable style={styles.addButton} onPress={() => setCreateVisible(true)} hitSlop={8}>
-          <FontAwesome name="plus" size={16} color="#fff" />
+          <FontAwesome name="plus" size={18} color={colors.textOnAccent} />
         </Pressable>
       </View>
 
@@ -258,7 +263,15 @@ function ListingCard({
 
   return (
     <Pressable style={styles.card} onPress={onPress}>
-      <View style={[styles.badge, { backgroundColor: `${meta.color}22` }]}>
+      <View
+        style={[
+          styles.badge,
+          {
+            backgroundColor:
+              listing.type === 'tour' ? colors.successSoft : `${meta.color}18`,
+          },
+        ]}
+      >
         <Text style={[styles.badgeText, { color: meta.color }]}>
           {meta.emoji} {meta.label}
         </Text>
@@ -336,27 +349,45 @@ function SkeletonCard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 14,
+  },
+  titleBlock: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 12,
   },
   title: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#111827',
+    fontSize: 32,
+    fontWeight: '700',
+    color: colors.text,
+    letterSpacing: -0.6,
+  },
+  subtitle: {
+    marginTop: 2,
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.textSecondary,
   },
   addButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#2563EB',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: colors.accent,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    elevation: 6,
   },
   filterScroll: {
     flexGrow: 0,
@@ -369,25 +400,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   filterChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#F3F4F6',
-    marginRight: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: colors.chip,
+    marginRight: 8,
     alignSelf: 'center',
     flexGrow: 0,
   },
   filterChipSelected: {
-    backgroundColor: '#111827',
+    backgroundColor: colors.chipSelected,
   },
   filterText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
     lineHeight: 18,
   },
   filterTextSelected: {
-    color: '#fff',
+    color: colors.textOnAccent,
   },
   listPad: {
     paddingHorizontal: 16,
@@ -398,71 +429,75 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   card: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 12,
-    backgroundColor: '#fff',
+    borderRadius: 28,
+    padding: 18,
+    marginBottom: 14,
+    backgroundColor: colors.surface,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 4,
   },
   badge: {
     alignSelf: 'flex-start',
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    marginBottom: 12,
   },
   badgeText: {
     fontSize: 12,
     fontWeight: '700',
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 6,
+    letterSpacing: -0.2,
   },
   cardDescription: {
-    fontSize: 13,
-    color: '#6B7280',
-    lineHeight: 18,
-    marginBottom: 12,
+    fontSize: 14,
+    color: colors.textSecondary,
+    lineHeight: 20,
+    marginBottom: 14,
   },
   creatorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 10,
+    gap: 10,
+    marginBottom: 14,
   },
   avatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
   },
   avatarPlaceholder: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#E5E7EB',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.successSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitial: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.success,
   },
   creatorName: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#111827',
+    color: colors.text,
   },
   metaBlock: {
-    gap: 4,
+    gap: 8,
   },
   metaLine: {
-    fontSize: 12,
-    color: '#4B5563',
+    fontSize: 13,
+    color: colors.textSecondary,
   },
   emptyState: {
     alignItems: 'center',
@@ -473,38 +508,36 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#6B7280',
+    color: colors.textSecondary,
     marginBottom: 14,
   },
   emptyButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
   emptyButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 14,
   },
   errorText: {
     marginHorizontal: 16,
     marginBottom: 8,
-    color: '#B91C1C',
+    color: colors.dangerText,
     fontSize: 13,
   },
   skeletonCard: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 14,
+    borderRadius: 24,
     padding: 14,
     marginBottom: 12,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.surfaceMuted,
   },
   skeletonLine: {
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
   },
   skeletonFooter: {
     flexDirection: 'row',
@@ -516,6 +549,6 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
   },
 });

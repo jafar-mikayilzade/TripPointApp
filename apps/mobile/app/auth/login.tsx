@@ -22,6 +22,8 @@ import { validateEmail } from '../../lib/formValidation';
 import { signInWithGoogle } from '../../lib/googleAuth';
 import { supabase } from '../../lib/supabase';
 
+import { colors } from '../../constants/theme';
+
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -261,7 +263,7 @@ export default function LoginScreen() {
             disabled={resendLoading || loading}
           >
             {resendLoading ? (
-              <ActivityIndicator color="#2563EB" />
+              <ActivityIndicator color={colors.accent} />
             ) : (
               <Text style={styles.resendButtonText}>Təsdiq linkini yenidən göndər</Text>
             )}
@@ -310,26 +312,26 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     padding: 24,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg,
   },
   title: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.textSecondary,
     marginBottom: 24,
   },
   infoBanner: {
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.successSoft,
     borderRadius: 8,
     padding: 12,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#A7F3D0',
+    borderColor: colors.successSoft,
   },
   infoText: {
     color: '#065F46',
@@ -337,8 +339,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   button: {
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 8,
@@ -348,13 +350,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingVertical: 12,
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#BFDBFE',
-    backgroundColor: '#EFF6FF',
+    backgroundColor: colors.accentSoft,
   },
   resendButtonText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '700',
     fontSize: 14,
   },
@@ -362,7 +364,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontSize: 15,
     fontWeight: '600',
   },
@@ -375,10 +377,10 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
   },
   dividerText: {
-    color: '#9CA3AF',
+    color: colors.textMuted,
     fontSize: 13,
   },
   googleButton: {
@@ -387,7 +389,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 12,
     borderWidth: 1.5,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingVertical: 14,
     backgroundColor: 'white',
@@ -399,7 +401,7 @@ const styles = StyleSheet.create({
   googleIcon: {
     width: 20,
     height: 20,
-    borderRadius: 10,
+    borderRadius: 16,
     backgroundColor: '#4285F4',
     justifyContent: 'center',
     alignItems: 'center',
@@ -412,16 +414,16 @@ const styles = StyleSheet.create({
   googleButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
   },
   footer: {
     marginTop: 20,
     textAlign: 'center',
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontSize: 14,
   },
   footerLink: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '600',
   },
   linkButton: {
@@ -430,7 +432,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   linkText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '700',
     fontSize: 14,
   },

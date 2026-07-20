@@ -10,6 +10,8 @@ import {
   View,
 } from 'react-native';
 
+import { colors } from '../constants/theme';
+
 interface SimpleDateTimeFieldProps {
   value: Date;
   onChange: (next: Date) => void;
@@ -242,13 +244,13 @@ export function SimpleDateTimeField({
 const styles = StyleSheet.create({
   trigger: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
   triggerText: {
-    color: '#111827',
+    color: colors.text,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -258,7 +260,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 16,
@@ -267,7 +269,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 8,
   },
   sectionLabel: {
@@ -275,7 +277,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     fontSize: 13,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   row: {
     flexDirection: 'row',
@@ -287,18 +289,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 16,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
   },
   chipSelected: {
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.accent,
   },
   chipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
   },
   chipTextSelected: {
-    color: '#fff',
+    color: colors.textOnAccent,
   },
   actions: {
     flexDirection: 'row',
@@ -309,24 +311,24 @@ const styles = StyleSheet.create({
   cancelButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
+    borderColor: colors.border,
+    borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
   },
   cancelText: {
-    color: '#374151',
+    color: colors.chipText,
     fontWeight: '700',
   },
   applyButton: {
     flex: 1,
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
   },
   applyText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
   },
 });

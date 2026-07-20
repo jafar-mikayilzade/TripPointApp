@@ -3,7 +3,7 @@
 /** Mobile/DB PoiCategory + region-wide "all" */
 const APP_CATEGORIES = [
   'restaurant',
-  'cafe',
+  // cafe ignored for now (noisy / low tourism value)
   'hostel',
   'hotel',
   'home_restaurant',

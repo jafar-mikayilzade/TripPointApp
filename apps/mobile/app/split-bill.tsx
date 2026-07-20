@@ -32,6 +32,8 @@ import type {
   Profile,
 } from '../types/database';
 
+import { colors } from '../constants/theme';
+
 type MemberProfile = Pick<Profile, 'id' | 'full_name' | 'phone'>;
 
 type GroupCard = ExpenseGroup & {
@@ -545,14 +547,14 @@ export default function SplitBillScreen() {
             }}
             hitSlop={8}
           >
-            <FontAwesome name="chevron-left" size={14} color="#2563EB" />
+            <FontAwesome name="chevron-left" size={14} color={colors.accent} />
             <Text style={styles.backText}>Qruplar</Text>
           </Pressable>
         </View>
 
         {detailLoading || !group ? (
           <View style={styles.centered}>
-            <ActivityIndicator size="large" color="#2563EB" />
+            <ActivityIndicator size="large" color={colors.accent} />
           </View>
         ) : (
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -561,13 +563,13 @@ export default function SplitBillScreen() {
             <View
               style={[
                 styles.statusBadge,
-                { backgroundColor: group.status === 'settled' ? '#DCFCE7' : '#DBEAFE' },
+                { backgroundColor: group.status === 'settled' ? colors.successSoft : '#DBEAFE' },
               ]}
             >
               <Text
                 style={[
                   styles.statusText,
-                  { color: group.status === 'settled' ? '#166534' : '#1D4ED8' },
+                  { color: group.status === 'settled' ? '#166534' : colors.accentPressed },
                 ]}
               >
                 {statusLabel(group.status)}
@@ -622,7 +624,7 @@ export default function SplitBillScreen() {
                       remindOnWhatsApp(item.toName, item.toPhone, item.fromName, item.amount)
                     }
                   >
-                    <FontAwesome name="whatsapp" size={14} color="#fff" />
+                    <FontAwesome name="whatsapp" size={14} color={colors.textOnAccent} />
                     <Text style={styles.whatsappText}>WhatsApp-da xatırlat</Text>
                   </Pressable>
                 </View>
@@ -694,7 +696,7 @@ export default function SplitBillScreen() {
                 value={amount}
                 onChangeText={setAmount}
                 placeholder="0.00"
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor={colors.textMuted}
                 keyboardType="decimal-pad"
               />
 
@@ -704,7 +706,7 @@ export default function SplitBillScreen() {
                 value={description}
                 onChangeText={setDescription}
                 placeholder="Yemək, yanacaq..."
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor={colors.textMuted}
               />
 
               <View style={styles.modalActions}>
@@ -744,7 +746,7 @@ export default function SplitBillScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()} hitSlop={8}>
-          <FontAwesome name="chevron-left" size={14} color="#2563EB" />
+          <FontAwesome name="chevron-left" size={14} color={colors.accent} />
           <Text style={styles.backText}>Geri</Text>
         </Pressable>
         <Pressable style={styles.addButton} onPress={openCreateModal}>
@@ -759,7 +761,7 @@ export default function SplitBillScreen() {
 
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator size="large" color="#2563EB" />
+          <ActivityIndicator size="large" color={colors.accent} />
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -822,7 +824,7 @@ export default function SplitBillScreen() {
                 value={groupName}
                 onChangeText={setGroupName}
                 placeholder="Quba səfəri xərcləri"
-                placeholderTextColor="#9CA3AF"
+                placeholderTextColor={colors.textMuted}
               />
 
               <Text style={styles.label}>Listing (istəyə bağlı)</Text>
@@ -892,7 +894,7 @@ export default function SplitBillScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.bg,
   },
   centered: {
     flex: 1,
@@ -912,40 +914,40 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   backText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '600',
   },
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   addButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 13,
   },
   screenTitle: {
     fontSize: 24,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
     paddingHorizontal: 16,
     marginBottom: 8,
   },
   title: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
   },
   totalText: {
     marginTop: 6,
     fontSize: 16,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   statusBadge: {
     alignSelf: 'flex-start',
@@ -967,69 +969,75 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     fontSize: 16,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
   },
   card: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
+    borderRadius: 24,
     padding: 14,
     marginBottom: 10,
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
   },
   cardTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 4,
   },
   metaLine: {
     fontSize: 13,
-    color: '#4B5563',
+    color: colors.textSecondary,
     marginTop: 2,
   },
   emptyText: {
     textAlign: 'center',
-    color: '#9CA3AF',
+    color: colors.textMuted,
     marginTop: 24,
     fontSize: 14,
   },
   primaryButton: {
     marginTop: 14,
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
   },
   primaryButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
   },
   settleButton: {
     marginTop: 20,
-    backgroundColor: '#16A34A',
-    borderRadius: 10,
+    backgroundColor: colors.success,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
   },
   settleCard: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
+    borderRadius: 24,
     padding: 12,
     marginBottom: 10,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.surface,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
   },
   settleText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 8,
   },
   whatsappButton: {
     alignSelf: 'flex-start',
     backgroundColor: '#25D366',
-    borderRadius: 8,
+    borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 8,
     flexDirection: 'row',
@@ -1037,13 +1045,13 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   whatsappText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 12,
   },
   errorText: {
-    backgroundColor: '#FEE2E2',
-    color: '#B91C1C',
+    backgroundColor: colors.dangerSoft,
+    color: colors.dangerText,
     borderRadius: 8,
     padding: 10,
     marginTop: 10,
@@ -1060,7 +1068,7 @@ const styles = StyleSheet.create({
     paddingBottom: 80,
   },
   modalSheet: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 16,
@@ -1069,7 +1077,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 8,
   },
   label: {
@@ -1077,16 +1085,16 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     fontSize: 13,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 11,
     fontSize: 15,
-    color: '#111827',
+    color: colors.text,
   },
   chipWrap: {
     flexDirection: 'row',
@@ -1097,23 +1105,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 16,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
   },
   chipSelected: {
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.accent,
   },
   chipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
   },
   chipTextSelected: {
-    color: '#fff',
+    color: colors.textOnAccent,
   },
   mvpHint: {
     marginTop: 14,
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.textSecondary,
     lineHeight: 18,
   },
   modalActions: {
@@ -1125,13 +1133,13 @@ const styles = StyleSheet.create({
   secondaryButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 10,
+    borderColor: colors.border,
+    borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
   },
   secondaryButtonText: {
-    color: '#374151',
+    color: colors.chipText,
     fontWeight: '700',
   },
   flexOne: {
@@ -1146,7 +1154,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   deleteText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontWeight: '700',
     fontSize: 13,
   },

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text } from 'react-native';
 
+import { colors } from '../constants/theme';
+
 type ToastState = {
   message: string;
   visible: boolean;
@@ -65,15 +67,19 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
     bottom: 28,
-    backgroundColor: '#111827',
-    borderRadius: 12,
+    backgroundColor: colors.chipSelected,
+    borderRadius: 16,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 13,
     zIndex: 100,
     elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
   },
   toastText: {
-    color: '#F9FAFB',
+    color: colors.textOnAccent,
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',

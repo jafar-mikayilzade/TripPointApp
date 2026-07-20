@@ -4,6 +4,8 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { supabase } from '../lib/supabase';
 
+import { colors } from '../constants/theme';
+
 export default function Index() {
   const [ready, setReady] = useState(false);
   const [hasSession, setHasSession] = useState(false);
@@ -38,7 +40,7 @@ export default function Index() {
   if (!ready) {
     return (
       <View style={styles.loader}>
-        <ActivityIndicator size="large" color="#2563EB" />
+        <ActivityIndicator size="large" color={colors.accent} />
         <Text style={styles.text}>Yüklənir...</Text>
       </View>
     );
@@ -56,11 +58,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
   },
   text: {
     marginTop: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
 });

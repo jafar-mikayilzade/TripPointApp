@@ -15,6 +15,7 @@ import {
 } from 'react';
 import { StyleSheet, Text, View, type ViewProps, type ViewStyle } from 'react-native';
 
+import { colors } from '../constants/theme';
 /* Google Maps JS API — runtime types (no @types/google.maps dependency) */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GMaps = any;
@@ -260,7 +261,7 @@ export function Polyline({ coordinates, strokeColor, strokeWidth }: PolylineProp
     const line = new googleApi.maps.Polyline({
       map,
       path: coordinates.map((c) => ({ lat: c.latitude, lng: c.longitude })),
-      strokeColor: strokeColor ?? '#2563EB',
+      strokeColor: strokeColor ?? colors.accent,
       strokeWeight: strokeWidth ?? 3,
     });
 
@@ -483,7 +484,7 @@ export default MapView;
 const styles = StyleSheet.create({
   map: {
     flex: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
     overflow: 'hidden',
     position: 'relative',
     minHeight: 320,
@@ -494,7 +495,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   errorText: {
-    color: '#B91C1C',
+    color: colors.dangerText,
     fontWeight: '600',
     textAlign: 'center',
   },

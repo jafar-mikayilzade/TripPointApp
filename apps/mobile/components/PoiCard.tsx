@@ -4,6 +4,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatDistanceKm, getCategoryColor, getCategoryIcon, getCategoryLabel } from '../lib/poi';
 import type { Poi } from '../types/database';
 
+import { colors } from '../constants/theme';
+
 interface PoiCardProps {
   poi: Poi;
   distanceKm: number | null;
@@ -35,10 +37,13 @@ export function PoiCard({ poi, distanceKm, onPress }: PoiCardProps) {
 const styles = StyleSheet.create({
   card: {
     width: 168,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderRadius: 24,
+    backgroundColor: colors.surface,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
     marginRight: 12,
     overflow: 'hidden',
   },
@@ -50,7 +55,7 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
     marginTop: 10,
     marginHorizontal: 12,
   },
@@ -64,12 +69,12 @@ const styles = StyleSheet.create({
   category: {
     flex: 1,
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   distance: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#2563EB',
+    color: colors.accent,
     marginTop: 8,
     marginBottom: 12,
     marginHorizontal: 12,

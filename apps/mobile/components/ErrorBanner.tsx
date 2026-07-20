@@ -1,5 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
+import { colors } from '../constants/theme';
+
 export function ErrorBanner({ message }: { message: string }) {
   return (
     <View style={styles.box}>
@@ -10,13 +12,13 @@ export function ErrorBanner({ message }: { message: string }) {
 
 const styles = StyleSheet.create({
   box: {
-    backgroundColor: '#FEE2E2',
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: colors.dangerSoft,
+    borderRadius: 16,
+    padding: 14,
     marginBottom: 16,
   },
   text: {
-    color: '#B91C1C',
+    color: colors.dangerText,
     fontSize: 13,
   },
 });

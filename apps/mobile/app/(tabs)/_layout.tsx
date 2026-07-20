@@ -2,12 +2,26 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Tabs } from 'expo-router';
 import { Text, View } from 'react-native';
 
+import { colors, shadows } from '../../constants/theme';
+
 export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#2563EB',
-        tabBarInactiveTintColor: '#9CA3AF',
+        tabBarActiveTintColor: colors.accent,
+        tabBarInactiveTintColor: colors.tabInactive,
+        tabBarStyle: {
+          backgroundColor: colors.surface,
+          borderTopWidth: 0,
+          height: 60,
+          paddingBottom: 8,
+          paddingTop: 6,
+          ...shadows.bar,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '600',
+        },
       }}
     >
       <Tabs.Screen
@@ -33,19 +47,18 @@ export default function TabLayout() {
         options={{
           title: 'AI',
           tabBarLabel: 'AI',
-          tabBarActiveTintColor: '#7C3AED',
           tabBarIcon: ({ focused }) => (
             <View
               style={{
                 width: 32,
                 height: 32,
                 borderRadius: 16,
-                backgroundColor: focused ? '#7C3AED' : '#E5E7EB',
+                backgroundColor: focused ? colors.accentSoft : colors.chip,
                 justifyContent: 'center',
                 alignItems: 'center',
               }}
             >
-              <Text style={{ fontSize: 16, lineHeight: 20 }}>✨</Text>
+              <Text style={{ fontSize: 15, lineHeight: 18 }}>✨</Text>
             </View>
           ),
         }}

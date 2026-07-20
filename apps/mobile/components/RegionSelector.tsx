@@ -2,6 +2,8 @@ import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 
 import type { Region } from '../constants/regions';
 
+import { colors } from '../constants/theme';
+
 interface RegionSelectorProps {
   regions: Region[];
   selectedRegionId: string;
@@ -41,18 +43,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
     marginRight: 8,
   },
   chipSelected: {
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.chipSelected,
   },
   chipText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
   },
   chipTextSelected: {
-    color: '#fff',
+    color: colors.textOnAccent,
   },
 });

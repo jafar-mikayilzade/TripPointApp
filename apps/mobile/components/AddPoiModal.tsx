@@ -27,6 +27,8 @@ import { uploadImage } from '../lib/uploadImage';
 import type { PoiCategory } from '../types/database';
 import { PhoneField } from './PhoneField';
 
+import { colors } from '../constants/theme';
+
 interface AddPoiModalProps {
   visible: boolean;
   onClose: () => void;
@@ -247,7 +249,7 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
           <View style={styles.header}>
             <Text style={styles.title}>Yeni yer əlavə et</Text>
             <Pressable onPress={onClose} hitSlop={12} style={styles.closeButton}>
-              <FontAwesome name="times" size={18} color="#6B7280" />
+              <FontAwesome name="times" size={18} color={colors.textSecondary} />
             </Pressable>
           </View>
 
@@ -266,7 +268,7 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
               value={name}
               onChangeText={setName}
               placeholder="Yerin adı"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={colors.textMuted}
               editable={!loading}
             />
 
@@ -322,7 +324,7 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
               value={description}
               onChangeText={setDescription}
               placeholder="Qısa təsvir..."
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={colors.textMuted}
               multiline
               textAlignVertical="top"
               editable={!loading}
@@ -384,7 +386,7 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
                   value={mapsLink}
                   onChangeText={setMapsLink}
                   placeholder="https://maps.google.com/..."
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                   autoCapitalize="none"
                   autoCorrect={false}
                   editable={!loading}
@@ -414,7 +416,7 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
               ))}
               {imageUris.length < MAX_IMAGES ? (
                 <Pressable style={styles.imagePicker} onPress={handlePickImages} disabled={loading}>
-                  <FontAwesome name="camera" size={20} color="#9CA3AF" />
+                  <FontAwesome name="camera" size={20} color={colors.textMuted} />
                   <Text style={styles.imagePickerText}>Əlavə et</Text>
                 </Pressable>
               ) : null}
@@ -446,7 +448,7 @@ const styles = StyleSheet.create({
   },
   sheet: {
     maxHeight: '92%',
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingTop: 12,
@@ -461,7 +463,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   closeButton: {
     padding: 8,
@@ -474,22 +476,22 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
     marginBottom: 6,
     marginTop: 12,
   },
   required: {
-    color: '#DC2626',
+    color: colors.danger,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
+    borderColor: colors.border,
+    borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
-    color: '#111827',
-    backgroundColor: '#fff',
+    color: colors.text,
+    backgroundColor: colors.surface,
   },
   textArea: {
     minHeight: 88,
@@ -503,23 +505,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 16,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
     marginRight: 8,
   },
   chipSelected: {
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.accent,
   },
   chipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
   },
   chipTextSelected: {
-    color: '#fff',
+    color: colors.textOnAccent,
   },
   tabRow: {
     flexDirection: 'row',
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
     borderRadius: 10,
     padding: 4,
   },
@@ -530,15 +532,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tabActive: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
   },
   tabText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   tabTextActive: {
-    color: '#2563EB',
+    color: colors.accent,
   },
   miniMapWrap: {
     marginTop: 10,
@@ -551,27 +553,27 @@ const styles = StyleSheet.create({
   hint: {
     marginTop: 6,
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   linkBlock: {
     marginTop: 10,
     gap: 8,
   },
   parseButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
   },
   parseButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '600',
     fontSize: 13,
   },
   coordsPreview: {
     marginTop: 8,
     fontSize: 13,
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
   },
@@ -606,22 +608,22 @@ const styles = StyleSheet.create({
     height: 84,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.border,
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.surfaceMuted,
   },
   imagePickerText: {
     marginTop: 6,
     fontSize: 11,
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   submitButton: {
     marginTop: 20,
     marginBottom: 20,
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
   },
@@ -629,14 +631,14 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   submitButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontSize: 15,
     fontWeight: '600',
   },
   errorText: {
-    color: '#B91C1C',
+    color: colors.dangerText,
     fontSize: 13,
-    backgroundColor: '#FEE2E2',
+    backgroundColor: colors.dangerSoft,
     borderRadius: 8,
     padding: 10,
     marginBottom: 4,

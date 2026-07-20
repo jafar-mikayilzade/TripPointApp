@@ -37,6 +37,8 @@ import type {
   Profile,
 } from '../types/database';
 
+import { colors } from '../constants/theme';
+
 export type ListingWithCreator = Listing & {
   creator: Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'phone'> | null;
 };
@@ -66,15 +68,15 @@ const STATUS_META: Record<
   { label: string; background: string; color: string }
 > = {
   pending: { label: 'Gözləyir', background: '#FEF3C7', color: '#B45309' },
-  approved: { label: 'Təsdiqlənib', background: '#DCFCE7', color: '#166534' },
-  rejected: { label: 'Rədd edilib', background: '#FEE2E2', color: '#B91C1C' },
-  cancelled: { label: 'Ləğv edilib', background: '#F3F4F6', color: '#6B7280' },
+  approved: { label: 'Təsdiqlənib', background: colors.successSoft, color: '#166534' },
+  rejected: { label: 'Rədd edilib', background: colors.dangerSoft, color: colors.dangerText },
+  cancelled: { label: 'Ləğv edilib', background: colors.chip, color: colors.textSecondary },
 };
 
 const TYPE_META: Record<ListingType, { label: string; emoji: string; color: string }> = {
-  carpool: { label: 'Carpool', emoji: '🚗', color: '#2196F3' },
-  tour: { label: 'Tur', emoji: '🗺', color: '#4CAF50' },
-  local_service: { label: 'Yerli xidmət', emoji: '🏔', color: '#FF6B35' },
+  carpool: { label: 'Carpool', emoji: '🚗', color: '#5B8DEF' },
+  tour: { label: 'Tur', emoji: '🗺', color: '#1B7A4E' },
+  local_service: { label: 'Yerli xidmət', emoji: '🏔', color: '#C96B45' },
 };
 
 function formatDate(value: string | null): string {
@@ -491,7 +493,7 @@ export function ListingDetailModal({
       >
         <View style={styles.sheet}>
           <Pressable onPress={onClose} style={styles.closeButton} hitSlop={12}>
-            <FontAwesome name="times" size={18} color="#111827" />
+            <FontAwesome name="times" size={18} color={colors.text} />
           </Pressable>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
@@ -583,7 +585,7 @@ export function ListingDetailModal({
                 <Text style={styles.detailLine}>💰 Qiymət: {formatPrice(listing)}</Text>
                 <Text style={styles.detailLine}>🗺 Marşrut yerləri:</Text>
                 {loadingExtras ? (
-                  <ActivityIndicator color="#2563EB" style={styles.inlineLoader} />
+                  <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
                 ) : tourPois.length === 0 ? (
                   <Text style={styles.muted}>Yer siyahısı yoxdur</Text>
                 ) : (
@@ -622,7 +624,7 @@ export function ListingDetailModal({
                         value={joinMessage}
                         onChangeText={setJoinMessage}
                         placeholder="Mesajınızı yazın..."
-                        placeholderTextColor="#9CA3AF"
+                        placeholderTextColor={colors.textMuted}
                         multiline
                         editable={!joining}
                       />
@@ -683,7 +685,7 @@ export function ListingDetailModal({
                       value={reportDetails}
                       onChangeText={setReportDetails}
                       placeholder="Əlavə izah (istəyə bağlı)"
-                      placeholderTextColor="#9CA3AF"
+                      placeholderTextColor={colors.textMuted}
                       multiline
                       editable={!reporting}
                     />
@@ -711,7 +713,7 @@ export function ListingDetailModal({
                       setErrorMessage(null);
                     }}
                   >
-                    <FontAwesome name="flag" size={13} color="#B91C1C" />
+                    <FontAwesome name="flag" size={13} color={colors.dangerText} />
                     <Text style={styles.reportButtonText}>Şikayət et</Text>
                   </Pressable>
                 )}
@@ -734,7 +736,7 @@ export function ListingDetailModal({
                       disabled={deleting}
                     >
                       {deleting ? (
-                        <ActivityIndicator color="#DC2626" size="small" />
+                        <ActivityIndicator color={colors.danger} size="small" />
                       ) : (
                         <Text style={styles.deleteText}>Admin: elanı sil</Text>
                       )}
@@ -754,7 +756,7 @@ export function ListingDetailModal({
                   disabled={deleting}
                 >
                   {deleting ? (
-                    <ActivityIndicator color="#DC2626" size="small" />
+                    <ActivityIndicator color={colors.danger} size="small" />
                   ) : (
                     <Text style={styles.deleteText}>Elanı sil</Text>
                   )}
@@ -776,7 +778,7 @@ export function ListingDetailModal({
                 {showParticipants ? (
                   <View style={styles.participantsBlock}>
                     {loadingParticipants ? (
-                      <ActivityIndicator color="#2563EB" />
+                      <ActivityIndicator color={colors.accent} />
                     ) : participants.length === 0 ? (
                       <Text style={styles.muted}>Hələ iştirakçı yoxdur</Text>
                     ) : (
@@ -862,14 +864,14 @@ export function ListingDetailModal({
                   value={editTitle}
                   onChangeText={setEditTitle}
                   placeholder="Başlıq"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                 />
                 <TextInput
                   style={styles.messageInput}
                   value={editDescription}
                   onChangeText={setEditDescription}
                   placeholder="Təsvir"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.textMuted}
                   multiline
                 />
                 <Pressable
@@ -903,7 +905,7 @@ const styles = StyleSheet.create({
   },
   sheet: {
     maxHeight: '90%',
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingTop: 12,
@@ -917,7 +919,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -940,7 +942,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
     marginBottom: 12,
     paddingRight: 36,
   },
@@ -959,14 +961,14 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitial: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   creatorInfo: {
     flex: 1,
@@ -974,7 +976,7 @@ const styles = StyleSheet.create({
   creatorName: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   ratingRow: {
     flexDirection: 'row',
@@ -984,7 +986,7 @@ const styles = StyleSheet.create({
   },
   ratingText: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   whatsappButton: {
     flexDirection: 'row',
@@ -992,12 +994,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     backgroundColor: '#25D366',
-    borderRadius: 10,
+    borderRadius: 16,
     paddingVertical: 12,
     marginBottom: 16,
   },
   whatsappButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 14,
   },
@@ -1007,36 +1009,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     backgroundColor: '#0F766E',
-    borderRadius: 10,
+    borderRadius: 16,
     paddingVertical: 12,
     marginBottom: 16,
   },
   splitBillButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 14,
   },
   sectionLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#9CA3AF',
+    color: colors.textMuted,
     textTransform: 'uppercase',
     marginBottom: 8,
   },
   detailLine: {
     fontSize: 14,
-    color: '#374151',
+    color: colors.chipText,
     marginBottom: 6,
   },
   poiItem: {
     fontSize: 13,
-    color: '#4B5563',
+    color: colors.textSecondary,
     marginLeft: 8,
     marginBottom: 4,
   },
   muted: {
     fontSize: 13,
-    color: '#9CA3AF',
+    color: colors.textMuted,
     marginBottom: 8,
   },
   inlineLoader: {
@@ -1049,24 +1051,24 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   joinButton: {
-    backgroundColor: '#16A34A',
-    borderRadius: 10,
+    backgroundColor: colors.success,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
   },
   joinButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 15,
   },
   disabledButton: {
-    backgroundColor: '#E5E7EB',
-    borderRadius: 10,
+    backgroundColor: colors.border,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
   },
   disabledButtonText: {
-    color: '#9CA3AF',
+    color: colors.textMuted,
     fontWeight: '700',
     fontSize: 15,
   },
@@ -1075,22 +1077,22 @@ const styles = StyleSheet.create({
   },
   messageInput: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.border,
     borderRadius: 10,
     minHeight: 80,
     paddingHorizontal: 12,
     paddingVertical: 10,
     textAlignVertical: 'top',
-    color: '#111827',
+    color: colors.text,
   },
   primaryButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 10,
+    backgroundColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 13,
     alignItems: 'center',
   },
   primaryButtonText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 14,
   },
@@ -1099,13 +1101,13 @@ const styles = StyleSheet.create({
   },
   ownerButton: {
     borderWidth: 1,
-    borderColor: '#2563EB',
-    borderRadius: 10,
+    borderColor: colors.accent,
+    borderRadius: 16,
     paddingVertical: 13,
     alignItems: 'center',
   },
   ownerButtonText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '700',
     fontSize: 14,
   },
@@ -1114,7 +1116,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   deleteText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontWeight: '700',
     fontSize: 14,
   },
@@ -1126,11 +1128,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FECACA',
     backgroundColor: '#FFF7F7',
-    borderRadius: 10,
+    borderRadius: 16,
     paddingVertical: 12,
   },
   reportButtonText: {
-    color: '#B91C1C',
+    color: colors.dangerText,
     fontWeight: '700',
     fontSize: 14,
   },
@@ -1149,33 +1151,33 @@ const styles = StyleSheet.create({
   },
   reasonChip: {
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#fff',
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     borderRadius: 8,
     paddingVertical: 8,
     paddingHorizontal: 10,
   },
   reasonChipSelected: {
-    borderColor: '#B91C1C',
-    backgroundColor: '#FEE2E2',
+    borderColor: colors.dangerText,
+    backgroundColor: colors.dangerSoft,
   },
   reasonChipText: {
-    color: '#374151',
+    color: colors.chipText,
     fontSize: 13,
     fontWeight: '600',
   },
   reasonChipTextSelected: {
-    color: '#B91C1C',
+    color: colors.dangerText,
   },
   reportSubmit: {
-    backgroundColor: '#B91C1C',
+    backgroundColor: colors.dangerText,
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
   },
   cancelReport: {
     textAlign: 'center',
-    color: '#6B7280',
+    color: colors.textSecondary,
     fontWeight: '600',
     marginTop: 4,
   },
@@ -1189,7 +1191,7 @@ const styles = StyleSheet.create({
   },
   participantRow: {
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 10,
     padding: 12,
     flexDirection: 'row',
@@ -1205,14 +1207,14 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   participantAvatarInitial: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#374151',
+    color: colors.chipText,
   },
   participantInfo: {
     flex: 1,
@@ -1220,11 +1222,11 @@ const styles = StyleSheet.create({
   participantName: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text,
   },
   participantMessage: {
     fontSize: 12,
-    color: '#4B5563',
+    color: colors.textSecondary,
     marginTop: 4,
   },
   statusBadge: {
@@ -1245,8 +1247,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   approveButton: {
-    borderRadius: 8,
-    backgroundColor: '#DCFCE7',
+    borderRadius: 16,
+    backgroundColor: colors.successSoft,
     paddingHorizontal: 12,
     paddingVertical: 8,
     minWidth: 96,
@@ -1258,26 +1260,26 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   rejectButton: {
-    borderRadius: 8,
-    backgroundColor: '#FEE2E2',
+    borderRadius: 16,
+    backgroundColor: colors.dangerSoft,
     paddingHorizontal: 12,
     paddingVertical: 8,
     minWidth: 96,
     alignItems: 'center',
   },
   rejectButtonText: {
-    color: '#B91C1C',
+    color: colors.dangerText,
     fontWeight: '700',
     fontSize: 13,
   },
   errorText: {
     marginTop: 12,
-    color: '#B91C1C',
+    color: colors.dangerText,
     fontSize: 13,
   },
   successText: {
     marginTop: 12,
-    color: '#15803D',
+    color: colors.success,
     fontSize: 13,
     fontWeight: '600',
   },

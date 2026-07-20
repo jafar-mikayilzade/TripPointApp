@@ -14,6 +14,8 @@ import { ADMIN_POI_CATEGORIES, type GoogleMapPoiPayload } from '../lib/adminMap'
 import { getCategoryEmoji, getCategoryLabel } from '../lib/categoryUtils';
 import type { PoiCategory } from '../types/database';
 
+import { colors } from '../constants/theme';
+
 type Props = {
   visible: boolean;
   poi: GoogleMapPoiPayload | null;
@@ -58,7 +60,7 @@ export function AdminPoiCategoryModal({
             value={name}
             onChangeText={setName}
             placeholder="Məs: Qız Qalası"
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor={colors.textMuted}
             editable={!loading}
             autoFocus
           />
@@ -113,7 +115,12 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
     borderRadius: 16,
     padding: 16,
     maxHeight: '85%',
@@ -121,30 +128,30 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text,
   },
   coords: {
     marginTop: 6,
     fontSize: 12,
-    color: '#9CA3AF',
+    color: colors.textMuted,
   },
   label: {
     marginTop: 16,
     marginBottom: 8,
     fontSize: 13,
     fontWeight: '700',
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   nameInput: {
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
     fontWeight: '600',
-    color: '#111827',
-    backgroundColor: '#F9FAFB',
+    color: colors.text,
+    backgroundColor: colors.surfaceMuted,
   },
   list: {
     maxHeight: 240,
@@ -161,12 +168,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#F9FAFB',
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
   },
   optionSelected: {
-    borderColor: '#2563EB',
-    backgroundColor: '#EFF6FF',
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
   },
   optionEmoji: {
     fontSize: 16,
@@ -174,10 +181,10 @@ const styles = StyleSheet.create({
   optionText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.chipText,
   },
   optionTextSelected: {
-    color: '#1D4ED8',
+    color: colors.accentPressed,
   },
   actions: {
     flexDirection: 'row',
@@ -188,24 +195,24 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     paddingVertical: 12,
     alignItems: 'center',
   },
   cancelText: {
     fontWeight: '700',
-    color: '#6B7280',
+    color: colors.textSecondary,
   },
   confirmBtn: {
     flex: 1,
     borderRadius: 10,
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.accent,
     paddingVertical: 12,
     alignItems: 'center',
   },
   confirmText: {
     fontWeight: '700',
-    color: '#fff',
+    color: colors.textOnAccent,
   },
   disabled: {
     opacity: 0.65,

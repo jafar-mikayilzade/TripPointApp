@@ -7,19 +7,19 @@ import { getCategoryEmoji as getCategoryEmojiFn } from './categoryUtils';
 export { getCategoryEmoji } from './categoryUtils';
 
 export const CATEGORY_COLORS: Record<PoiCategory, string> = {
-  restaurant: '#FF6B35',
-  cafe: '#FF6B35',
-  hotel: '#2196F3',
-  hostel: '#2196F3',
-  home_restaurant: '#2196F3',
-  guesthouse: '#2196F3',
-  nature: '#4CAF50',
-  waterfall: '#4CAF50',
-  mountain: '#4CAF50',
-  lake: '#4CAF50',
-  historical: '#795548',
-  monument: '#795548',
-  other: '#9E9E9E',
+  restaurant: '#E07A4F',
+  cafe: '#D4A017',
+  hotel: '#5B8DEF',
+  hostel: '#6B9AF0',
+  home_restaurant: '#E07A4F',
+  guesthouse: '#7AA2F7',
+  nature: '#3D9B6E',
+  waterfall: '#3D9B6E',
+  mountain: '#5A8F6C',
+  lake: '#4A90A4',
+  historical: '#8B6F5C',
+  monument: '#8B6F5C',
+  other: '#9A9AA0',
 };
 
 export const CATEGORY_LABELS: Record<PoiCategory, string> = {
@@ -90,7 +90,7 @@ export const CATEGORY_FILTERS: {
   categories: PoiCategory[] | null;
 }[] = [
   { id: 'all', label: 'Hamısı', categories: null },
-  { id: 'restaurant', label: 'Restoran', categories: ['restaurant', 'cafe'] },
+  { id: 'restaurant', label: 'Restoran', categories: ['restaurant'] },
   {
     id: 'hotel',
     label: 'Otel',
@@ -161,7 +161,6 @@ export function parseCoordsFromGoogleMapsUrl(url: string): { lat: number; lng: n
 
 export const POI_CATEGORY_OPTIONS: { value: PoiCategory; label: string }[] = [
   { value: 'restaurant', label: 'Restoran' },
-  { value: 'cafe', label: 'Kafe' },
   { value: 'hotel', label: 'Otel' },
   { value: 'hostel', label: 'Hostel' },
   { value: 'home_restaurant', label: 'Ev restoranı' },

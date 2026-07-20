@@ -47,7 +47,6 @@ export const HOME_CATEGORY_FILTERS: {
 }[] = [
   { id: 'all', label: 'Hamısı', emoji: '🗺️' },
   { id: 'restaurant', label: 'Restoran', emoji: '🍽️' },
-  { id: 'cafe', label: 'Kafe', emoji: '☕' },
   { id: 'hotel', label: 'Otel', emoji: '🏨' },
   { id: 'hostel', label: 'Hostel', emoji: '🛏️' },
   { id: 'home_restaurant', label: 'Ev restoranı', emoji: '🏠' },

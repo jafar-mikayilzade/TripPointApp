@@ -2,6 +2,8 @@ import { useState, type ReactNode } from 'react';
 import type { TextInputProps, StyleProp, ViewStyle } from 'react-native';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { colors } from '../constants/theme';
+
 interface FormFieldProps extends TextInputProps {
   label: string;
   /** Parol sahəsi üçün Göstər/Gizlət düyməsi */
@@ -48,7 +50,7 @@ export function FormField({
             error ? styles.inputError : null,
             style,
           ]}
-          placeholderTextColor="#9CA3AF"
+          placeholderTextColor={colors.textMuted}
           {...inputProps}
           {...(disablePasswordSuggestions
             ? {
@@ -87,7 +89,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 13,
-    color: '#374151',
+    color: colors.chipText,
     marginBottom: 6,
     fontWeight: '500',
     flexShrink: 1,
@@ -100,16 +102,17 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
+    borderColor: colors.borderSoft,
+    borderRadius: 16,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 13,
     fontSize: 15,
-    color: '#111827',
+    color: colors.text,
     width: '100%',
+    backgroundColor: colors.surface,
   },
   inputError: {
-    borderColor: '#DC2626',
+    borderColor: colors.danger,
   },
   inputWithToggle: {
     paddingRight: 72,
@@ -124,14 +127,14 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   toggleText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontSize: 13,
     fontWeight: '700',
   },
   errorText: {
     marginTop: 6,
     fontSize: 12,
-    color: '#DC2626',
+    color: colors.danger,
     lineHeight: 16,
     flexShrink: 1,
   },
