@@ -54,6 +54,9 @@ export function getErrorMessage(error: unknown): string {
   if (msg.includes('column') && msg.includes('does not exist')) {
     return 'Sistem xətası. Adminə bildirin';
   }
+  if (/Could not find the '[^']+' column/i.test(msg)) {
+    return 'Verilənlər bazası sahəsi tapılmadı. Yeniləmə/migration lazımdır.';
+  }
   if (msg.includes('permission denied') || msg.includes('row-level security')) {
     return 'Bu əməliyyat üçün icazəniz yoxdur';
   }

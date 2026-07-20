@@ -1,48 +1,47 @@
 /**
- * Soft minimal design tokens (icma-inspired).
- * Soft grey canvas, white elevated cards, calm blue accent, soft green badges.
- * Swap this file (or revert StyleSheet imports) to undo the redesign.
+ * Calm weekend travel palette — soft, quiet, low-effort.
+ * Soft grey canvas, white cards, gentle blue accent.
+ * Revert this file (+ screen StyleSheets) to undo the calm redesign.
  */
 
 export const colors = {
-  /** Soft canvas — clearly greyer than pure white so redesign is visible */
-  bg: '#E9EAEE',
+  /** Soft mist canvas */
+  bg: '#ECEEF2',
   surface: '#FFFFFF',
-  surfaceMuted: '#F4F4F7',
-  text: '#111111',
-  textSecondary: '#8E8E93',
-  textMuted: '#AEAEB2',
+  surfaceMuted: '#F5F6F8',
+  text: '#1A1A1C',
+  textSecondary: '#8A8A8E',
+  textMuted: '#B0B0B5',
   textOnAccent: '#FFFFFF',
-  border: '#E2E3E8',
-  borderSoft: '#ECECF0',
-  /** Soft blue — primary actions / active tab */
-  accent: '#3B82F6',
-  accentPressed: '#2563EB',
-  accentSoft: '#E8F1FF',
-  /** Selected filter chips (dark capsule like reference) */
-  chip: '#E4E5EA',
+  border: '#E6E7EB',
+  borderSoft: '#EEEFF2',
+  /** Calm sky blue */
+  accent: '#4A8FE8',
+  accentPressed: '#3B7BD4',
+  accentSoft: '#EAF2FC',
+  /** Quiet chips */
+  chip: '#E8E9ED',
   chipSelected: '#2C2C2E',
-  chipText: '#1C1C1E',
+  chipText: '#3A3A3C',
   chipTextSelected: '#FFFFFF',
-  /** Soft green badges */
-  success: '#1B7A4E',
-  successSoft: '#E2F1E6',
-  warning: '#B45309',
-  warningSoft: '#FEF3C7',
-  danger: '#DC2626',
-  dangerSoft: '#FEE2E2',
-  dangerText: '#B91C1C',
-  tabInactive: '#AEAEB2',
-  overlay: 'rgba(17, 17, 17, 0.4)',
+  success: '#3D8B6E',
+  successSoft: '#E8F4EE',
+  warning: '#C47A2C',
+  warningSoft: '#FFF6E8',
+  danger: '#D45B5B',
+  dangerSoft: '#FCECEC',
+  dangerText: '#B44545',
+  tabInactive: '#B0B0B5',
+  overlay: 'rgba(26, 26, 28, 0.35)',
   whatsapp: '#25D366',
-  skeleton: '#E8E8ED',
-  mapAccent: '#3B82F6',
+  skeleton: '#E8E9ED',
+  mapAccent: '#4A8FE8',
 } as const;
 
 export const radii = {
   sm: 12,
   md: 16,
-  lg: 24,
+  lg: 22,
   xl: 28,
   pill: 999,
 } as const;
@@ -56,40 +55,39 @@ export const space = {
   xxl: 24,
 } as const;
 
-/** Soft, diffused elevation — no harsh borders needed */
 export const shadows = {
   card: {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 3,
+    shadowColor: '#1A1A1C',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
+    elevation: 2,
   },
   fab: {
-    shadowColor: '#3B82F6',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.28,
+    shadowColor: '#4A8FE8',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.22,
     shadowRadius: 10,
-    elevation: 6,
+    elevation: 5,
   },
   bar: {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: -2 },
+    shadowColor: '#1A1A1C',
+    shadowOffset: { width: 0, height: -1 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
-    elevation: 8,
+    elevation: 6,
   },
 } as const;
 
 export const typography = {
   title: {
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: '700' as const,
     color: colors.text,
-    letterSpacing: -0.4,
+    letterSpacing: -0.5,
   },
   heading: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700' as const,
     color: colors.text,
     letterSpacing: -0.2,

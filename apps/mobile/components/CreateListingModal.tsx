@@ -15,12 +15,17 @@ import {
 import { DEFAULT_REGION_ID, REGIONS } from '../constants/regions';
 import { getErrorMessage } from '../lib/errors';
 import {
+  FIELD_EMPTY_PLACEHOLDER,
   buildCarpoolTitle,
   formatAzPhoneE164,
+  parsePositiveNumber,
+  sanitizeAzPhoneLocalInput,
   sanitizeLettersOnlyInput,
+  sanitizePositiveIntInput,
   validateAzPhone,
   validateLettersOnlyField,
 } from '../lib/formValidation';
+import { isBeforeSelectableHour, nextSelectableHour } from '../lib/listingSchedule';
 import { supabase } from '../lib/supabase';
 import type {
   ListingPriceType,
@@ -38,6 +43,13 @@ interface CreateListingModalProps {
   onClose: () => void;
   onCreated: () => void;
 }
+
+type FieldErrors = Partial<
+  Record<
+    'title' | 'origin' | 'destination' | 'phone' | 'price' | 'capacity' | 'departure' | 'submit',
+    string
+  >
+>;
 
 const TYPE_CARDS: { type: ListingType; emoji: string; title: string; subtitle: string }[] = [
   {
@@ -83,8 +95,9 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
   const [title, setTitle] = useState('');
   const [originText, setOriginText] = useState('');
   const [destinationText, setDestinationText] = useState('');
-  const [departureAt, setDepartureAt] = useState(new Date(Date.now() + 24 * 60 * 60 * 1000));
+  const [departureAt, setDepartureAt] = useState(() => nextSelectableHour());
   const [capacity, setCapacity] = useState(3);
+  const [capacityText, setCapacityText] = useState('');
   const [price, setPrice] = useState('');
   const [isFree, setIsFree] = useState(false);
   const [contactPhone, setContactPhone] = useState('');
@@ -94,13 +107,16 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
   const [approvedPois, setApprovedPois] = useState<Poi[]>([]);
   const [loadingPois, setLoadingPois] = useState(false);
   const [poiPickerOpen, setPoiPickerOpen] = useState(false);
+  const [regionOpen, setRegionOpen] = useState(false);
+  const [dateOpen, setDateOpen] = useState(false);
   const [poiPage, setPoiPage] = useState(0);
   const [serviceCategory, setServiceCategory] = useState<LocalServiceCategory>('private_guide');
   const [priceType, setPriceType] = useState<ListingPriceType>('per_person');
   const [isRecurring, setIsRecurring] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [minDeparture, setMinDeparture] = useState(() => nextSelectableHour());
 
   useEffect(() => {
     if (!visible) {
@@ -112,8 +128,11 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     setTitle('');
     setOriginText('');
     setDestinationText('');
-    setDepartureAt(new Date(Date.now() + 24 * 60 * 60 * 1000));
+    const soonest = nextSelectableHour();
+    setMinDeparture(soonest);
+    setDepartureAt(soonest);
     setCapacity(3);
+    setCapacityText('');
     setPrice('');
     setIsFree(false);
     setContactPhone('');
@@ -121,11 +140,13 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     setDescription('');
     setSelectedPoiIds([]);
     setPoiPickerOpen(false);
+    setRegionOpen(false);
+    setDateOpen(false);
     setPoiPage(0);
     setServiceCategory('private_guide');
     setPriceType('per_person');
     setIsRecurring(false);
-    setErrorMessage(null);
+    setFieldErrors({});
     setLoading(false);
   }, [visible]);
 
@@ -139,7 +160,8 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
   }, [listingType, originText, destinationText]);
 
   useEffect(() => {
-    if (!visible || listingType !== 'tour' || step !== 2 || !poiPickerOpen) {
+    const needsRoute = listingType === 'tour' || listingType === 'carpool';
+    if (!visible || !needsRoute || step !== 2 || !poiPickerOpen) {
       return;
     }
 
@@ -159,7 +181,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
       }
 
       if (error) {
-        setErrorMessage(getErrorMessage(error));
+        setFieldErrors((prev) => ({ ...prev, submit: getErrorMessage(error) }));
         setApprovedPois([]);
       } else {
         setApprovedPois(data ?? []);
@@ -178,6 +200,9 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     setSelectedPoiIds([]);
   }, [regionId]);
 
+  const regionLabel = REGIONS.find((item) => item.id === regionId)?.label ?? regionId;
+  const departureLabel = formatDepartureLabel(departureAt);
+
   const poiTotalPages = Math.max(1, Math.ceil(approvedPois.length / POI_PAGE_SIZE));
   const pagedPois = useMemo(() => {
     const start = poiPage * POI_PAGE_SIZE;
@@ -185,11 +210,10 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
   }, [approvedPois, poiPage]);
 
   const parsedPrice = useMemo(() => {
-    if (isFree || priceType === 'free') {
+    if (isFree || priceType === 'free' || priceType === 'negotiable') {
       return null;
     }
-    const value = Number(price.replace(',', '.'));
-    return Number.isFinite(value) ? value : null;
+    return parsePositiveNumber(price);
   }, [isFree, price, priceType]);
 
   function resolvePriceFields(): {
@@ -220,13 +244,28 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     return { price: parsedPrice, price_type: safeType };
   }
 
+  function clearFieldError(key: keyof FieldErrors) {
+    setFieldErrors((prev) => {
+      if (!prev[key]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
   function selectType(type: ListingType) {
+    const soonest = nextSelectableHour();
+    setMinDeparture(soonest);
+    setDepartureAt(soonest);
     setListingType(type);
     setStep(2);
-    setErrorMessage(null);
+    setFieldErrors({});
     if (type === 'tour') {
       setPriceType('per_person');
       setIsFree(false);
+      setCapacityText('');
     }
     if (type === 'local_service') {
       setPriceType('per_person');
@@ -239,74 +278,75 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     );
   }
 
-  async function handleSubmit() {
+  function collectFieldErrors(): FieldErrors {
+    const errors: FieldErrors = {};
     if (!listingType) {
-      setErrorMessage('Tip seçin.');
-      return;
+      errors.submit = 'Tip seçin.';
+      return errors;
     }
 
-    setErrorMessage(null);
-
-    let resolvedTitle = title.trim();
+    if (
+      (listingType === 'carpool' || listingType === 'tour') &&
+      isBeforeSelectableHour(departureAt)
+    ) {
+      errors.departure = 'past';
+    }
 
     if (listingType === 'carpool') {
-      const originError = validateLettersOnlyField(originText, 'Haradan');
-      if (originError) {
-        setErrorMessage(originError);
-        return;
+      if (validateLettersOnlyField(originText, 'Haradan')) {
+        errors.origin = 'empty';
       }
-      const destinationError = validateLettersOnlyField(destinationText, 'Haraya');
-      if (destinationError) {
-        setErrorMessage(destinationError);
-        return;
-      }
-      resolvedTitle = buildCarpoolTitle(originText, destinationText);
-      if (!resolvedTitle) {
-        setErrorMessage('Haradan və Haraya sahələrini doldurun.');
-        return;
+      if (validateLettersOnlyField(destinationText, 'Haraya')) {
+        errors.destination = 'empty';
       }
       if (!isFree && parsedPrice === null) {
-        setErrorMessage('Qiymət daxil edin və ya Pulsuz seçin.');
-        return;
+        errors.price = 'empty';
       }
-      const phoneError = validateAzPhone(contactPhone, true);
-      if (phoneError) {
-        setErrorMessage(phoneError);
-        return;
+      if (validateAzPhone(contactPhone, true)) {
+        errors.phone = 'empty';
       }
     }
 
     if (listingType === 'tour') {
-      const titleError = validateLettersOnlyField(title, 'Başlıq');
-      if (titleError) {
-        setErrorMessage(titleError);
-        return;
+      if (validateLettersOnlyField(title, 'Başlıq')) {
+        errors.title = 'empty';
       }
       if (parsedPrice === null) {
-        setErrorMessage('Qiymət daxil edin.');
-        return;
+        errors.price = 'empty';
       }
-      if (capacity < 1) {
-        setErrorMessage('Nəfər sayı ən azı 1 olmalıdır.');
-        return;
+      const tourCapacity = Number(capacityText);
+      if (!capacityText || !Number.isFinite(tourCapacity) || tourCapacity <= 0) {
+        errors.capacity = 'empty';
+      }
+      if (validateAzPhone(contactPhone, true)) {
+        errors.phone = 'empty';
       }
     }
 
     if (listingType === 'local_service') {
-      const titleError = validateLettersOnlyField(title, 'Başlıq');
-      if (titleError) {
-        setErrorMessage(titleError);
-        return;
+      if (validateLettersOnlyField(title, 'Başlıq')) {
+        errors.title = 'empty';
       }
       if (priceType !== 'free' && priceType !== 'negotiable' && parsedPrice === null) {
-        setErrorMessage('Qiymət daxil edin.');
-        return;
+        errors.price = 'empty';
       }
-      const phoneError = validateAzPhone(contactPhone, true);
-      if (phoneError) {
-        setErrorMessage(phoneError);
-        return;
+      if (validateAzPhone(contactPhone, true)) {
+        errors.phone = 'empty';
       }
+    }
+
+    return errors;
+  }
+
+  async function handleSubmit() {
+    if (!listingType) {
+      return;
+    }
+
+    const errors = collectFieldErrors();
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      return;
     }
 
     setLoading(true);
@@ -318,20 +358,38 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
       } = await supabase.auth.getUser();
 
       if (userError || !user) {
-        setErrorMessage(userError ? getErrorMessage(userError) : 'Daxil olmaq lazımdır.');
+        setFieldErrors({
+          submit: userError ? getErrorMessage(userError) : 'Daxil olmaq lazımdır.',
+        });
         return;
       }
 
-      const capacityValue = listingType === 'local_service' ? null : capacity;
-      const { price: priceValue, price_type: priceTypeValue } = resolvePriceFields();
+      let resolvedTitle = title.trim();
+      if (listingType === 'carpool') {
+        resolvedTitle = buildCarpoolTitle(originText, destinationText);
+      }
 
+      const capacityValue =
+        listingType === 'local_service'
+          ? null
+          : listingType === 'tour'
+            ? Number(capacityText)
+            : capacity;
+      const { price: priceValue, price_type: priceTypeValue } = resolvePriceFields();
       const formattedPhone = formatAzPhoneE164(contactPhone);
+
+      let descriptionValue = description.trim() || null;
+      if (listingType === 'local_service') {
+        const catLabel =
+          SERVICE_CATEGORIES.find((c) => c.value === serviceCategory)?.label ?? serviceCategory;
+        descriptionValue = descriptionValue ? `${catLabel}\n\n${descriptionValue}` : catLabel;
+      }
 
       const payload = {
         created_by: user.id,
         type: listingType,
         title: resolvedTitle,
-        description: description.trim() || null,
+        description: descriptionValue,
         price: priceValue,
         price_type: priceTypeValue,
         capacity: capacityValue,
@@ -350,36 +408,76 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
         .from('listings')
         .insert(payload)
         .select('id')
-        .single();
+        .maybeSingle();
 
-      if (insertError || !listing) {
-        setErrorMessage(insertError ? getErrorMessage(insertError) : 'Elan yaradılmadı.');
+      if (insertError) {
+        setFieldErrors({ submit: getErrorMessage(insertError) });
         return;
       }
 
-      if (listingType === 'tour' && selectedPoiIds.length > 0) {
-        const rows = selectedPoiIds.map((poiId, index) => ({
-          listing_id: listing.id,
-          poi_id: poiId,
-          sort_order: index + 1,
-        }));
+      let listingId = listing?.id ?? null;
+      if (!listingId) {
+        const { data: latest } = await supabase
+          .from('listings')
+          .select('id')
+          .eq('created_by', user.id)
+          .eq('title', resolvedTitle)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        listingId = latest?.id ?? null;
+      }
 
-        const { error: poisError } = await supabase.from('listing_pois').insert(rows);
-        if (poisError) {
-          setErrorMessage(`Elan yaradıldı, amma marşrut yerləri yazılmadı: ${getErrorMessage(poisError)}`);
-          onCreated();
-          onClose();
-          return;
+      if (!listingId) {
+        setFieldErrors({ submit: 'Elan yaradılmadı.' });
+        return;
+      }
+
+      if (
+        (listingType === 'tour' || listingType === 'carpool') &&
+        selectedPoiIds.length > 0
+      ) {
+        const { error: rpcError } = await supabase.rpc('set_listing_route_pois', {
+          p_listing_id: listingId,
+          p_poi_ids: selectedPoiIds,
+        });
+        if (rpcError) {
+          const rows = selectedPoiIds.map((poiId, index) => ({
+            listing_id: listingId,
+            poi_id: poiId,
+            sort_order: index + 1,
+          }));
+          const { error: poisError } = await supabase.from('listing_pois').insert(rows);
+          if (poisError) {
+            setFieldErrors({
+              submit: `Elan yaradıldı, amma marşrut yerləri yazılmadı: ${getErrorMessage(poisError)}`,
+            });
+            onCreated();
+            onClose();
+            return;
+          }
         }
       }
 
       onCreated();
       onClose();
     } catch (err) {
-      setErrorMessage(getErrorMessage(err));
+      setFieldErrors({ submit: getErrorMessage(err) });
     } finally {
       setLoading(false);
     }
+  }
+
+  function inputStyle(hasError?: boolean) {
+    return [styles.input, hasError ? styles.inputError : null];
+  }
+
+  function ph(hasError: boolean | undefined, normal: string) {
+    return hasError ? FIELD_EMPTY_PLACEHOLDER : normal;
+  }
+
+  function phColor(hasError?: boolean) {
+    return hasError ? colors.danger : colors.textMuted;
   }
 
   return (
@@ -407,8 +505,6 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
               step === 2 && styles.contentWithFooter,
             ]}
           >
-            {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-
             {step === 1 ? (
               <View style={styles.typeList}>
                 {TYPE_CARDS.map((card) => (
@@ -431,20 +527,26 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
               <>
                 <FieldLabel text="Haradan" required />
                 <TextInput
-                  style={styles.input}
+                  style={inputStyle(!!fieldErrors.origin)}
                   value={originText}
-                  onChangeText={(text) => setOriginText(sanitizeLettersOnlyInput(text))}
-                  placeholder="Bakı"
-                  placeholderTextColor={colors.textMuted}
+                  onChangeText={(text) => {
+                    clearFieldError('origin');
+                    setOriginText(sanitizeLettersOnlyInput(text));
+                  }}
+                  placeholder={ph(!!fieldErrors.origin, 'Bakı')}
+                  placeholderTextColor={phColor(!!fieldErrors.origin)}
                 />
 
                 <FieldLabel text="Haraya" required />
                 <TextInput
-                  style={styles.input}
+                  style={inputStyle(!!fieldErrors.destination)}
                   value={destinationText}
-                  onChangeText={(text) => setDestinationText(sanitizeLettersOnlyInput(text))}
-                  placeholder="Quba"
-                  placeholderTextColor={colors.textMuted}
+                  onChangeText={(text) => {
+                    clearFieldError('destination');
+                    setDestinationText(sanitizeLettersOnlyInput(text));
+                  }}
+                  placeholder={ph(!!fieldErrors.destination, 'Quba')}
+                  placeholderTextColor={phColor(!!fieldErrors.destination)}
                 />
 
                 <FieldLabel text="Başlıq" required />
@@ -456,8 +558,29 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   placeholderTextColor={colors.textMuted}
                 />
 
-                <FieldLabel text="Tarix və saat" required />
-                <SimpleDateTimeField value={departureAt} onChange={setDepartureAt} />
+                <CollapseToggle
+                  open={dateOpen}
+                  label="Tarix və saat"
+                  value={departureLabel}
+                  required
+                  hasError={!!fieldErrors.departure}
+                  onPress={() => {
+                    setDateOpen((open) => !open);
+                    setRegionOpen(false);
+                  }}
+                />
+                {dateOpen ? (
+                  <SimpleDateTimeField
+                    value={departureAt}
+                    onChange={(next) => {
+                      clearFieldError('departure');
+                      setMinDeparture(nextSelectableHour());
+                      setDepartureAt(next);
+                    }}
+                    minimumDate={minDeparture}
+                    hasError={!!fieldErrors.departure}
+                  />
+                ) : null}
 
                 <FieldLabel text="Yer sayı" required />
                 <View style={styles.chipRow}>
@@ -479,17 +602,24 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
 
                 <FieldLabel text="Qiymət" />
                 <TextInput
-                  style={[styles.input, isFree && styles.inputDisabled]}
+                  style={[
+                    ...inputStyle(!!fieldErrors.price),
+                    isFree ? styles.inputDisabled : null,
+                  ]}
                   value={price}
-                  onChangeText={setPrice}
-                  placeholder="AZN"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="decimal-pad"
+                  onChangeText={(text) => {
+                    clearFieldError('price');
+                    setPrice(sanitizePositiveIntInput(text));
+                  }}
+                  placeholder={ph(!!fieldErrors.price, 'AZN')}
+                  placeholderTextColor={phColor(!!fieldErrors.price)}
+                  keyboardType="number-pad"
                   editable={!isFree}
                 />
                 <Pressable
                   style={styles.checkboxRow}
                   onPress={() => {
+                    clearFieldError('price');
                     setIsFree((current) => !current);
                     if (!isFree) {
                       setPrice('');
@@ -504,7 +634,120 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   label="Əlaqə nömrəsi"
                   required
                   value={contactPhone}
-                  onChangeLocal={setContactPhone}
+                  onChangeLocal={(local) => {
+                    clearFieldError('phone');
+                    setContactPhone(sanitizeAzPhoneLocalInput(local));
+                  }}
+                  error={fieldErrors.phone ? FIELD_EMPTY_PLACEHOLDER : null}
+                />
+
+                <CollapseToggle
+                  open={regionOpen}
+                  label="Region"
+                  value={regionLabel}
+                  onPress={() => {
+                    setRegionOpen((open) => !open);
+                    setDateOpen(false);
+                  }}
+                />
+                {regionOpen ? (
+                  <View style={styles.chipRowWrap}>
+                    {REGIONS.map((region) => {
+                      const selected = region.id === regionId;
+                      return (
+                        <Pressable
+                          key={region.id}
+                          style={[styles.chip, selected && styles.chipSelected]}
+                          onPress={() => {
+                            setRegionId(region.id);
+                            setRegionOpen(false);
+                          }}
+                        >
+                          <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                            {region.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
+
+                <Pressable
+                  style={styles.poiToggle}
+                  onPress={() => {
+                    setPoiPickerOpen((open) => !open);
+                    if (!poiPickerOpen) {
+                      setPoiPage(0);
+                    }
+                  }}
+                >
+                  <Text style={styles.poiToggleText}>
+                    {poiPickerOpen ? '▾' : '▸'} Marşrut nöqtələri əlavə et
+                    {selectedPoiIds.length > 0 ? ` (${selectedPoiIds.length})` : ''}
+                  </Text>
+                </Pressable>
+
+                {poiPickerOpen ? (
+                  <View style={styles.poiPickerBox}>
+                    {loadingPois ? (
+                      <ActivityIndicator color={colors.accent} />
+                    ) : approvedPois.length === 0 ? (
+                      <Text style={styles.muted}>Bu regionda təsdiqlənmiş yer yoxdur</Text>
+                    ) : (
+                      <>
+                        {pagedPois.map((poi) => {
+                          const selected = selectedPoiIds.includes(poi.id);
+                          return (
+                            <Pressable
+                              key={poi.id}
+                              style={[styles.poiRow, selected && styles.poiRowSelected]}
+                              onPress={() => togglePoi(poi.id)}
+                            >
+                              <Text style={styles.poiName}>{poi.name}</Text>
+                              <Text style={styles.poiCheck}>{selected ? '✓' : '+'}</Text>
+                            </Pressable>
+                          );
+                        })}
+                        {poiTotalPages > 1 ? (
+                          <View style={styles.poiPager}>
+                            <Pressable
+                              style={[styles.pagerBtn, poiPage === 0 && styles.pagerBtnDisabled]}
+                              disabled={poiPage === 0}
+                              onPress={() => setPoiPage((p) => Math.max(0, p - 1))}
+                            >
+                              <Text style={styles.pagerBtnText}>Əvvəlki</Text>
+                            </Pressable>
+                            <Text style={styles.pagerMeta}>
+                              {poiPage + 1} / {poiTotalPages}
+                            </Text>
+                            <Pressable
+                              style={[
+                                styles.pagerBtn,
+                                poiPage >= poiTotalPages - 1 && styles.pagerBtnDisabled,
+                              ]}
+                              disabled={poiPage >= poiTotalPages - 1}
+                              onPress={() =>
+                                setPoiPage((p) => Math.min(poiTotalPages - 1, p + 1))
+                              }
+                            >
+                              <Text style={styles.pagerBtnText}>Növbəti</Text>
+                            </Pressable>
+                          </View>
+                        ) : null}
+                      </>
+                    )}
+                  </View>
+                ) : null}
+
+                <FieldLabel text="Təsvir" />
+                <TextInput
+                  style={[styles.input, description.trim().length > 0 && styles.textAreaGrowing]}
+                  value={description}
+                  onChangeText={setDescription}
+                  placeholder="Qısa qeyd (istəyə bağlı)"
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  textAlignVertical={description.trim().length > 0 ? 'top' : 'center'}
                 />
               </>
             ) : null}
@@ -513,64 +756,107 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
               <>
                 <FieldLabel text="Başlıq" required />
                 <TextInput
-                  style={styles.input}
+                  style={inputStyle(!!fieldErrors.title)}
                   value={title}
-                  onChangeText={(text) => setTitle(sanitizeLettersOnlyInput(text))}
-                  placeholder="Quba weekend turu"
-                  placeholderTextColor={colors.textMuted}
+                  onChangeText={(text) => {
+                    clearFieldError('title');
+                    setTitle(sanitizeLettersOnlyInput(text));
+                  }}
+                  placeholder={ph(!!fieldErrors.title, 'Quba weekend turu')}
+                  placeholderTextColor={phColor(!!fieldErrors.title)}
                 />
 
-                <FieldLabel text="Region" required />
-                <View style={styles.chipRowWrap}>
-                  {REGIONS.map((region) => {
-                    const selected = region.id === regionId;
-                    return (
-                      <Pressable
-                        key={region.id}
-                        style={[styles.chip, selected && styles.chipSelected]}
-                        onPress={() => setRegionId(region.id)}
-                      >
-                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                          {region.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                <CollapseToggle
+                  open={regionOpen}
+                  label="Region"
+                  value={regionLabel}
+                  required
+                  onPress={() => {
+                    setRegionOpen((open) => !open);
+                    setDateOpen(false);
+                  }}
+                />
+                {regionOpen ? (
+                  <View style={styles.chipRowWrap}>
+                    {REGIONS.map((region) => {
+                      const selected = region.id === regionId;
+                      return (
+                        <Pressable
+                          key={region.id}
+                          style={[styles.chip, selected && styles.chipSelected]}
+                          onPress={() => {
+                            setRegionId(region.id);
+                            setRegionOpen(false);
+                          }}
+                        >
+                          <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                            {region.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
 
-                <FieldLabel text="Tarix" required />
-                <SimpleDateTimeField value={departureAt} onChange={setDepartureAt} />
+                <CollapseToggle
+                  open={dateOpen}
+                  label="Tarix"
+                  value={departureLabel}
+                  required
+                  hasError={!!fieldErrors.departure}
+                  onPress={() => {
+                    setDateOpen((open) => !open);
+                    setRegionOpen(false);
+                  }}
+                />
+                {dateOpen ? (
+                  <SimpleDateTimeField
+                    value={departureAt}
+                    onChange={(next) => {
+                      clearFieldError('departure');
+                      setMinDeparture(nextSelectableHour());
+                      setDepartureAt(next);
+                    }}
+                    minimumDate={minDeparture}
+                    hasError={!!fieldErrors.departure}
+                  />
+                ) : null}
 
                 <FieldLabel text="Nəfər sayı" required />
                 <TextInput
-                  style={styles.input}
-                  value={String(capacity)}
+                  style={inputStyle(!!fieldErrors.capacity)}
+                  value={capacityText}
                   onChangeText={(text) => {
-                    const next = Number(text.replace(/[^\d]/g, ''));
-                    setCapacity(Number.isFinite(next) && next > 0 ? next : 1);
+                    clearFieldError('capacity');
+                    setCapacityText(sanitizePositiveIntInput(text));
                   }}
+                  placeholder={ph(!!fieldErrors.capacity, 'Məs: 5')}
+                  placeholderTextColor={phColor(!!fieldErrors.capacity)}
                   keyboardType="number-pad"
                 />
 
                 <FieldLabel text="Qiymət / nəfər" required />
                 <TextInput
-                  style={styles.input}
+                  style={inputStyle(!!fieldErrors.price)}
                   value={price}
-                  onChangeText={setPrice}
-                  placeholder="AZN"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="decimal-pad"
+                  onChangeText={(text) => {
+                    clearFieldError('price');
+                    setPrice(sanitizePositiveIntInput(text));
+                  }}
+                  placeholder={ph(!!fieldErrors.price, 'AZN')}
+                  placeholderTextColor={phColor(!!fieldErrors.price)}
+                  keyboardType="number-pad"
                 />
 
-                <FieldLabel text="Təsvir" />
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  value={description}
-                  onChangeText={setDescription}
-                  placeholder="Tur haqqında..."
-                  placeholderTextColor={colors.textMuted}
-                  multiline
-                  textAlignVertical="top"
+                <PhoneField
+                  label="Əlaqə nömrəsi"
+                  required
+                  value={contactPhone}
+                  onChangeLocal={(local) => {
+                    clearFieldError('phone');
+                    setContactPhone(sanitizeAzPhoneLocalInput(local));
+                  }}
+                  error={fieldErrors.phone ? FIELD_EMPTY_PLACEHOLDER : null}
                 />
 
                 <Pressable
@@ -639,6 +925,17 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                     )}
                   </View>
                 ) : null}
+
+                <FieldLabel text="Təsvir" />
+                <TextInput
+                  style={[styles.input, description.trim().length > 0 && styles.textAreaGrowing]}
+                  value={description}
+                  onChangeText={setDescription}
+                  placeholder="Tur haqqında..."
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  textAlignVertical={description.trim().length > 0 ? 'top' : 'center'}
+                />
               </>
             ) : null}
 
@@ -646,11 +943,14 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
               <>
                 <FieldLabel text="Başlıq" required />
                 <TextInput
-                  style={styles.input}
+                  style={inputStyle(!!fieldErrors.title)}
                   value={title}
-                  onChangeText={(text) => setTitle(sanitizeLettersOnlyInput(text))}
-                  placeholder="Offroad jeep turu"
-                  placeholderTextColor={colors.textMuted}
+                  onChangeText={(text) => {
+                    clearFieldError('title');
+                    setTitle(sanitizeLettersOnlyInput(text));
+                  }}
+                  placeholder={ph(!!fieldErrors.title, 'Offroad jeep turu')}
+                  placeholderTextColor={phColor(!!fieldErrors.title)}
                 />
 
                 <FieldLabel text="Xidmət kateqoriyası" required />
@@ -671,23 +971,37 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   })}
                 </View>
 
-                <FieldLabel text="Region" required />
-                <View style={styles.chipRowWrap}>
-                  {REGIONS.map((region) => {
-                    const selected = region.id === regionId;
-                    return (
-                      <Pressable
-                        key={region.id}
-                        style={[styles.chip, selected && styles.chipSelected]}
-                        onPress={() => setRegionId(region.id)}
-                      >
-                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                          {region.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                <CollapseToggle
+                  open={regionOpen}
+                  label="Region"
+                  value={regionLabel}
+                  required
+                  onPress={() => {
+                    setRegionOpen((open) => !open);
+                    setDateOpen(false);
+                  }}
+                />
+                {regionOpen ? (
+                  <View style={styles.chipRowWrap}>
+                    {REGIONS.map((region) => {
+                      const selected = region.id === regionId;
+                      return (
+                        <Pressable
+                          key={region.id}
+                          style={[styles.chip, selected && styles.chipSelected]}
+                          onPress={() => {
+                            setRegionId(region.id);
+                            setRegionOpen(false);
+                          }}
+                        >
+                          <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                            {region.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
 
                 <FieldLabel text="Qiymət tipi" required />
                 <View style={styles.chipRowWrap}>
@@ -697,7 +1011,13 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                       <Pressable
                         key={item.value}
                         style={[styles.chip, selected && styles.chipSelected]}
-                        onPress={() => setPriceType(item.value)}
+                        onPress={() => {
+                          clearFieldError('price');
+                          setPriceType(item.value);
+                          if (item.value === 'free' || item.value === 'negotiable') {
+                            setPrice('');
+                          }
+                        }}
                       >
                         <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
                           {item.label}
@@ -711,12 +1031,15 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   <>
                     <FieldLabel text="Qiymət" required />
                     <TextInput
-                      style={styles.input}
+                      style={inputStyle(!!fieldErrors.price)}
                       value={price}
-                      onChangeText={setPrice}
-                      placeholder="AZN"
-                      placeholderTextColor={colors.textMuted}
-                      keyboardType="decimal-pad"
+                      onChangeText={(text) => {
+                        clearFieldError('price');
+                        setPrice(sanitizePositiveIntInput(text));
+                      }}
+                      placeholder={ph(!!fieldErrors.price, 'AZN')}
+                      placeholderTextColor={phColor(!!fieldErrors.price)}
+                      keyboardType="number-pad"
                     />
                   </>
                 ) : null}
@@ -729,24 +1052,32 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   <Text style={styles.checkboxLabel}>Daimi xidmət</Text>
                 </Pressable>
 
+                <PhoneField
+                  label="Əlaqə nömrəsi"
+                  required
+                  value={contactPhone}
+                  onChangeLocal={(local) => {
+                    clearFieldError('phone');
+                    setContactPhone(sanitizeAzPhoneLocalInput(local));
+                  }}
+                  error={fieldErrors.phone ? FIELD_EMPTY_PLACEHOLDER : null}
+                />
+
                 <FieldLabel text="Ətraflı təsvir" />
                 <TextInput
-                  style={[styles.input, styles.textArea]}
+                  style={[styles.input, description.trim().length > 0 && styles.textAreaGrowing]}
                   value={description}
                   onChangeText={setDescription}
                   placeholder="Xidmət haqqında..."
                   placeholderTextColor={colors.textMuted}
                   multiline
-                  textAlignVertical="top"
-                />
-
-                <PhoneField
-                  label="Əlaqə nömrəsi"
-                  required
-                  value={contactPhone}
-                  onChangeLocal={setContactPhone}
+                  textAlignVertical={description.trim().length > 0 ? 'top' : 'center'}
                 />
               </>
+            ) : null}
+
+            {fieldErrors.submit ? (
+              <Text style={styles.submitError}>{fieldErrors.submit}</Text>
             ) : null}
           </ScrollView>
 
@@ -756,8 +1087,10 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                 style={styles.backButton}
                 onPress={() => {
                   setStep(1);
-                  setErrorMessage(null);
+                  setFieldErrors({});
                   setPoiPickerOpen(false);
+                  setRegionOpen(false);
+                  setDateOpen(false);
                 }}
                 disabled={loading}
               >
@@ -782,6 +1115,16 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
   );
 }
 
+function formatDepartureLabel(date: Date): string {
+  const d = date.toLocaleDateString('az-AZ', {
+    day: '2-digit',
+    month: 'short',
+  });
+  const h = String(date.getHours()).padStart(2, '0');
+  const m = String(date.getMinutes()).padStart(2, '0');
+  return `${d} · ${h}:${m}`;
+}
+
 function FieldLabel({ text, required }: { text: string; required?: boolean }) {
   return (
     <Text style={styles.label}>
@@ -791,11 +1134,43 @@ function FieldLabel({ text, required }: { text: string; required?: boolean }) {
   );
 }
 
+function CollapseToggle({
+  open,
+  label,
+  value,
+  required,
+  hasError,
+  onPress,
+}: {
+  open: boolean;
+  label: string;
+  value?: string;
+  required?: boolean;
+  hasError?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={[styles.collapseToggle, hasError && styles.collapseToggleError]}
+      onPress={onPress}
+    >
+      <Text
+        style={[styles.collapseToggleText, hasError && styles.collapseToggleTextError]}
+        numberOfLines={1}
+      >
+        {open ? '▾' : '▸'} {label}
+        {required ? ' *' : ''}
+        {!open && value ? ` · ${value}` : ''}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: colors.overlay,
   },
   sheet: {
     maxHeight: '92%',
@@ -885,12 +1260,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.text,
   },
+  inputError: {
+    borderColor: colors.danger,
+  },
   inputDisabled: {
     backgroundColor: colors.chip,
     color: colors.textMuted,
   },
   textArea: {
     minHeight: 90,
+  },
+  textAreaGrowing: {
+    minHeight: 96,
+    paddingTop: 11,
   },
   chipRow: {
     flexDirection: 'row',
@@ -909,7 +1291,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.chip,
   },
   chipSelected: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.chipSelected,
   },
   chipText: {
     fontSize: 13,
@@ -984,6 +1366,26 @@ const styles = StyleSheet.create({
     color: colors.accentPressed,
     fontWeight: '700',
     fontSize: 14,
+  },
+  collapseToggle: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  collapseToggleError: {
+    borderColor: colors.danger,
+  },
+  collapseToggleText: {
+    color: colors.text,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  collapseToggleTextError: {
+    color: colors.dangerText,
   },
   poiPickerBox: {
     marginTop: 8,
@@ -1064,6 +1466,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
     marginBottom: 8,
+    fontSize: 13,
+  },
+  submitError: {
+    marginTop: 12,
+    backgroundColor: colors.dangerSoft,
+    color: colors.dangerText,
+    borderRadius: 8,
+    padding: 10,
     fontSize: 13,
   },
 });

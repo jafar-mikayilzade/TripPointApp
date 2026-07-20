@@ -561,7 +561,7 @@ export default function FeedScreen() {
                   <FontAwesome
                     name={filled ? 'star' : 'star-o'}
                     size={18}
-                    color="#F59E0B"
+                    color={colors.warning}
                   />
                 </Pressable>
               );
@@ -915,7 +915,7 @@ const styles = StyleSheet.create({
   },
   mapLinkText: {
     fontSize: 13,
-    color: '#0F766E',
+    color: colors.accent,
     fontWeight: '700',
   },
   ratingBlock: {

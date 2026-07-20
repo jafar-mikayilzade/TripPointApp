@@ -254,3 +254,38 @@ export function validateAzPhone(
 
   return null;
 }
+
+/** Yalnız müsbət tam ədəd (≥1). 0, mənfi, onluq, hərf — yazılmır. */
+export function sanitizePositiveIntInput(raw: string): string {
+  // Yalnız rəqəm; minus/nöqtə/vergül silinir
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) {
+    return '';
+  }
+  // Başdakı sıfırları sil: "0" → "", "01" → "1", "10" → "10"
+  const normalized = digits.replace(/^0+/, '');
+  return normalized;
+}
+
+/**
+ * @deprecated Qiymət də yalnız müsbət tam ədəd — sanitizePositiveIntInput istifadə et.
+ * Saxlanılıb ki, köhnə importlar sınmasın; eyni məntiq.
+ */
+export function sanitizePositiveDecimalInput(raw: string): string {
+  return sanitizePositiveIntInput(raw);
+}
+
+/** Müsbət tam ədəd (≥1). Boş / 0 / onluq → null. */
+export function parsePositiveNumber(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed || !/^\d+$/.test(trimmed)) {
+    return null;
+  }
+  const value = Number(trimmed);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    return null;
+  }
+  return value;
+}
+
+export const FIELD_EMPTY_PLACEHOLDER = 'Boş ola bilməz';

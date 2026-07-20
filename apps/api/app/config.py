@@ -14,6 +14,9 @@ SUPABASE_SERVICE_KEY = (os.getenv("SUPABASE_SERVICE_KEY") or "").strip()
 _raw_google_key = (os.getenv("GOOGLE_PLACES_API_KEY") or "").strip()
 GOOGLE_PLACES_API_KEY = _raw_google_key.strip('"').strip("'") or None
 
+_raw_ow_key = (os.getenv("OPENWEATHER_API_KEY") or "").strip()
+OPENWEATHER_API_KEY = _raw_ow_key.strip('"').strip("'") or None
+
 # mock | osm | google | hybrid
 DATA_SOURCE = (os.getenv("DATA_SOURCE") or "mock").strip().lower()
 ALLOWED_DATA_SOURCES = {"mock", "osm", "google", "hybrid"}
@@ -31,12 +34,12 @@ OVERPASS_ENDPOINTS: list[str] = [
 ]
 
 SEARCH_RADIUS_METERS = 5000
-OSM_SEARCH_RADIUS_METERS = 10000
+OSM_SEARCH_RADIUS_METERS = 15000
 OSM_RESULT_LIMIT = 30
 OSM_RESULT_LIMIT_ALL = 120
 # "all" sync: hər app kateqoriyasına ayrı kvota (restoran digərlərini boğmasın)
 OSM_PER_CATEGORY_LIMIT = 10
-OSM_HTTP_TIMEOUT_SECONDS = 20
+OSM_HTTP_TIMEOUT_SECONDS = 28
 OSM_CACHE_TTL_SECONDS = 600
 # hybrid "all": name+coords dedupe radius (meters)
 HYBRID_DEDUPE_METERS = 90

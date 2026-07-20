@@ -1,6 +1,6 @@
 import * as Location from 'expo-location';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,6 +10,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -22,7 +23,7 @@ import MapView, {
   type MarkerDragStartEndEvent,
   type PoiClickEvent,
   type Region as MapRegion,
-} from '../../components/AppMap';
+} from '../../components/ClusteredAppMap';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AddPoiModal } from '../../components/AddPoiModal';
@@ -648,6 +649,9 @@ export default function HomeScreen() {
                 initialRegion={mapRegion}
                 showsUserLocation={false}
                 showsMyLocationButton={false}
+                radius={48}
+                minPoints={3}
+                animationEnabled={false}
                 onPoiClick={isAdmin ? handleGooglePoiClick : undefined}
                 onPress={isAdmin && Platform.OS === 'web' ? handleAdminMapPress : undefined}
               >
@@ -656,6 +660,7 @@ export default function HomeScreen() {
                     coordinate={userLocation}
                     title="Siz buradasınız"
                     pinColor={colors.accent}
+                    cluster={false}
                   >
                     <View style={styles.userMarker}>
                       <View style={styles.userMarkerDot} />
@@ -792,6 +797,14 @@ export default function HomeScreen() {
                       style={{ flex: 1 }}
                       showsVerticalScrollIndicator={false}
                       contentContainerStyle={styles.listContent}
+                      refreshControl={
+                        <RefreshControl
+                          refreshing={loading}
+                          onRefresh={() => void fetchPois()}
+                          tintColor={colors.accent}
+                          colors={[colors.accent]}
+                        />
+                      }
                       onScrollToIndexFailed={(info) => {
                         setTimeout(() => {
                           listRef.current?.scrollToIndex({
@@ -802,13 +815,13 @@ export default function HomeScreen() {
                         }, 100);
                       }}
                       renderItem={({ item }) => (
-                        <PoiListCard
+                        <MemoPoiListCard
                           item={item}
                           highlighted={highlightedPoiId === item.id}
                           userLocation={userLocation}
                           onPress={() => handleCardPress(item)}
                         />
-                      )}
+                      }}
                       ListEmptyComponent={
                         <View style={styles.emptyWrap}>
                           <Text style={styles.emptyTitle}>Bu filterlə yer tapılmadı 🔍</Text>
@@ -1160,6 +1173,8 @@ function PoiListCard({
   );
 }
 
+const MemoPoiListCard = memo(PoiListCard);
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1198,7 +1213,7 @@ const styles = StyleSheet.create({
     zIndex: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
@@ -1282,7 +1297,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: colors.accent,
     borderWidth: 3,
-    borderColor: '#fff',
+    borderColor: colors.surface,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.3,
@@ -1301,7 +1316,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   poiMarkerBubble: {
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     borderRadius: 20,
     padding: 4,
     borderWidth: 1,
@@ -1431,7 +1446,7 @@ const styles = StyleSheet.create({
     color: colors.border,
   },
   starButtonFilled: {
-    color: '#F59E0B',
+    color: colors.warning,
   },
   ratingError: {
     marginTop: 8,
@@ -1460,7 +1475,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   addPoiButtonText: {
-    color: 'white',
+    color: colors.textOnAccent,
     fontSize: 24,
     fontWeight: 'bold',
     lineHeight: 28,
@@ -1472,7 +1487,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',

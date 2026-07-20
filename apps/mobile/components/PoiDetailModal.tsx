@@ -1,3 +1,4 @@
+import { Image } from 'expo-image';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useState } from 'react';
@@ -5,7 +6,6 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
-  Image,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 
 import { REGIONS } from '../constants/regions';
+import { FavoriteButton } from './FavoriteButton';
 import { notifyAdminsViaWhatsApp } from '../lib/adminNotify';
 import { getErrorMessage } from '../lib/errors';
 import {
@@ -294,9 +295,12 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.sheet}>
-          <Pressable onPress={onClose} style={styles.closeButton} hitSlop={12}>
-            <FontAwesome name="times" size={18} color={colors.text} />
-          </Pressable>
+          <View style={styles.sheetHeader}>
+            <FavoriteButton targetType="poi" targetId={poi.id} />
+            <Pressable onPress={onClose} style={styles.closeButton} hitSlop={12}>
+              <FontAwesome name="times" size={18} color={colors.text} />
+            </Pressable>
+          </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
             {loadingPhotos ? (
@@ -311,7 +315,14 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
                 style={styles.gallery}
               >
                 {photos.map((url) => (
-                  <Image key={url} source={{ uri: url }} style={styles.galleryImage} />
+                  <Image
+                    key={url}
+                    source={{ uri: url }}
+                    style={styles.galleryImage}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    recyclingKey={url}
+                  />
                 ))}
               </ScrollView>
             ) : (
@@ -352,7 +363,7 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
               <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
             ) : (
               <View style={styles.ratingRow}>
-                <FontAwesome name="star" size={16} color="#F59E0B" />
+                <FontAwesome name="star" size={16} color={colors.warning} />
                 <Text style={styles.ratingValue}>
                   {averageRating === null ? '—' : averageRating.toFixed(1)}
                 </Text>
@@ -410,7 +421,7 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
                     <FontAwesome
                       name={filled ? 'star' : 'star-o'}
                       size={28}
-                      color={filled ? '#F59E0B' : colors.border}
+                      color={filled ? colors.warning : colors.border}
                     />
                   </Pressable>
                 );
@@ -439,16 +450,21 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
   },
   closeButton: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    zIndex: 2,
     width: 36,
     height: 36,
     borderRadius: 18,
     backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sheetHeader: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    zIndex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   content: {
     paddingHorizontal: 20,

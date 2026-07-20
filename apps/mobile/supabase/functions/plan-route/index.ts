@@ -13,7 +13,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { region, days, budget, interests, groupType, pois } = body;
+    const { region, days, budget, interests, groupType, pois, weather } = body;
 
     const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
     if (!anthropicKey) {
@@ -42,13 +42,30 @@ serve(async (req) => {
       });
     }
 
+    const weatherBlock = weather
+      ? `
+HAVA PROQNOZU:
+${weather.summary_az || ''}
+prefer_indoor: ${weather.prefer_indoor ? 'bəli' : 'xeyr'}
+çıxarılmalı kateqoriyalar: ${(weather.exclude_categories || []).join(', ') || 'yox'}
+üstün kateqoriyalar: ${(weather.prefer_categories || []).join(', ') || 'yox'}
+
+${
+  weather.prefer_indoor
+    ? `MÜTLƏQ: Güclü yağış var. nature/waterfall/mountain/lake stoplarını MINIMUMA endir və ya çıxar.
+Muzey, tarixi qapalı məkan, restoran, kafe, otel üstün tut.`
+    : 'Hava uyğundur — açıq hava yerləri də ola bilər.'
+}
+`
+      : '';
+
     const userPrompt = `
 Region: ${body.region}
 Gün sayı: ${body.days}
 Büdcə: ${body.budget}
 Maraqlar: ${Array.isArray(body.interests) ? body.interests.join(', ') : body.interests}
 Qrup: ${body.groupType}
-
+${weatherBlock}
 MÖVCUD RESTORANLAR/KAFELER:
 ${JSON.stringify(
   (body.pois?.restaurants || []).map((p: any) => ({

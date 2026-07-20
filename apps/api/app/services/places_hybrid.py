@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 import time
+from collections.abc import Iterator
 from typing import Any
 
 from app.config import HYBRID_DEDUPE_METERS, OSM_PER_CATEGORY_LIMIT
@@ -17,13 +18,14 @@ from app.services.places_google import fetch_places_from_google
 from app.services.places_osm import _fetch_single_category
 
 # "all" sync: one call per Google type (lodging covers hotel/hostel/guesthouse)
-_HYBRID_GOOGLE_ALL_ORDER = ("restaurant", "hotel")
+HYBRID_GOOGLE_ALL_ORDER = ("restaurant", "hotel")
 # Pause between OSM categories — public Overpass rate-limits hard on Railway
-_OSM_GAP_SECONDS = 2.5
+OSM_GAP_SECONDS = 2.5
 # Skip noisy/empty buckets on region-wide sync to cut Overpass load
-_HYBRID_OSM_ALL_ORDER = tuple(
+HYBRID_OSM_ALL_ORDER = tuple(
     c for c in HYBRID_OSM_SYNC_ORDER if c not in {"other"}
 )
+
 
 def _normalize_name(name: str) -> str:
     text = name.casefold().strip()
@@ -150,35 +152,44 @@ def _fetch_osm_safe(
         return []
 
 
-def _fetch_all_hybrid(
+def iter_hybrid_all_batches(
     latitude: float,
     longitude: float,
-    cache_key: str,
-) -> tuple[list[dict[str, Any]], list[str]]:
+) -> Iterator[tuple[str, list[dict[str, Any]], list[str]]]:
     """
-    Balanced all: Google (few unique types) + OSM (fully sequential).
-    Returns (places, warnings).
+    Yield (batch_label, places, warnings) so sync can upsert Google before OSM.
     """
-    del cache_key  # reserved for future hybrid cache
-    merged: list[dict[str, Any]] = []
-    warnings: list[str] = []
-
-    for cat in _HYBRID_GOOGLE_ALL_ORDER:
+    for cat in HYBRID_GOOGLE_ALL_ORDER:
+        warnings: list[str] = []
         try:
-            merged.extend(_fetch_google(latitude, longitude, cat))
+            places = _fetch_google(latitude, longitude, cat)
         except Exception as exc:
             msg = f"google:{cat}: {exc}"
             print(f"[hybrid] {msg}")
             warnings.append(msg)
+            places = []
+        yield f"google:{cat}", places, warnings
 
-    for i, cat in enumerate(_HYBRID_OSM_ALL_ORDER):
-        if i > 0:
-            time.sleep(_OSM_GAP_SECONDS)
+    for i, cat in enumerate(HYBRID_OSM_ALL_ORDER):
+        if i > 0 or HYBRID_GOOGLE_ALL_ORDER:
+            time.sleep(OSM_GAP_SECONDS)
         places = _fetch_osm_safe(latitude, longitude, cat)
+        warnings = []
         if not places:
             warnings.append(f"osm:{cat}: empty or unavailable")
-        merged.extend(places)
+        yield f"osm:{cat}", places, warnings
 
+
+def _fetch_all_hybrid(
+    latitude: float,
+    longitude: float,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Collect all hybrid batches (used when progressive upsert is not needed)."""
+    merged: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for _label, places, batch_warnings in iter_hybrid_all_batches(latitude, longitude):
+        merged.extend(places)
+        warnings.extend(batch_warnings)
     return merge_dedupe_places(merged), warnings
 
 
@@ -192,14 +203,14 @@ def fetch_places_from_hybrid(
     Returns (places, warnings).
     Google-only categories raise on API key / Places errors (do not swallow).
     """
-    key = cache_key or f"hybrid:{latitude:.4f}:{longitude:.4f}:{category}"
+    del cache_key  # reserved
     cat = (category or "").strip().lower()
 
     if cat == "cafe":
         return [], []
 
     if cat == "all":
-        return _fetch_all_hybrid(latitude, longitude, key)
+        return _fetch_all_hybrid(latitude, longitude)
 
     if cat == "tourist_attraction":
         return _fetch_osm_safe(latitude, longitude, "historical"), []

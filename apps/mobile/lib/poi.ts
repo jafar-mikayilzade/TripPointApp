@@ -7,14 +7,14 @@ import { getCategoryEmoji as getCategoryEmojiFn } from './categoryUtils';
 export { getCategoryEmoji } from './categoryUtils';
 
 export const CATEGORY_COLORS: Record<PoiCategory, string> = {
-  restaurant: '#E07A4F',
-  cafe: '#D4A017',
-  hotel: '#5B8DEF',
+  restaurant: '#C47A2C',
+  cafe: '#B8952A',
+  hotel: '#4A8FE8',
   hostel: '#6B9AF0',
-  home_restaurant: '#E07A4F',
+  home_restaurant: '#C47A2C',
   guesthouse: '#7AA2F7',
-  nature: '#3D9B6E',
-  waterfall: '#3D9B6E',
+  nature: '#3D8B6E',
+  waterfall: '#3D8B6E',
   mountain: '#5A8F6C',
   lake: '#4A90A4',
   historical: '#8B6F5C',

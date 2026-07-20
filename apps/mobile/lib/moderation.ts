@@ -83,7 +83,7 @@ export async function reportListing(args: {
   }
 }
 
-/** Sahib və ya admin soft-delete (status = cancelled). */
+/** Sahib və ya admin soft-delete (status = cancelled) via SECURITY DEFINER RPC. */
 export async function deleteListingAsAdminOrOwner(listingId: string): Promise<Result> {
   try {
     const {
@@ -94,6 +94,24 @@ export async function deleteListingAsAdminOrOwner(listingId: string): Promise<Re
       return { error: 'Daxil olmaq lazımdır' };
     }
 
+    const { error } = await supabase.rpc('cancel_listing', {
+      p_listing_id: listingId,
+    });
+
+    if (!error) {
+      return { error: null };
+    }
+
+    const missingRpc =
+      error.message?.includes('Could not find the function') ||
+      error.message?.includes('cancel_listing') ||
+      error.code === 'PGRST202';
+
+    if (!missingRpc) {
+      return { error: getErrorMessage(error) };
+    }
+
+    // Fallback if RPC not deployed yet
     const admin = await fetchIsAdmin(user.id);
     let query = supabase
       .from('listings')
@@ -104,13 +122,14 @@ export async function deleteListingAsAdminOrOwner(listingId: string): Promise<Re
       query = query.eq('created_by', user.id);
     }
 
-    const { data, error } = await query.select('id').maybeSingle();
-
-    if (error) {
-      return { error: getErrorMessage(error) };
+    const { data, error: updateError } = await query.select('id').maybeSingle();
+    if (updateError) {
+      return { error: getErrorMessage(updateError) };
     }
     if (!data) {
-      return { error: 'Elan silinmədi. İcazə yoxdur və ya elan tapılmadı.' };
+      return {
+        error: 'Elan silinmədi. İcazə yoxdur və ya elan tapılmadı.',
+      };
     }
     return { error: null };
   } catch (err) {
@@ -138,14 +157,43 @@ export async function updateListingAsAdmin(
       return { error: 'Yalnız admin redaktə edə bilər' };
     }
 
-    const { error } = await supabase
-      .from('listings')
-      .update({ ...patch, updated_at: new Date().toISOString() })
-      .eq('id', listingId);
+    const { error } = await supabase.rpc('admin_update_listing', {
+      p_listing_id: listingId,
+      p_title: patch.title ?? null,
+      p_description: patch.description ?? null,
+      p_status: patch.status ?? null,
+      p_price: patch.price ?? null,
+      p_contact_phone: patch.contact_phone ?? null,
+      p_spots_left: patch.spots_left ?? null,
+    });
 
-    if (error) {
+    if (!error) {
+      return { error: null };
+    }
+
+    const missingRpc =
+      error.message?.includes('Could not find the function') ||
+      error.message?.includes('admin_update_listing') ||
+      error.code === 'PGRST202';
+
+    if (!missingRpc) {
       return { error: getErrorMessage(error) };
     }
+
+    const { data, error: updateError } = await supabase
+      .from('listings')
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq('id', listingId)
+      .select('id')
+      .maybeSingle();
+
+    if (updateError) {
+      return { error: getErrorMessage(updateError) };
+    }
+    if (!data) {
+      return { error: 'Elan yenilənmədi. İcazə yoxdur və ya elan tapılmadı.' };
+    }
+
     return { error: null };
   } catch (err) {
     return { error: getErrorMessage(err) };

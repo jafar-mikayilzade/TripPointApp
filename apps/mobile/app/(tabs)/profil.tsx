@@ -70,14 +70,14 @@ const ROLE_META: Record<UserRole, { label: string; color: string }> = {
   user: { label: 'Səyahətçi', color: colors.textSecondary },
   guide: { label: 'Tur Bələdçisi', color: colors.success },
   business_owner: { label: 'Biznes Sahibi', color: colors.accent },
-  local_provider: { label: 'Yerli Xidmət', color: '#C96B45' },
+  local_provider: { label: 'Yerli Xidmət', color: colors.warning },
   admin: { label: 'Admin', color: colors.danger },
 };
 
 const TYPE_META: Record<ListingType, { label: string; emoji: string; color: string }> = {
-  carpool: { label: 'Carpool', emoji: '🚗', color: '#5B8DEF' },
-  tour: { label: 'Tur', emoji: '🗺', color: '#1B7A4E' },
-  local_service: { label: 'Yerli xidmət', emoji: '🏔', color: '#C96B45' },
+  carpool: { label: 'Carpool', emoji: '🚗', color: colors.accent },
+  tour: { label: 'Tur', emoji: '🗺', color: colors.success },
+  local_service: { label: 'Yerli xidmət', emoji: '🏔', color: colors.warning },
 };
 
 const TABS: { id: ProfileTab; label: string }[] = [
@@ -668,7 +668,7 @@ export default function ProfilScreen() {
           </View>
 
           <View style={styles.ratingRow}>
-            <FontAwesome name="star" size={14} color="#F59E0B" />
+            <FontAwesome name="star" size={14} color={colors.warning} />
             <Text style={styles.ratingText}>
               {ratingCount > 0
                 ? `${ratingAvg.toFixed(1)} (${ratingCount} rəy)`
@@ -845,7 +845,7 @@ export default function ProfilScreen() {
                           key={index}
                           name={index < item.score ? 'star' : 'star-o'}
                           size={14}
-                          color="#F59E0B"
+                          color={colors.warning}
                         />
                       ))}
                     </View>
@@ -1182,7 +1182,7 @@ const styles = StyleSheet.create({
   },
   splitBillButton: {
     width: '100%',
-    backgroundColor: '#0F766E',
+    backgroundColor: colors.accent,
     borderRadius: 16,
     paddingVertical: 12,
     flexDirection: 'row',

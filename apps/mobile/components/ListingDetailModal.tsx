@@ -18,8 +18,13 @@ import {
 } from 'react-native';
 
 import { REGIONS } from '../constants/regions';
+import { FavoriteButton } from './FavoriteButton';
 import { notifyAdminsViaWhatsApp } from '../lib/adminNotify';
 import { getErrorMessage } from '../lib/errors';
+import {
+  buildListingWhatsAppUrl,
+  resolveListingWhatsAppPhone,
+} from '../lib/listingWhatsApp';
 import {
   LISTING_REPORT_REASONS,
   type ListingReportReasonId,
@@ -67,16 +72,16 @@ const STATUS_META: Record<
   ParticipantStatus,
   { label: string; background: string; color: string }
 > = {
-  pending: { label: 'Gözləyir', background: '#FEF3C7', color: '#B45309' },
-  approved: { label: 'Təsdiqlənib', background: colors.successSoft, color: '#166534' },
+  pending: { label: 'Gözləyir', background: colors.warningSoft, color: colors.warning },
+  approved: { label: 'Təsdiqlənib', background: colors.successSoft, color: colors.success },
   rejected: { label: 'Rədd edilib', background: colors.dangerSoft, color: colors.dangerText },
   cancelled: { label: 'Ləğv edilib', background: colors.chip, color: colors.textSecondary },
 };
 
 const TYPE_META: Record<ListingType, { label: string; emoji: string; color: string }> = {
-  carpool: { label: 'Carpool', emoji: '🚗', color: '#5B8DEF' },
-  tour: { label: 'Tur', emoji: '🗺', color: '#1B7A4E' },
-  local_service: { label: 'Yerli xidmət', emoji: '🏔', color: '#C96B45' },
+  carpool: { label: 'Carpool', emoji: '🚗', color: colors.accent },
+  tour: { label: 'Tur', emoji: '🗺', color: colors.success },
+  local_service: { label: 'Yerli xidmət', emoji: '🏔', color: colors.warning },
 };
 
 function formatDate(value: string | null): string {
@@ -93,6 +98,7 @@ function formatDate(value: string | null): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    hour12: false,
   });
 }
 
@@ -131,7 +137,8 @@ export function ListingDetailModal({
   const { isAdmin } = useIsAdmin();
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [creatorRating, setCreatorRating] = useState<number | null>(null);
-  const [tourPois, setTourPois] = useState<string[]>([]);
+  const [routePois, setRoutePois] = useState<string[]>([]);
+  const [routeListOpen, setRouteListOpen] = useState(false);
   const [loadingExtras, setLoadingExtras] = useState(false);
 
   const [showJoinForm, setShowJoinForm] = useState(false);
@@ -207,7 +214,7 @@ export function ListingDetailModal({
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
+          event: '*',
           schema: 'public',
           table: 'listing_participants',
           filter: `listing_id=eq.${listing.id}`,
@@ -240,7 +247,8 @@ export function ListingDetailModal({
       setShowAdminEdit(false);
       setJoinMessage('');
       setReportDetails('');
-      setTourPois([]);
+      setRoutePois([]);
+      setRouteListOpen(false);
       setCreatorRating(null);
 
       const {
@@ -253,14 +261,16 @@ export function ListingDetailModal({
 
       setCurrentUserId(user?.id ?? null);
 
-      const [listingRatingsResult, tourPoisResult] = await Promise.all([
+      const [listingRatingsResult, routePoisResult] = await Promise.all([
         supabase
           .from('ratings')
           .select('score')
           .eq('target_type', 'listing')
           .eq('target_id', listing!.id),
-        listing!.type === 'tour'
-          ? supabase.from('listing_pois').select('poi_id, sort_order').eq('listing_id', listing!.id)
+        listing!.type === 'tour' || listing!.type === 'carpool'
+          ? supabase.rpc('get_listing_route_poi_names', {
+              p_listing_id: listing!.id,
+            })
           : Promise.resolve({ data: null, error: null }),
       ]);
 
@@ -279,24 +289,46 @@ export function ListingDetailModal({
         setCreatorRating(null);
       }
 
-      if (listing!.type === 'tour' && tourPoisResult.data && !tourPoisResult.error) {
-        const sorted = [...tourPoisResult.data].sort(
-          (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
-        );
-        const poiIds = sorted.map((row) => row.poi_id);
-        if (poiIds.length > 0) {
-          const { data: pois, error: poisError } = await supabase
-            .from('pois')
-            .select('id, name')
-            .in('id', poiIds);
+      if (
+        (listing!.type === 'tour' || listing!.type === 'carpool') &&
+        !routePoisResult.error
+      ) {
+        const rpcRows = Array.isArray(routePoisResult.data) ? routePoisResult.data : [];
+        if (rpcRows.length > 0) {
+          setRoutePois(
+            rpcRows
+              .map((row: { name?: string | null }) => row.name)
+              .filter((name): name is string => Boolean(name))
+          );
+        } else {
+          // Fallback if RPC not deployed yet
+          const { data: linkRows, error: linkError } = await supabase
+            .from('listing_pois')
+            .select('poi_id, sort_order')
+            .eq('listing_id', listing!.id);
 
           if (!isActive) {
             return;
           }
 
-          if (!poisError && pois) {
-            const nameById = new Map(pois.map((poi) => [poi.id, poi.name]));
-            setTourPois(poiIds.map((id) => nameById.get(id) ?? id).filter(Boolean));
+          if (!linkError && linkRows && linkRows.length > 0) {
+            const sorted = [...linkRows].sort(
+              (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)
+            );
+            const poiIds = sorted.map((row) => row.poi_id);
+            const { data: pois } = await supabase
+              .from('pois')
+              .select('id, name')
+              .in('id', poiIds);
+
+            if (!isActive) {
+              return;
+            }
+
+            if (pois) {
+              const nameById = new Map(pois.map((poi) => [poi.id, poi.name]));
+              setRoutePois(poiIds.map((id) => nameById.get(id) ?? id).filter(Boolean));
+            }
           }
         }
       }
@@ -320,11 +352,23 @@ export function ListingDetailModal({
 
     setErrorMessage(null);
     const creatorName = listing.creator?.full_name?.trim() || 'istifadəçi';
-    const text = encodeURIComponent(
-      `Salam ${creatorName}! TripPoint-də "${listing.title}" elanınızla maraqlanıram.`
-    );
-    const phone = listing.creator?.phone?.replace(/[^\d]/g, '') || listing.contact_phone?.replace(/[^\d]/g, '');
-    const url = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
+    const phoneDigits = resolveListingWhatsAppPhone({
+      contactPhone: listing.contact_phone,
+      creatorPhone: listing.creator?.phone,
+    });
+
+    if (!phoneDigits) {
+      setErrorMessage(
+        'Bu elanda əlaqə nömrəsi yoxdur. Elan sahibi nömrə əlavə etməyib.'
+      );
+      return;
+    }
+
+    const url = buildListingWhatsAppUrl({
+      phoneDigits,
+      creatorName,
+      listingTitle: listing.title,
+    });
 
     try {
       await Linking.openURL(url);
@@ -332,6 +376,9 @@ export function ListingDetailModal({
       setErrorMessage(getErrorMessage(err));
     }
   }
+
+  const contactDisplayPhone =
+    listing?.contact_phone?.trim() || listing?.creator?.phone?.trim() || null;
 
   async function handleJoinSubmit() {
     if (!listing || !currentUserId) {
@@ -492,9 +539,12 @@ export function ListingDetailModal({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.sheet}>
-          <Pressable onPress={onClose} style={styles.closeButton} hitSlop={12}>
-            <FontAwesome name="times" size={18} color={colors.text} />
-          </Pressable>
+          <View style={styles.sheetHeader}>
+            <FavoriteButton targetType="listing" targetId={listing.id} />
+            <Pressable onPress={onClose} style={styles.closeButton} hitSlop={12}>
+              <FontAwesome name="times" size={18} color={colors.text} />
+            </Pressable>
+          </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
             <View style={[styles.badge, { backgroundColor: `${meta.color}22` }]}>
@@ -530,7 +580,7 @@ export function ListingDetailModal({
               <View style={styles.creatorInfo}>
                 <Text style={styles.creatorName}>{creatorName}</Text>
                 <View style={styles.ratingRow}>
-                  <FontAwesome name="star" size={12} color="#F59E0B" />
+                  <FontAwesome name="star" size={12} color={colors.warning} />
                   <Text style={styles.ratingText}>
                     {loadingExtras
                       ? '...'
@@ -542,9 +592,17 @@ export function ListingDetailModal({
               </View>
             </Pressable>
 
-            <Pressable style={styles.whatsappButton} onPress={openWhatsApp}>
-              <FontAwesome name="whatsapp" size={16} color="#fff" />
-              <Text style={styles.whatsappButtonText}>Mesaj göndər</Text>
+            <Pressable
+              style={[
+                styles.whatsappButton,
+                !contactDisplayPhone && styles.whatsappButtonDisabled,
+              ]}
+              onPress={openWhatsApp}
+            >
+              <FontAwesome name="whatsapp" size={16} color={colors.textOnAccent} />
+              <Text style={styles.whatsappButtonText}>
+                {contactDisplayPhone ? 'WhatsApp ilə yaz' : 'Nömrə yoxdur'}
+              </Text>
             </Pressable>
 
             <Pressable
@@ -557,7 +615,7 @@ export function ListingDetailModal({
                 } as never);
               }}
             >
-              <FontAwesome name="money" size={14} color="#fff" />
+              <FontAwesome name="money" size={14} color={colors.textOnAccent} />
               <Text style={styles.splitBillButtonText}>Xərc bölüşdür</Text>
             </Pressable>
 
@@ -572,6 +630,28 @@ export function ListingDetailModal({
                   💺 Qalan yer: {spotsLeft} / {capacity || '—'}
                 </Text>
                 <Text style={styles.detailLine}>💰 Qiymət: {formatPrice(listing)}</Text>
+                <Pressable
+                  style={styles.routeToggle}
+                  onPress={() => setRouteListOpen((open) => !open)}
+                >
+                  <Text style={styles.routeToggleText}>
+                    {routeListOpen ? '▾' : '▸'} Marşrut siyahısına bax
+                    {routePois.length > 0 ? ` (${routePois.length})` : ''}
+                  </Text>
+                </Pressable>
+                {routeListOpen ? (
+                  loadingExtras ? (
+                    <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
+                  ) : routePois.length === 0 ? (
+                    <Text style={styles.muted}>Yer siyahısı yoxdur</Text>
+                  ) : (
+                    routePois.map((name, index) => (
+                      <Text key={`${name}-${index}`} style={styles.poiItem}>
+                        • {name}
+                      </Text>
+                    ))
+                  )
+                ) : null}
               </>
             ) : null}
 
@@ -583,18 +663,28 @@ export function ListingDetailModal({
                   👥 İştirakçı: {joinedCount} / {capacity || '—'}
                 </Text>
                 <Text style={styles.detailLine}>💰 Qiymət: {formatPrice(listing)}</Text>
-                <Text style={styles.detailLine}>🗺 Marşrut yerləri:</Text>
-                {loadingExtras ? (
-                  <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
-                ) : tourPois.length === 0 ? (
-                  <Text style={styles.muted}>Yer siyahısı yoxdur</Text>
-                ) : (
-                  tourPois.map((name) => (
-                    <Text key={name} style={styles.poiItem}>
-                      • {name}
-                    </Text>
-                  ))
-                )}
+                <Pressable
+                  style={styles.routeToggle}
+                  onPress={() => setRouteListOpen((open) => !open)}
+                >
+                  <Text style={styles.routeToggleText}>
+                    {routeListOpen ? '▾' : '▸'} Marşrut siyahısına bax
+                    {routePois.length > 0 ? ` (${routePois.length})` : ''}
+                  </Text>
+                </Pressable>
+                {routeListOpen ? (
+                  loadingExtras ? (
+                    <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
+                  ) : routePois.length === 0 ? (
+                    <Text style={styles.muted}>Yer siyahısı yoxdur</Text>
+                  ) : (
+                    routePois.map((name, index) => (
+                      <Text key={`${name}-${index}`} style={styles.poiItem}>
+                        • {name}
+                      </Text>
+                    ))
+                  )
+                ) : null}
               </>
             ) : null}
 
@@ -605,9 +695,6 @@ export function ListingDetailModal({
                 {listing.is_recurring ? (
                   <Text style={styles.detailLine}>🔄 Daimi xidmət</Text>
                 ) : null}
-                <Text style={styles.detailLine}>
-                  📞 Əlaqə: {listing.contact_phone || 'Göstərilməyib'}
-                </Text>
               </>
             ) : null}
 
@@ -634,7 +721,7 @@ export function ListingDetailModal({
                         disabled={joining}
                       >
                         {joining ? (
-                          <ActivityIndicator color="#fff" />
+                          <ActivityIndicator color={colors.textOnAccent} />
                         ) : (
                           <Text style={styles.primaryButtonText}>Göndər</Text>
                         )}
@@ -695,7 +782,7 @@ export function ListingDetailModal({
                       disabled={reporting}
                     >
                       {reporting ? (
-                        <ActivityIndicator color="#fff" />
+                        <ActivityIndicator color={colors.textOnAccent} />
                       ) : (
                         <Text style={styles.primaryButtonText}>Şikayəti göndər</Text>
                       )}
@@ -830,7 +917,7 @@ export function ListingDetailModal({
                                     }
                                   >
                                     {updatingParticipantId === participant.id ? (
-                                      <ActivityIndicator color="#166534" size="small" />
+                                      <ActivityIndicator color={colors.success} size="small" />
                                     ) : (
                                       <Text style={styles.approveButtonText}>✓ Təsdiqlə</Text>
                                     )}
@@ -880,7 +967,7 @@ export function ListingDetailModal({
                   disabled={savingEdit}
                 >
                   {savingEdit ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color={colors.textOnAccent} />
                   ) : (
                     <Text style={styles.primaryButtonText}>Yadda saxla</Text>
                   )}
@@ -912,16 +999,21 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
   },
   closeButton: {
-    position: 'absolute',
-    top: 14,
-    right: 14,
-    zIndex: 2,
     width: 36,
     height: 36,
     borderRadius: 18,
     backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sheetHeader: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    zIndex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   content: {
     paddingHorizontal: 20,
@@ -993,10 +1085,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#25D366',
+    backgroundColor: colors.whatsapp,
     borderRadius: 16,
     paddingVertical: 12,
     marginBottom: 16,
+  },
+  whatsappButtonDisabled: {
+    backgroundColor: colors.textMuted,
+    opacity: 0.9,
   },
   whatsappButtonText: {
     color: colors.textOnAccent,
@@ -1008,7 +1104,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#0F766E',
+    backgroundColor: colors.accent,
     borderRadius: 16,
     paddingVertical: 12,
     marginBottom: 16,
@@ -1029,6 +1125,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.chipText,
     marginBottom: 6,
+  },
+  routeToggle: {
+    marginTop: 4,
+    marginBottom: 6,
+    paddingVertical: 6,
+  },
+  routeToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.accent,
   },
   poiItem: {
     fontSize: 13,
@@ -1255,7 +1361,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   approveButtonText: {
-    color: '#166534',
+    color: colors.success,
     fontWeight: '700',
     fontSize: 13,
   },

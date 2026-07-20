@@ -35,6 +35,20 @@
               "pathPrefix": "/callback"
             }
           ]
+        },
+        {
+          "action": "VIEW",
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "trippoint",
+              "host": "listing",
+              "pathPrefix": "/"
+            }
+          ]
         }
       ],
       "config": {
@@ -69,7 +83,9 @@
       ],
       "expo-dev-client",
       "expo-font",
-      "@react-native-google-signin/google-signin"
+      "@react-native-google-signin/google-signin",
+      "expo-image",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true

@@ -1,10 +1,44 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Tabs } from 'expo-router';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, shadows } from '../../constants/theme';
 
+/** Ana səhifə: nazik dairə + mərkəz nöqtə (referans navbar) */
+function HomeTabIcon({ color, size }: { color: string; size: number }) {
+  const outer = size;
+  const inner = Math.max(5, Math.round(size * 0.28));
+  return (
+    <View
+      style={{
+        width: outer,
+        height: outer,
+        borderRadius: outer / 2,
+        borderWidth: 1.6,
+        borderColor: color,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <View
+        style={{
+          width: inner,
+          height: inner,
+          borderRadius: inner / 2,
+          backgroundColor: color,
+        }}
+      />
+    </View>
+  );
+}
+
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, 10);
+  const tabBarHeight = 52 + bottomPad;
+
   return (
     <Tabs
       screenOptions={{
@@ -13,8 +47,8 @@ export default function TabLayout() {
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopWidth: 0,
-          height: 60,
-          paddingBottom: 8,
+          height: tabBarHeight,
+          paddingBottom: bottomPad,
           paddingTop: 6,
           ...shadows.bar,
         },
@@ -28,9 +62,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Ana səhifə',
-          tabBarIcon: ({ color, size }) => (
-            <FontAwesome name="map-marker" size={size} color={color} />
-          ),
+          tabBarIcon: ({ color, size }) => <HomeTabIcon color={color} size={size} />,
         }}
       />
       <Tabs.Screen
@@ -38,28 +70,17 @@ export default function TabLayout() {
         options={{
           title: 'Marşrut',
           tabBarIcon: ({ color, size }) => (
-            <FontAwesome name="compass" size={size} color={color} />
+            <MaterialCommunityIcons name="map-marker-path" size={size + 1} color={color} />
           ),
         }}
       />
       <Tabs.Screen
         name="ai-komekci"
         options={{
-          title: 'AI',
-          tabBarLabel: 'AI',
-          tabBarIcon: ({ focused }) => (
-            <View
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 16,
-                backgroundColor: focused ? colors.accentSoft : colors.chip,
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}
-            >
-              <Text style={{ fontSize: 15, lineHeight: 18 }}>✨</Text>
-            </View>
+          title: 'Al',
+          tabBarLabel: 'Al',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="bulb-outline" size={size + 1} color={color} />
           ),
         }}
       />
@@ -68,7 +89,7 @@ export default function TabLayout() {
         options={{
           title: 'İcma',
           tabBarIcon: ({ color, size }) => (
-            <FontAwesome name="users" size={size} color={color} />
+            <Ionicons name="people-outline" size={size + 1} color={color} />
           ),
         }}
       />
@@ -77,7 +98,7 @@ export default function TabLayout() {
         options={{
           title: 'Profil',
           tabBarIcon: ({ color, size }) => (
-            <FontAwesome name="user" size={size} color={color} />
+            <Ionicons name="person-outline" size={size + 1} color={color} />
           ),
         }}
       />

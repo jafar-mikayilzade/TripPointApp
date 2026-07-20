@@ -540,7 +540,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   chipSelected: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.chipSelected,
   },
   chipText: {
     fontSize: 13,

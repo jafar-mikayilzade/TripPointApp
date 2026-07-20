@@ -1,7 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -24,21 +23,24 @@ import { getErrorMessage } from '../../lib/errors';
 import { supabase } from '../../lib/supabase';
 import type { Listing, ListingType, Profile } from '../../types/database';
 
-import { colors } from '../../constants/theme';
+import { colors, radii, shadows, space } from '../../constants/theme';
 
 type ListingFilter = 'all' | ListingType;
 
 const FILTERS: { id: ListingFilter; label: string }[] = [
   { id: 'all', label: 'Hamısı' },
-  { id: 'tour', label: '🗺 Tur' },
-  { id: 'local_service', label: '🏔 Yerli Xidmət' },
-  { id: 'carpool', label: '🚗 Carpool' },
+  { id: 'tour', label: 'Tur' },
+  { id: 'local_service', label: 'Yerli xidmət' },
+  { id: 'carpool', label: 'Carpool' },
 ];
 
-const TYPE_META: Record<ListingType, { label: string; emoji: string; color: string }> = {
-  carpool: { label: 'Carpool', emoji: '🚗', color: '#5B8DEF' },
-  tour: { label: 'Tur', emoji: '🗺', color: '#1B7A4E' },
-  local_service: { label: 'Yerli xidmət', emoji: '🏔', color: '#C96B45' },
+const TYPE_META: Record<
+  ListingType,
+  { label: string; tint: string; soft: string }
+> = {
+  carpool: { label: 'Carpool', tint: colors.accent, soft: colors.accentSoft },
+  tour: { label: 'Tur', tint: colors.success, soft: colors.successSoft },
+  local_service: { label: 'Yerli xidmət', tint: colors.warning, soft: colors.warningSoft },
 };
 
 function formatDate(value: string | null): string {
@@ -54,6 +56,7 @@ function formatDate(value: string | null): string {
     month: 'short',
     hour: '2-digit',
     minute: '2-digit',
+    hour12: false,
   });
 }
 
@@ -166,8 +169,8 @@ export default function IcmaScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <View style={styles.titleBlock}>
-          <Text style={styles.title}>İcma</Text>
-          <Text style={styles.subtitle}>Elanlar və turlar</Text>
+          <Text style={styles.title}>icma</Text>
+          <Text style={styles.subtitle}>Sakitcə planla · yoldaş tap</Text>
         </View>
         <Pressable style={styles.addButton} onPress={() => setCreateVisible(true)} hitSlop={8}>
           <FontAwesome name="plus" size={18} color={colors.textOnAccent} />
@@ -212,7 +215,7 @@ export default function IcmaScreen() {
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
-            <ListingCard listing={item} onPress={() => openDetail(item)} />
+            <MemoListingCard listing={item} onPress={() => openDetail(item)} />
           )}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -260,88 +263,91 @@ function ListingCard({
 }) {
   const meta = TYPE_META[listing.type];
   const creatorName = listing.creator?.full_name?.trim() || 'İstifadəçi';
+  const seats = listing.spots_left ?? 0;
+  const price = formatPrice(listing);
+
+  let pairLeft = '';
+  let pairRight = '';
+  let footRight: string | null = null;
+
+  if (listing.type === 'carpool') {
+    pairLeft = `${listing.origin_text || '—'} → ${listing.destination_text || '—'}`;
+    pairRight = formatDate(listing.departure_at);
+    footRight = `${seats} yer`;
+  } else if (listing.type === 'tour') {
+    pairLeft = formatDate(listing.departure_at);
+    pairRight = `${seats} yer`;
+  } else {
+    pairLeft = getRegionLabel(listing.region);
+  }
 
   return (
     <Pressable style={styles.card} onPress={onPress}>
-      <View
-        style={[
-          styles.badge,
-          {
-            backgroundColor:
-              listing.type === 'tour' ? colors.successSoft : `${meta.color}18`,
-          },
-        ]}
-      >
-        <Text style={[styles.badgeText, { color: meta.color }]}>
-          {meta.emoji} {meta.label}
+      <View style={styles.cardTop}>
+        <View style={[styles.badge, { backgroundColor: meta.soft }]}>
+          <Text style={[styles.badgeText, { color: meta.tint }]}>{meta.label}</Text>
+        </View>
+        <Text style={styles.topRight} numberOfLines={1}>
+          {price}
         </Text>
       </View>
 
-      <Text style={styles.cardTitle} numberOfLines={2}>
+      <Text style={styles.cardTitle} numberOfLines={1}>
         {listing.title}
       </Text>
-      <Text style={styles.cardDescription} numberOfLines={2}>
-        {listing.description?.trim() || 'Təsvir yoxdur'}
-      </Text>
 
-      <View style={styles.creatorRow}>
-        {listing.creator?.avatar_url ? (
-          <Image source={{ uri: listing.creator.avatar_url }} style={styles.avatar} />
-        ) : (
-          <View style={styles.avatarPlaceholder}>
-            <Text style={styles.avatarInitial}>{creatorName.charAt(0).toUpperCase()}</Text>
-          </View>
-        )}
-        <Text style={styles.creatorName}>{creatorName}</Text>
+      <View style={styles.pairRow}>
+        <Text style={styles.pairLeft} numberOfLines={1}>
+          {pairLeft}
+        </Text>
+        {pairRight ? (
+          <Text style={styles.pairRight} numberOfLines={1}>
+            {pairRight}
+          </Text>
+        ) : null}
       </View>
 
-      <View style={styles.metaBlock}>
-        {listing.type === 'carpool' ? (
-          <>
-            <Text style={styles.metaLine}>
-              📍 {listing.origin_text || '—'} → {listing.destination_text || '—'}
-            </Text>
-            <Text style={styles.metaLine}>📅 {formatDate(listing.departure_at)}</Text>
-            <Text style={styles.metaLine}>💺 {listing.spots_left ?? 0} yer qalıb</Text>
-          </>
-        ) : null}
-
-        {listing.type === 'tour' ? (
-          <>
-            <Text style={styles.metaLine}>📍 {getRegionLabel(listing.region)}</Text>
-            <Text style={styles.metaLine}>📅 {formatDate(listing.departure_at)}</Text>
-            <Text style={styles.metaLine}>
-              👥 {listing.spots_left ?? 0} yer · 💰 {formatPrice(listing)}
-            </Text>
-          </>
-        ) : null}
-
-        {listing.type === 'local_service' ? (
-          <>
-            <Text style={styles.metaLine}>📍 {getRegionLabel(listing.region)}</Text>
-            <Text style={styles.metaLine}>💰 {formatPrice(listing)}</Text>
-            {listing.is_recurring ? (
-              <Text style={styles.metaLine}>🔄 Daimi xidmət</Text>
-            ) : null}
-          </>
+      <View style={styles.cardBottom}>
+        <View style={styles.creatorRow}>
+          {listing.creator?.avatar_url ? (
+            <Image source={{ uri: listing.creator.avatar_url }} style={styles.avatar} />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Text style={styles.avatarInitial}>{creatorName.charAt(0).toUpperCase()}</Text>
+            </View>
+          )}
+          <Text style={styles.creatorName} numberOfLines={1}>
+            {creatorName}
+          </Text>
+        </View>
+        {footRight ? (
+          <Text style={styles.footMeta} numberOfLines={1}>
+            {footRight}
+          </Text>
         ) : null}
       </View>
     </Pressable>
   );
 }
 
+const MemoListingCard = memo(ListingCard);
+
 function SkeletonCard() {
   return (
     <View style={styles.skeletonCard}>
-      <View style={[styles.skeletonLine, { width: 100, height: 18 }]} />
-      <View style={[styles.skeletonLine, { width: '80%', marginTop: 12 }]} />
-      <View style={[styles.skeletonLine, { width: '95%', marginTop: 8 }]} />
-      <View style={[styles.skeletonLine, { width: '60%', marginTop: 8 }]} />
+      <View style={styles.skeletonTop}>
+        <View style={[styles.skeletonLine, { width: 72, height: 16, marginTop: 0 }]} />
+        <View style={[styles.skeletonLine, { width: 48, height: 12, marginTop: 0 }]} />
+      </View>
+      <View style={[styles.skeletonLine, { width: '70%', marginTop: 10 }]} />
+      <View style={styles.skeletonTop}>
+        <View style={[styles.skeletonLine, { width: '55%', marginTop: 10 }]} />
+        <View style={[styles.skeletonLine, { width: 64, marginTop: 10 }]} />
+      </View>
       <View style={styles.skeletonFooter}>
         <View style={styles.skeletonAvatar} />
-        <View style={[styles.skeletonLine, { width: 120, marginTop: 0 }]} />
+        <View style={[styles.skeletonLine, { width: 88, marginTop: 0 }]} />
       </View>
-      <ActivityIndicator style={{ marginTop: 8, opacity: 0 }} />
     </View>
   );
 }
@@ -365,14 +371,15 @@ const styles = StyleSheet.create({
     paddingRight: 12,
   },
   title: {
-    fontSize: 32,
+    fontSize: 34,
     fontWeight: '700',
     color: colors.text,
-    letterSpacing: -0.6,
+    letterSpacing: -0.8,
+    textTransform: 'lowercase',
   },
   subtitle: {
-    marginTop: 2,
-    fontSize: 14,
+    marginTop: 4,
+    fontSize: 13,
     fontWeight: '500',
     color: colors.textSecondary,
   },
@@ -383,30 +390,24 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: colors.accent,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.28,
-    shadowRadius: 10,
-    elevation: 6,
+    ...shadows.fab,
   },
   filterScroll: {
     flexGrow: 0,
     flexShrink: 0,
   },
   filterRow: {
-    paddingHorizontal: 16,
-    paddingBottom: 10,
-    gap: 4,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.md,
+    gap: 8,
     alignItems: 'center',
   },
   filterChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: radii.pill,
     backgroundColor: colors.chip,
-    marginRight: 8,
-    alignSelf: 'center',
-    flexGrow: 0,
+    marginRight: 4,
   },
   filterChipSelected: {
     backgroundColor: colors.chipSelected,
@@ -421,82 +422,115 @@ const styles = StyleSheet.create({
     color: colors.textOnAccent,
   },
   listPad: {
-    paddingHorizontal: 16,
+    paddingHorizontal: space.lg,
   },
   listContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: space.lg,
     paddingBottom: 28,
     flexGrow: 1,
   },
   card: {
-    borderRadius: 28,
-    padding: 18,
-    marginBottom: 14,
+    borderRadius: radii.lg,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 8,
     backgroundColor: colors.surface,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 4,
+    ...shadows.card,
   },
-  badge: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    marginBottom: 12,
-  },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 6,
-    letterSpacing: -0.2,
-  },
-  cardDescription: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    lineHeight: 20,
-    marginBottom: 14,
-  },
-  creatorRow: {
+  cardTop: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 10,
-    marginBottom: 14,
+    marginBottom: 8,
+  },
+  badge: {
+    borderRadius: radii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  topRight: {
+    flexShrink: 0,
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+    letterSpacing: -0.2,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+    letterSpacing: -0.2,
+    marginBottom: 6,
+  },
+  pairRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 10,
+  },
+  pairLeft: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.textSecondary,
+  },
+  pairRight: {
+    flexShrink: 0,
+    maxWidth: '42%',
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.textSecondary,
+    textAlign: 'right',
+  },
+  cardBottom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  creatorRow: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
   },
   avatarPlaceholder: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.successSoft,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitial: {
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: '700',
-    color: colors.success,
+    color: colors.textSecondary,
   },
   creatorName: {
-    fontSize: 14,
+    flex: 1,
+    minWidth: 0,
+    fontSize: 12,
     fontWeight: '600',
-    color: colors.text,
+    color: colors.textMuted,
   },
-  metaBlock: {
-    gap: 8,
-  },
-  metaLine: {
-    fontSize: 13,
+  footMeta: {
+    flexShrink: 0,
+    fontSize: 12,
+    fontWeight: '600',
     color: colors.textSecondary,
   },
   emptyState: {
@@ -529,10 +563,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   skeletonCard: {
-    borderRadius: 24,
-    padding: 14,
-    marginBottom: 12,
+    borderRadius: radii.lg,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 8,
     backgroundColor: colors.surfaceMuted,
+  },
+  skeletonTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   skeletonLine: {
     height: 12,
@@ -543,12 +583,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 14,
+    marginTop: 12,
   },
   skeletonAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: colors.border,
   },
 });

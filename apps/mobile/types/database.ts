@@ -98,6 +98,14 @@ export type ListingReport = {
   created_at: string;
 };
 
+export type Favorite = {
+  id: string;
+  user_id: string;
+  target_type: 'poi' | 'listing';
+  target_id: string;
+  created_at: string;
+};
+
 export type Listing = {
   id: string;
   created_by: string;
@@ -267,6 +275,13 @@ export type Database = {
         Update: Partial<ListingReport>;
         Relationships: [];
       };
+      favorites: {
+        Row: Favorite;
+        Insert: Pick<Favorite, 'user_id' | 'target_type' | 'target_id'> &
+          Partial<Omit<Favorite, 'user_id' | 'target_type' | 'target_id'>>;
+        Update: Partial<Favorite>;
+        Relationships: [];
+      };
       listings: {
         Row: Listing;
         Insert: Pick<Listing, 'created_by' | 'type' | 'title'> &
@@ -353,6 +368,30 @@ export type Database = {
       delete_own_account: {
         Args: Record<PropertyKey, never>;
         Returns: { ok: boolean; user_id: string };
+      };
+      cancel_listing: {
+        Args: { p_listing_id: string };
+        Returns: undefined;
+      };
+      admin_update_listing: {
+        Args: {
+          p_listing_id: string;
+          p_title?: string | null;
+          p_description?: string | null;
+          p_status?: string | null;
+          p_price?: number | null;
+          p_contact_phone?: string | null;
+          p_spots_left?: number | null;
+        };
+        Returns: undefined;
+      };
+      set_listing_route_pois: {
+        Args: { p_listing_id: string; p_poi_ids: string[] };
+        Returns: undefined;
+      };
+      get_listing_route_poi_names: {
+        Args: { p_listing_id: string };
+        Returns: { name: string; sort_order: number | null }[];
       };
     };
   };

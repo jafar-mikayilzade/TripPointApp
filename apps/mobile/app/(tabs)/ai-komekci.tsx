@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -23,7 +24,13 @@ import { DropdownButton } from '../../components/DropdownButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
 import { getCategoryEmoji } from '../../lib/categoryUtils';
 import { getErrorMessage } from '../../lib/errors';
+import { shareRoutePdf, shareRouteText } from '../../lib/shareRoute';
 import { supabase } from '../../lib/supabase';
+import {
+  applyWeatherPoiFilter,
+  fetchRegionWeather,
+  type WeatherAdvice,
+} from '../../lib/weather';
 import {
   optimizeRouteAndTimeline,
   parseDurationHours,
@@ -32,7 +39,7 @@ import {
 
 import { colors } from '../../constants/theme';
 
-const DAY_COLORS = [colors.accent, colors.accent, '#059669', '#D97706', colors.danger];
+const DAY_COLORS = [colors.accent, colors.success, colors.warning, colors.accentPressed, colors.danger];
 
 const REGION_COORDS: Record<string, { latitude: number; longitude: number }> = {
   quba: { latitude: 41.3625, longitude: 48.5128 },
@@ -148,6 +155,7 @@ export default function AiKomekciScreen() {
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [plan, setPlan] = useState<any | null>(null);
+  const [weatherAdvice, setWeatherAdvice] = useState<WeatherAdvice | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<LatLng[]>([]);
@@ -306,24 +314,28 @@ export default function AiKomekciScreen() {
         return;
       }
 
-      const { data: pois, error: poisError } = await supabase
+      const { data: poisRaw, error: poisError } = await supabase
         .from('pois')
         .select('id, name, category, description, lat, lng, region')
         .eq('status', 'approved')
         .eq('region', selectedRegion.toLowerCase())
-        .limit(30);
+        .limit(40);
 
       if (poisError) {
         throw poisError;
       }
 
-      if (!pois || pois.length === 0) {
+      if (!poisRaw || poisRaw.length === 0) {
         setError('Bu bölgədə hələ yer əlavə edilməyib. Başqa rayon seçin.');
         return;
       }
 
+      const weather = await fetchRegionWeather(selectedRegion, selectedDays);
+      setWeatherAdvice(weather);
+      const pois = applyWeatherPoiFilter(poisRaw, weather);
+
       const restaurants = pois.filter((p) =>
-        ['restaurant', 'home_restaurant'].includes(p.category)
+        ['restaurant', 'home_restaurant', 'cafe'].includes(p.category)
       );
       const accommodations = pois.filter((p) =>
         ['hotel', 'hostel', 'guesthouse'].includes(p.category)
@@ -347,6 +359,14 @@ export default function AiKomekciScreen() {
           budget: selectedBudget,
           interests: selectedInterests,
           groupType: selectedGroup ?? 'tek',
+          weather: weather
+            ? {
+                prefer_indoor: weather.prefer_indoor,
+                summary_az: weather.summary_az,
+                exclude_categories: weather.exclude_categories,
+                prefer_categories: weather.prefer_categories,
+              }
+            : null,
           pois: {
             restaurants,
             accommodations,
@@ -561,6 +581,7 @@ export default function AiKomekciScreen() {
               <TouchableOpacity
                 onPress={() => {
                   setPlan(null);
+                  setWeatherAdvice(null);
                   setRouteCoordinates([]);
                   setStopDurations([]);
                 }}
@@ -701,6 +722,9 @@ export default function AiKomekciScreen() {
             >
               <View style={styles.summaryCard}>
                 <Text style={styles.summaryText}>{plan.summary}</Text>
+                {weatherAdvice?.summary_az ? (
+                  <Text style={styles.weatherNote}>{weatherAdvice.summary_az}</Text>
+                ) : null}
                 <View style={styles.summaryMetaRow}>
                   <Text style={styles.summaryMeta} numberOfLines={1}>
                     💰 {plan.total_cost}
@@ -708,6 +732,34 @@ export default function AiKomekciScreen() {
                   <Text style={styles.summaryMeta} numberOfLines={1}>
                     ⏰ {plan.best_time}
                   </Text>
+                </View>
+                <View style={styles.shareRow}>
+                  <TouchableOpacity
+                    style={styles.shareButton}
+                    onPress={() =>
+                      void shareRouteText(
+                        plan,
+                        selectedRegion ?? 'region',
+                        weatherAdvice?.summary_az
+                      ).catch((err) => Alert.alert('Paylaşım', getErrorMessage(err)))
+                    }
+                  >
+                    <Text style={styles.shareButtonText}>Paylaş</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.shareButton, styles.shareButtonSecondary]}
+                    onPress={() =>
+                      void shareRoutePdf(
+                        plan,
+                        selectedRegion ?? 'region',
+                        weatherAdvice?.summary_az
+                      ).catch((err) => Alert.alert('PDF', getErrorMessage(err)))
+                    }
+                  >
+                    <Text style={[styles.shareButtonText, styles.shareButtonTextSecondary]}>
+                      PDF
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               </View>
 
@@ -814,7 +866,7 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.bg,
   },
   mapSection: {
     flex: 1,
@@ -899,7 +951,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   durationChip: {
-    backgroundColor: 'rgba(124,58,237,0.9)',
+    backgroundColor: colors.accent,
     borderRadius: 10,
     padding: 6,
     maxWidth: 120,
@@ -994,7 +1046,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   submitButtonDisabled: {
-    backgroundColor: '#C4B5FD',
+    backgroundColor: colors.chip,
   },
   loadingRow: {
     flexDirection: 'row',
@@ -1019,7 +1071,7 @@ const styles = StyleSheet.create({
   },
   summaryText: {
     fontSize: 13,
-    color: '#5B21B6',
+    color: colors.accentPressed,
     lineHeight: 18,
     flexShrink: 1,
   },
@@ -1035,6 +1087,36 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flexShrink: 1,
     minWidth: 0,
+  },
+  weatherNote: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.accentPressed,
+    fontWeight: '500',
+  },
+  shareRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  shareButton: {
+    flex: 1,
+    backgroundColor: colors.accent,
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  shareButtonSecondary: {
+    backgroundColor: colors.accentSoft,
+  },
+  shareButtonText: {
+    color: colors.textOnAccent,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  shareButtonTextSecondary: {
+    color: colors.accentPressed,
   },
   dayBlock: {
     marginBottom: 16,

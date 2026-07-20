@@ -74,8 +74,8 @@ export function PhoneField({
           value={displayValue}
           onChangeText={handleChange}
           onBlur={handleBlur}
-          placeholder="XX XXX XX XX"
-          placeholderTextColor={colors.textMuted}
+          placeholder={error && !displayValue ? 'Boş ola bilməz' : 'XX XXX XX XX'}
+          placeholderTextColor={error && !displayValue ? colors.danger : colors.textMuted}
           keyboardType="number-pad"
           maxLength={AZ_PHONE_MAX_WITH_LEADING_ZERO}
           editable={editable}
@@ -84,7 +84,6 @@ export function PhoneField({
           {...inputProps}
         />
       </View>
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
   );
 }

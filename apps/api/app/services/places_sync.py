@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import requests
@@ -14,9 +15,12 @@ from app.constants.regions import REGION_COORDINATES
 from app.db import supabase
 from app.services.places_clean import clean_place, to_db_region
 from app.services.places_google import fetch_places_from_google
-from app.services.places_hybrid import fetch_places_from_hybrid
+from app.services.places_hybrid import fetch_places_from_hybrid, iter_hybrid_all_batches
 from app.services.places_mock import fetch_places_from_mock
 from app.services.places_osm import fetch_places_from_osm
+
+# One sync at a time — concurrent mobile/all+filter calls stampede Overpass
+_SYNC_LOCK = threading.Lock()
 
 
 def sync_places(region: str, category: str) -> JSONResponse:
@@ -57,61 +61,35 @@ def sync_places(region: str, category: str) -> JSONResponse:
             }
         )
 
-    coordinates = REGION_COORDINATES[region_key]
-    db_region = to_db_region(region_key)
+    if not _SYNC_LOCK.acquire(blocking=False):
+        return JSONResponse(
+            status_code=429,
+            content={
+                "success": False,
+                "error": "sync_busy",
+                "message": "Another sync is in progress. Retry in a few seconds.",
+            },
+        )
 
     try:
+        coordinates = REGION_COORDINATES[region_key]
+        db_region = to_db_region(region_key)
+
+        # Hybrid "all": upsert Google immediately, then OSM batch-by-batch
+        if DATA_SOURCE == "hybrid" and category_key == "all":
+            return _sync_hybrid_all_progressive(coordinates, region_key, db_region)
+
         raw_places, fetch_warnings = _fetch_raw_places(
             coordinates, region_key, category_key, db_region
         )
-
-        cleaned_places = [
-            cleaned
-            for place in raw_places
-            if (cleaned := clean_place(place, region_key, category_key)) is not None
-        ]
-
-        if not cleaned_places:
-            return JSONResponse(
-                content={
-                    "success": True,
-                    "data_source": DATA_SOURCE,
-                    "region": db_region,
-                    "category": category_key,
-                    "fetched": 0,
-                    "upserted": 0,
-                    "warnings": fetch_warnings,
-                    "message": "No places found for the given region and category.",
-                }
-            )
-
-        result = (
-            supabase.table("pois")
-            .upsert(cleaned_places, on_conflict="place_id")
-            .execute()
+        return _upsert_and_respond(
+            raw_places=raw_places,
+            region_key=region_key,
+            db_region=db_region,
+            category_key=category_key,
+            fetch_warnings=fetch_warnings,
         )
-        upserted_count = len(result.data) if result.data else len(cleaned_places)
-        category_counts: dict[str, int] = {}
-        for row in cleaned_places:
-            cat = str(row.get("category") or "other")
-            category_counts[cat] = category_counts.get(cat, 0) + 1
-
-        return JSONResponse(
-            content={
-                "success": True,
-                "data_source": DATA_SOURCE,
-                "region": db_region,
-                "category": category_key,
-                "fetched": len(raw_places),
-                "upserted": upserted_count,
-                "category_counts": category_counts,
-                "warnings": fetch_warnings,
-                "data": result.data or cleaned_places,
-            }
-        )
-
     except RuntimeError as exc:
-        # e.g. invalid Google API key — return clear error (not empty success)
         return JSONResponse(
             status_code=502,
             content={
@@ -150,6 +128,143 @@ def sync_places(region: str, category: str) -> JSONResponse:
                 "details": str(exc),
             },
         )
+    finally:
+        _SYNC_LOCK.release()
+
+
+def _sync_hybrid_all_progressive(
+    coordinates: dict[str, float],
+    region_key: str,
+    db_region: str,
+) -> JSONResponse:
+    """
+    Write Google food/lodging first so the app has POIs even if OSM times out later.
+    """
+    lat = coordinates["latitude"]
+    lng = coordinates["longitude"]
+    all_warnings: list[str] = []
+    total_fetched = 0
+    total_upserted = 0
+    category_counts: dict[str, int] = {}
+    seen_place_ids: set[str] = set()
+
+    for label, raw_places, warnings in iter_hybrid_all_batches(lat, lng):
+        all_warnings.extend(warnings)
+        total_fetched += len(raw_places)
+
+        # Dedupe across batches by place_id within this sync run
+        unique_batch: list[dict[str, Any]] = []
+        for place in raw_places:
+            place_id = str(place.get("place_id") or "").strip()
+            if not place_id or place_id in seen_place_ids:
+                continue
+            seen_place_ids.add(place_id)
+            unique_batch.append(place)
+
+        cleaned = [
+            cleaned
+            for place in unique_batch
+            if (cleaned := clean_place(place, region_key, "all")) is not None
+        ]
+        if not cleaned:
+            print(f"[hybrid] progressive skip empty batch={label}")
+            continue
+
+        result = (
+            supabase.table("pois")
+            .upsert(cleaned, on_conflict="place_id")
+            .execute()
+        )
+        batch_upserted = len(result.data) if result.data else len(cleaned)
+        total_upserted += batch_upserted
+        for row in cleaned:
+            cat = str(row.get("category") or "other")
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+        print(
+            f"[hybrid] progressive upsert batch={label} "
+            f"cleaned={len(cleaned)} upserted={batch_upserted}"
+        )
+
+    if total_upserted == 0:
+        return JSONResponse(
+            content={
+                "success": True,
+                "data_source": DATA_SOURCE,
+                "region": db_region,
+                "category": "all",
+                "fetched": total_fetched,
+                "upserted": 0,
+                "warnings": all_warnings,
+                "message": "No places found for the given region and category.",
+            }
+        )
+
+    return JSONResponse(
+        content={
+            "success": True,
+            "data_source": DATA_SOURCE,
+            "region": db_region,
+            "category": "all",
+            "fetched": total_fetched,
+            "upserted": total_upserted,
+            "category_counts": category_counts,
+            "warnings": all_warnings,
+        }
+    )
+
+
+def _upsert_and_respond(
+    *,
+    raw_places: list[dict[str, Any]],
+    region_key: str,
+    db_region: str,
+    category_key: str,
+    fetch_warnings: list[str],
+) -> JSONResponse:
+    cleaned_places = [
+        cleaned
+        for place in raw_places
+        if (cleaned := clean_place(place, region_key, category_key)) is not None
+    ]
+
+    if not cleaned_places:
+        return JSONResponse(
+            content={
+                "success": True,
+                "data_source": DATA_SOURCE,
+                "region": db_region,
+                "category": category_key,
+                "fetched": 0,
+                "upserted": 0,
+                "warnings": fetch_warnings,
+                "message": "No places found for the given region and category.",
+            }
+        )
+
+    result = (
+        supabase.table("pois")
+        .upsert(cleaned_places, on_conflict="place_id")
+        .execute()
+    )
+    upserted_count = len(result.data) if result.data else len(cleaned_places)
+    category_counts: dict[str, int] = {}
+    for row in cleaned_places:
+        cat = str(row.get("category") or "other")
+        category_counts[cat] = category_counts.get(cat, 0) + 1
+
+    return JSONResponse(
+        content={
+            "success": True,
+            "data_source": DATA_SOURCE,
+            "region": db_region,
+            "category": category_key,
+            "fetched": len(raw_places),
+            "upserted": upserted_count,
+            "category_counts": category_counts,
+            "warnings": fetch_warnings,
+            "data": result.data or cleaned_places,
+        }
+    )
 
 
 def _fetch_raw_places(
