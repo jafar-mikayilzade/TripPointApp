@@ -1,4 +1,5 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
+import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
@@ -26,6 +27,7 @@ import {
 } from '../../components/ListingDetailModal';
 import { PhoneField } from '../../components/PhoneField';
 import { REGIONS } from '../../constants/regions';
+import { colors } from '../../constants/theme';
 import { deleteOwnAccount } from '../../lib/deleteAccount';
 import { getErrorMessage } from '../../lib/errors';
 import { ensureProfile } from '../../lib/ensureProfile';
@@ -38,6 +40,7 @@ import {
 } from '../../lib/formValidation';
 import { signOutEverywhere } from '../../lib/googleAuth';
 import { supabase } from '../../lib/supabase';
+import { uploadImage } from '../../lib/uploadImage';
 import { useIsAdmin } from '../../lib/useIsAdmin';
 import {
   confirmDelete,
@@ -54,7 +57,7 @@ import type {
   UserRole,
 } from '../../types/database';
 
-import { colors } from '../../constants/theme';
+const AVATAR_BUCKET = 'avatars';
 
 type ProfileTab = 'travels' | 'listings' | 'reviews';
 
@@ -79,12 +82,6 @@ const TYPE_META: Record<ListingType, { label: string; emoji: string; color: stri
   tour: { label: 'Tur', emoji: '🗺', color: colors.success },
   local_service: { label: 'Yerli xidmət', emoji: '🏔', color: colors.warning },
 };
-
-const TABS: { id: ProfileTab; label: string }[] = [
-  { id: 'travels', label: 'Səyahətlər' },
-  { id: 'listings', label: 'Elanlar' },
-  { id: 'reviews', label: 'Rəylər' },
-];
 
 function formatDate(value: string | null): string {
   if (!value) {
@@ -163,6 +160,7 @@ export default function ProfilScreen() {
   const [editPhone, setEditPhone] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
   const [selectedTravel, setSelectedTravel] = useState<TravelRow | null>(null);
@@ -440,6 +438,63 @@ export default function ProfilScreen() {
     setEditVisible(true);
   }
 
+  async function handlePickAvatar() {
+    if (!authUserId || !isOwnProfile || uploadingAvatar) {
+      return;
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('İcazə lazımdır', 'Profil şəkli üçün qalereya icazəsi verin.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.85,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+
+    if (result.canceled || !result.assets[0]?.uri) {
+      return;
+    }
+
+    setUploadingAvatar(true);
+    setErrorMessage(null);
+
+    try {
+      const uri = result.assets[0].uri;
+      const extension = uri.split('.').pop()?.split('?')[0]?.toLowerCase() ?? 'jpg';
+      const safeExt =
+        extension === 'png' || extension === 'webp' || extension === 'jpeg' || extension === 'jpg'
+          ? extension
+          : 'jpg';
+      const path = `${authUserId}/avatar.${safeExt}`;
+      const publicUrl = await uploadImage(uri, AVATAR_BUCKET, path);
+      const avatarUrl = `${publicUrl}?t=${Date.now()}`;
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          avatar_url: avatarUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', authUserId);
+
+      if (error) {
+        setErrorMessage(getErrorMessage(error));
+        return;
+      }
+
+      setProfile((prev) => (prev ? { ...prev, avatar_url: avatarUrl } : prev));
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err));
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
   async function saveProfile() {
     if (!profile || !authUserId) {
       return;
@@ -653,7 +708,29 @@ export default function ProfilScreen() {
         ) : null}
 
         <View style={styles.headerBlock}>
-          {profile.avatar_url ? (
+          {isOwnProfile ? (
+            <Pressable
+              style={styles.avatarPressable}
+              onPress={() => void handlePickAvatar()}
+              disabled={uploadingAvatar}
+              accessibilityLabel="Profil şəkli əlavə et"
+            >
+              {profile.avatar_url ? (
+                <Image source={{ uri: profile.avatar_url }} style={styles.avatar} />
+              ) : (
+                <View style={styles.avatarPlaceholder}>
+                  <Text style={styles.avatarInitial}>{displayName.charAt(0).toUpperCase()}</Text>
+                </View>
+              )}
+              <View style={styles.avatarBadge}>
+                {uploadingAvatar ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <FontAwesome name="camera" size={12} color="#fff" />
+                )}
+              </View>
+            </Pressable>
+          ) : profile.avatar_url ? (
             <Image source={{ uri: profile.avatar_url }} style={styles.avatar} />
           ) : (
             <View style={styles.avatarPlaceholder}>
@@ -679,28 +756,40 @@ export default function ProfilScreen() {
           {profile.bio?.trim() ? <Text style={styles.bio}>{profile.bio.trim()}</Text> : null}
 
           <View style={styles.statsRow}>
-            <StatBox label="Səyahət" value={travelCount} />
-            <StatBox label="Elan" value={listingCount} />
-            <StatBox label="Rəy" value={ratingCount} />
+            <StatBox
+              label="Səyahət"
+              value={travelCount}
+              selected={activeTab === 'travels'}
+              onPress={() => setActiveTab('travels')}
+            />
+            <StatBox
+              label="Elan"
+              value={listingCount}
+              selected={activeTab === 'listings'}
+              onPress={() => setActiveTab('listings')}
+            />
+            <StatBox
+              label="Rəy"
+              value={ratingCount}
+              selected={activeTab === 'reviews'}
+              onPress={() => setActiveTab('reviews')}
+            />
           </View>
 
           {isOwnProfile ? (
             <View style={styles.actionColumn}>
               <View style={styles.actionRow}>
                 <Pressable style={styles.primaryButton} onPress={openEditModal}>
-                  <Text style={styles.primaryButtonText}>Profili Redaktə et</Text>
+                  <Text style={styles.primaryButtonText}>Redaktə et</Text>
                 </Pressable>
-                <Pressable style={styles.dangerButton} onPress={handleSignOut}>
-                  <Text style={styles.dangerButtonText}>Çıxış</Text>
+                <Pressable
+                  style={styles.splitBillButton}
+                  onPress={() => router.push('/split-bill' as never)}
+                >
+                  <FontAwesome name="money" size={13} color="#fff" />
+                  <Text style={styles.splitBillButtonText}>Xərc bölüşdürücü</Text>
                 </Pressable>
               </View>
-              <Pressable
-                style={styles.splitBillButton}
-                onPress={() => router.push('/split-bill' as never)}
-              >
-                <FontAwesome name="money" size={14} color="#fff" />
-                <Text style={styles.splitBillButtonText}>Xərc Bölüşdürücü</Text>
-              </Pressable>
               {isAdmin ? (
                 <Pressable
                   style={styles.adminModButton}
@@ -710,17 +799,6 @@ export default function ProfilScreen() {
                   <Text style={styles.splitBillButtonText}>Admin nəzarəti</Text>
                 </Pressable>
               ) : null}
-              <Pressable
-                style={[styles.deleteAccountButton, deletingAccount && styles.disabled]}
-                onPress={handleDeleteAccount}
-                disabled={deletingAccount}
-              >
-                {deletingAccount ? (
-                  <ActivityIndicator color={colors.dangerText} />
-                ) : (
-                  <Text style={styles.deleteAccountButtonText}>Hesabı sil</Text>
-                )}
-              </Pressable>
             </View>
           ) : profile.phone ? (
             <Pressable style={styles.whatsappButton} onPress={openWhatsApp}>
@@ -751,21 +829,6 @@ export default function ProfilScreen() {
             ))}
           </View>
         ) : null}
-
-        <View style={styles.tabRow}>
-          {TABS.map((tab) => {
-            const selected = activeTab === tab.id;
-            return (
-              <Pressable
-                key={tab.id}
-                style={[styles.tabChip, selected && styles.tabChipSelected]}
-                onPress={() => setActiveTab(tab.id)}
-              >
-                <Text style={[styles.tabText, selected && styles.tabTextSelected]}>{tab.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
 
         {tabLoading ? (
           <ActivityIndicator color={colors.accent} style={{ marginTop: 24 }} />
@@ -870,6 +933,25 @@ export default function ProfilScreen() {
             ) : null}
           </View>
         )}
+
+        {isOwnProfile ? (
+          <View style={styles.bottomActionRow}>
+            <Pressable style={styles.dangerButton} onPress={handleSignOut}>
+              <Text style={styles.dangerButtonText}>Çıxış</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.deleteAccountButton, deletingAccount && styles.disabled]}
+              onPress={handleDeleteAccount}
+              disabled={deletingAccount}
+            >
+              {deletingAccount ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.deleteAccountButtonText}>Hesabı sil</Text>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
       </ScrollView>
 
       <Modal visible={editVisible} transparent animationType="slide" onRequestClose={() => setEditVisible(false)}>
@@ -1001,12 +1083,27 @@ export default function ProfilScreen() {
   );
 }
 
-function StatBox({ label, value }: { label: string; value: number }) {
+function StatBox({
+  label,
+  value,
+  selected,
+  onPress,
+}: {
+  label: string;
+  value: number;
+  selected: boolean;
+  onPress: () => void;
+}) {
   return (
-    <View style={styles.statBox}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
+    <Pressable
+      style={[styles.statBox, selected && styles.statBoxSelected]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+    >
+      <Text style={[styles.statValue, selected && styles.statValueSelected]}>{value}</Text>
+      <Text style={[styles.statLabel, selected && styles.statLabelSelected]}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -1094,6 +1191,9 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
   },
+  avatarPressable: {
+    position: 'relative',
+  },
   avatar: {
     width: 80,
     height: 80,
@@ -1106,6 +1206,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  avatarBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.surface,
   },
   avatarInitial: {
     fontSize: 28,
@@ -1158,17 +1271,29 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  statBoxSelected: {
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
   },
   statValue: {
     fontSize: 18,
     fontWeight: '800',
     color: colors.text,
   },
+  statValueSelected: {
+    color: colors.accentPressed,
+  },
   statLabel: {
     marginTop: 2,
     fontSize: 12,
     color: colors.textSecondary,
     fontWeight: '600',
+  },
+  statLabelSelected: {
+    color: colors.accentPressed,
   },
   actionRow: {
     flexDirection: 'row',
@@ -1180,15 +1305,23 @@ const styles = StyleSheet.create({
     marginTop: 16,
     gap: 10,
   },
-  splitBillButton: {
+  bottomActionRow: {
+    flexDirection: 'row',
+    gap: 10,
     width: '100%',
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  splitBillButton: {
+    flex: 1,
     backgroundColor: colors.accent,
     borderRadius: 16,
     paddingVertical: 12,
+    paddingHorizontal: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 6,
   },
   adminModButton: {
     width: '100%',
@@ -1203,6 +1336,7 @@ const styles = StyleSheet.create({
   splitBillButtonText: {
     color: colors.textOnAccent,
     fontWeight: '700',
+    fontSize: 13,
   },
   primaryButton: {
     flex: 1,
@@ -1210,10 +1344,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   primaryButtonText: {
     color: colors.textOnAccent,
     fontWeight: '700',
+    fontSize: 13,
   },
   dangerButton: {
     flex: 1,
@@ -1227,16 +1363,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   deleteAccountButton: {
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#FECACA',
+    flex: 1,
     borderRadius: 16,
     paddingVertical: 12,
     alignItems: 'center',
-    backgroundColor: '#FFF7F7',
+    backgroundColor: '#B44545',
   },
   deleteAccountButtonText: {
-    color: colors.dangerText,
+    color: '#FFFFFF',
     fontWeight: '700',
   },
   whatsappButton: {
@@ -1297,31 +1431,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     backgroundColor: colors.successSoft,
   },
-  tabRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 18,
-  },
-  tabChip: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: colors.chip,
-    alignItems: 'center',
-  },
-  tabChipSelected: {
-    backgroundColor: colors.text,
-  },
-  tabText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.chipText,
-  },
-  tabTextSelected: {
-    color: colors.textOnAccent,
-  },
   tabContent: {
-    marginTop: 14,
+    marginTop: 18,
   },
   addTravelButton: {
     backgroundColor: colors.accent,
