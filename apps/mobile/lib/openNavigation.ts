@@ -25,11 +25,14 @@ export function collectRouteStops(plan: {
 }
 
 /**
- * Opens Google Maps turn-by-turn (Waze-like) for a multi-stop route.
- * Full in-app Navigation SDK is costly; this reuses Maps already on the phone.
+ * Opens Google Maps directions overview (route preview).
+ * Does NOT auto-start turn-by-turn — user taps Start in Maps if they want.
  * Mobile Maps URLs: origin + destination + up to ~8 waypoints.
  */
-export function buildGoogleMapsNavUrl(stops: NavStop[]): string | null {
+export function buildGoogleMapsNavUrl(
+  stops: NavStop[],
+  options?: { startNavigation?: boolean }
+): string | null {
   if (stops.length < 2) {
     return null;
   }
@@ -46,8 +49,12 @@ export function buildGoogleMapsNavUrl(stops: NavStop[]): string | null {
     `https://www.google.com/maps/dir/?api=1` +
     `&origin=${encodeURIComponent(origin)}` +
     `&destination=${encodeURIComponent(destination)}` +
-    `&travelmode=driving` +
-    `&dir_action=navigate`;
+    `&travelmode=driving`;
+
+  // Yalnız açıq istənəndə naviqasiyanı avtomatik başlat
+  if (options?.startNavigation) {
+    url += `&dir_action=navigate`;
+  }
 
   if (waypoints) {
     url += `&waypoints=${encodeURIComponent(waypoints)}`;
@@ -56,10 +63,13 @@ export function buildGoogleMapsNavUrl(stops: NavStop[]): string | null {
   return url;
 }
 
-export async function openRouteInGoogleMaps(stops: NavStop[]): Promise<void> {
-  const url = buildGoogleMapsNavUrl(stops);
+export async function openRouteInGoogleMaps(
+  stops: NavStop[],
+  options?: { startNavigation?: boolean }
+): Promise<void> {
+  const url = buildGoogleMapsNavUrl(stops, options);
   if (!url) {
-    throw new Error('Naviqasiya üçün ən azı 2 nöqtə lazımdır');
+    throw new Error('Marşrut üçün ən azı 2 nöqtə lazımdır');
   }
 
   const can = await Linking.canOpenURL(url);

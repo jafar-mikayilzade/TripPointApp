@@ -14,6 +14,7 @@ import { getErrorMessage } from '../lib/errors';
 import { configureGoogleSignIn, signOutEverywhere } from '../lib/googleAuth';
 import { supabase } from '../lib/supabase';
 
+import { InfoToastProvider } from '../components/InfoToastProvider';
 import { colors } from '../constants/theme';
 
 const SESSION_TIMEOUT_MS = 8000;
@@ -162,19 +163,21 @@ export default function RootLayout() {
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
+    <InfoToastProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" />
 
-      <Stack.Protected guard={!!session}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="split-bill" />
-        <Stack.Screen name="feed" />
-      </Stack.Protected>
+        <Stack.Protected guard={!!session}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="split-bill" />
+          <Stack.Screen name="feed" />
+        </Stack.Protected>
 
-      <Stack.Protected guard={!session}>
-        <Stack.Screen name="auth" />
-      </Stack.Protected>
-    </Stack>
+        <Stack.Protected guard={!session}>
+          <Stack.Screen name="auth" />
+        </Stack.Protected>
+      </Stack>
+    </InfoToastProvider>
   );
 }
 

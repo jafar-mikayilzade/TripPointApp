@@ -1,6 +1,6 @@
 import type { User } from '@supabase/supabase-js';
 
-import { AUTH_CALLBACK_URL } from './authDeepLink';
+import { AUTH_CALLBACK_URL } from './authConstants';
 import { supabase } from './supabase';
 
 /** Google idToken axını bitənə qədər layout verified gate-i gözləsin. */

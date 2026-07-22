@@ -66,21 +66,21 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="ai-komekci"
+        options={{
+          title: 'Qur',
+          tabBarLabel: 'Qur',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="construct-outline" size={size + 1} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="marsrut"
         options={{
           title: 'Marşrut',
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="map-marker-path" size={size + 1} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="ai-komekci"
-        options={{
-          title: 'Al',
-          tabBarLabel: 'Al',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="bulb-outline" size={size + 1} color={color} />
           ),
         }}
       />

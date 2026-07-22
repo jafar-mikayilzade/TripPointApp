@@ -30,13 +30,26 @@ const REGION_TO_API: Record<string, string> = {
 };
 
 const DEBOUNCE_MS = 1200;
-// Short enough that a redeployed API can be re-tested without a long wait
 const COOLDOWN_MS = 90_000;
+const BUSY_COOLDOWN_MS = 25_000;
 const FETCH_TIMEOUT_MS = 55_000;
-const FETCH_TIMEOUT_ALL_MS = 120_000;
+const FETCH_TIMEOUT_ALL_MS = 180_000;
+const BUSY_RETRY_MS = 8_000;
 
 const lastSyncedAt = new Map<string, number>();
 const inFlight = new Map<string, Promise<SyncPlacesResult>>();
+
+/** Serialize all sync HTTP calls — API allows only one sync at a time (429 otherwise). */
+let syncChain: Promise<void> = Promise.resolve();
+
+function enqueueSync<T>(fn: () => Promise<T>): Promise<T> {
+  const run = syncChain.then(fn, fn);
+  syncChain = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
 
 export type SyncPlacesResult = {
   ok: boolean;
@@ -67,7 +80,37 @@ function syncKey(apiRegion: string, apiCategory: SyncCategory): string {
   return `${apiRegion}:${apiCategory}`;
 }
 
+function isBusyResponse(
+  status: number,
+  body: { error?: string; message?: string } | null
+): boolean {
+  if (status === 429) {
+    return true;
+  }
+  const err = `${body?.error ?? ''} ${body?.message ?? ''}`.toLowerCase();
+  return err.includes('sync_busy') || err.includes('another sync');
+}
+
 type SyncOneStatus = 'synced' | 'skipped';
+
+async function fetchSyncOnce(
+  url: string,
+  signal: AbortSignal
+): Promise<{ response: Response; body: Record<string, unknown> | null }> {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    signal,
+  });
+
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = (await response.json()) as Record<string, unknown>;
+  } catch {
+    body = null;
+  }
+  return { response, body };
+}
 
 async function syncOne(
   baseUrl: string,
@@ -88,25 +131,41 @@ async function syncOne(
   }
 
   const timeoutMs = apiCategory === 'all' ? FETCH_TIMEOUT_ALL_MS : FETCH_TIMEOUT_MS;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  const request = (async (): Promise<SyncPlacesResult> => {
+  const request = enqueueSync(async (): Promise<SyncPlacesResult> => {
+    // Re-check cooldown after waiting in queue
+    const queuedAt = Date.now();
+    const lastAfterWait = lastSyncedAt.get(key) ?? 0;
+    if (queuedAt - lastAfterWait < COOLDOWN_MS) {
+      return { ok: true, attempted: false };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const url = `${baseUrl}/api/sync-places?region=${encodeURIComponent(apiRegion)}&category=${encodeURIComponent(apiCategory)}`;
     console.log('[syncPlaces] GET', url);
 
     try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: { Accept: 'application/json' },
-        signal: controller.signal,
-      });
+      let { response, body } = await fetchSyncOnce(url, controller.signal);
 
-      let body: { success?: boolean; message?: string; detail?: unknown } | null = null;
-      try {
-        body = (await response.json()) as typeof body;
-      } catch {
-        body = null;
+      if (
+        isBusyResponse(response.status, body as { error?: string; message?: string } | null)
+      ) {
+        console.log('[syncPlaces] server busy — retry once');
+        await new Promise((r) => setTimeout(r, BUSY_RETRY_MS));
+        if (controller.signal.aborted) {
+          return { ok: true, attempted: false };
+        }
+        ({ response, body } = await fetchSyncOnce(url, controller.signal));
+      }
+
+      if (
+        isBusyResponse(response.status, body as { error?: string; message?: string } | null)
+      ) {
+        // Still busy — silent skip, short cooldown so we don't stampede
+        lastSyncedAt.set(key, Date.now() - COOLDOWN_MS + BUSY_COOLDOWN_MS);
+        console.log('[syncPlaces] still busy — skip');
+        return { ok: true, attempted: false };
       }
 
       if (!response.ok || body?.success === false) {
@@ -124,12 +183,12 @@ async function syncOne(
     } finally {
       clearTimeout(timeout);
     }
-  })();
+  });
 
   inFlight.set(key, request);
   try {
-    await request;
-    return 'synced';
+    const result = await request;
+    return result.attempted ? 'synced' : 'skipped';
   } finally {
     inFlight.delete(key);
   }

@@ -1,4 +1,5 @@
 import * as Location from 'expo-location';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import {
@@ -26,8 +27,8 @@ import MapView, {
 } from '../../components/ClusteredAppMap';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AddPoiModal } from '../../components/AddPoiModal';
 import { AdminPoiCategoryModal } from '../../components/AdminPoiCategoryModal';
+import { CategoryIcon } from '../../components/CategoryIcon';
 import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
 import { useToast } from '../../components/Toast';
@@ -39,17 +40,20 @@ import {
   type GoogleMapPoiPayload,
 } from '../../lib/adminMap';
 import {
-  getCategoryEmoji,
   getCategoryLabel,
   type HomeCategoryFilterId,
 } from '../../lib/categoryUtils';
 import { getErrorMessage } from '../../lib/errors';
-import { createDebouncedSyncPlaces } from '../../lib/syncPlaces';
+import {
+  fetchLivePlaces,
+  isDatabasePoiId,
+  livePlaceToPoi,
+} from '../../lib/livePlaces';
 import { supabase } from '../../lib/supabase';
 import { useIsAdmin } from '../../lib/useIsAdmin';
 import type { Poi, PoiCategory, PoiPhoto } from '../../types/database';
 
-import { colors, shadows } from '../../constants/theme';
+import { colors } from '../../constants/theme';
 
 type PoiListItem = Poi & {
   photoUrl: string | null;
@@ -71,19 +75,19 @@ const LOCATION_OPTIONS: { label: string; value: string | null }[] = [
 ];
 
 const CATEGORY_OPTIONS: { label: string; value: string | null }[] = [
-  { label: '🗺️ Hamısı', value: null },
-  { label: '🍽️ Restoran', value: 'restaurant' },
-  { label: '🏨 Otel', value: 'hotel' },
-  { label: '🛏️ Hostel', value: 'hostel' },
-  { label: '🏠 Ev restoranı', value: 'home_restaurant' },
-  { label: '🏡 Qonaq evi', value: 'guesthouse' },
-  { label: '🌿 Təbiət', value: 'nature' },
-  { label: '💧 Şəlalə', value: 'waterfall' },
-  { label: '⛰️ Dağ', value: 'mountain' },
-  { label: '🏞️ Göl', value: 'lake' },
-  { label: '🏛️ Tarixi', value: 'historical' },
-  { label: '🗿 Abidə', value: 'monument' },
-  { label: '📍 Digər', value: 'other' },
+  { label: 'Hamısı', value: null },
+  { label: 'Restoran', value: 'restaurant' },
+  { label: 'Otel', value: 'hotel' },
+  { label: 'Hostel', value: 'hostel' },
+  { label: 'Ev restoranı', value: 'home_restaurant' },
+  { label: 'Qonaq evi', value: 'guesthouse' },
+  { label: 'Təbiət', value: 'nature' },
+  { label: 'Şəlalə', value: 'waterfall' },
+  { label: 'Dağ', value: 'mountain' },
+  { label: 'Göl', value: 'lake' },
+  { label: 'Tarixi', value: 'historical' },
+  { label: 'Abidə', value: 'monument' },
+  { label: 'Digər', value: 'other' },
 ];
 
 const REGION_LOCATIVE: Record<string, string> = {
@@ -132,7 +136,6 @@ export default function HomeScreen() {
   const [selectedPoi, setSelectedPoi] = useState<Poi | null>(null);
   /** Custom marker redraw (tracksViewChanges) — seçim dəyişəndə qısa müddət. */
   const [markerTracksId, setMarkerTracksId] = useState<string | null>(null);
-  const [addPoiVisible, setAddPoiVisible] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [pendingGooglePoi, setPendingGooglePoi] = useState<GoogleMapPoiPayload | null>(null);
@@ -183,7 +186,7 @@ export default function HomeScreen() {
 
   const listTitle = useMemo(() => {
     if (!selectedRegionId && categoryFilter === 'all') {
-      return '📍 Yaxınlıqda';
+      return 'Yaxınlıqda';
     }
 
     const locative = selectedRegionId
@@ -191,19 +194,83 @@ export default function HomeScreen() {
       : null;
 
     if (selectedRegionId && categoryFilter === 'all') {
-      return `🗺️ ${locative} yerlər`;
+      return `${locative} yerlər`;
     }
 
     if (selectedRegionId && selectedCategory) {
-      return `${getCategoryEmoji(selectedCategory)} ${locative} ${getCategoryLabel(selectedCategory).toLowerCase()}`;
+      return `${locative} · ${getCategoryLabel(selectedCategory)}`;
     }
 
     if (!selectedRegionId && selectedCategory) {
-      return `${getCategoryEmoji(selectedCategory)} Yaxınlıqda ${getCategoryLabel(selectedCategory).toLowerCase()}`;
+      return `Yaxınlıqda · ${getCategoryLabel(selectedCategory)}`;
     }
 
-    return '📍 Yaxınlıqda';
+    return 'Yaxınlıqda';
   }, [selectedRegionId, categoryFilter, selectedRegion, selectedCategory]);
+
+  const fetchPoisFromDb = useCallback(async (): Promise<PoiListItem[]> => {
+    let query = supabase
+      .from('pois')
+      .select(
+        `
+          *,
+          poi_photos (
+            photo_url,
+            order_index,
+            created_at,
+            status
+          )
+        `
+      )
+      .eq('status', 'approved')
+      .order('rating', { ascending: false, nullsFirst: false });
+
+    if (selectedRegionId) {
+      query = query.ilike('region', selectedRegionId);
+    }
+
+    if (categoryFilter && categoryFilter !== 'all') {
+      query = query.eq('category', categoryFilter);
+    }
+
+    query = query.neq('category', 'cafe');
+
+    const { data, error } = await query.limit(50);
+    if (error) {
+      throw error;
+    }
+
+    const rows = (data ?? []) as PoiQueryRow[];
+    const mapped = rows.map((poi) => {
+      const photos = [...(poi.poi_photos ?? [])]
+        .filter((photo) => !('status' in photo) || photo.status === 'approved')
+        .sort((a, b) => a.order_index - b.order_index);
+      const { poi_photos: _ignored, ...rest } = poi;
+      return {
+        ...rest,
+        photoUrl: photos[0]?.photo_url ?? null,
+        averageRating:
+          typeof rest.rating === 'number' && Number.isFinite(rest.rating)
+            ? rest.rating
+            : null,
+        ratingCount:
+          typeof rest.rating_count === 'number' && Number.isFinite(rest.rating_count)
+            ? rest.rating_count
+            : 0,
+      };
+    });
+
+    mapped.sort((a, b) => {
+      const ra = a.averageRating ?? -1;
+      const rb = b.averageRating ?? -1;
+      if (rb !== ra) {
+        return rb - ra;
+      }
+      return (b.ratingCount ?? 0) - (a.ratingCount ?? 0);
+    });
+
+    return mapped;
+  }, [selectedRegionId, categoryFilter]);
 
   const fetchPois = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent === true;
@@ -213,76 +280,37 @@ export default function HomeScreen() {
         setErrorMessage(null);
       }
 
-      let query = supabase
-        .from('pois')
-        .select(
-          `
-          *,
-          poi_photos (
-            photo_url,
-            order_index,
-            created_at,
-            status
-          )
-        `
-        )
-        .eq('status', 'approved')
-        .order('rating', { ascending: false, nullsFirst: false });
-
+      // Region seçilibsə — live Google (API); uğursuz olsa DB fallback
       if (selectedRegionId) {
-        // Region id həmişə lowercase (quba); DB-də köhnə "Quba" olsa belə tapılsın
-        query = query.ilike('region', selectedRegionId);
-      }
+        const live = await fetchLivePlaces(selectedRegionId, {
+          category: categoryFilter === 'all' ? null : categoryFilter,
+          limit: 60,
+        });
 
-      if (categoryFilter && categoryFilter !== 'all') {
-        query = query.eq('category', categoryFilter);
-      }
-
-      // Cafe temporarily ignored (low tourism value / noisy OSM tags)
-      query = query.neq('category', 'cafe');
-
-      const { data, error } = await query.limit(50);
-
-      if (error) {
-        console.log('POI xətası:', JSON.stringify(error));
-        if (!silent) {
-          setErrorMessage('Xəta: ' + error.message + ' | Kod: ' + error.code);
+        if (live && live.places.length > 0) {
+          const mapped: PoiListItem[] = live.places.map((place) => {
+            const poi = livePlaceToPoi(place, selectedRegionId);
+            return {
+              ...poi,
+              photoUrl: null,
+              averageRating:
+                typeof poi.rating === 'number' && Number.isFinite(poi.rating)
+                  ? poi.rating
+                  : null,
+              ratingCount:
+                typeof poi.rating_count === 'number' && Number.isFinite(poi.rating_count)
+                  ? poi.rating_count
+                  : 0,
+            };
+          });
+          console.log('Live places:', mapped.length, live.source);
+          setPois(mapped);
+          return;
         }
-        return;
       }
 
-      console.log('POI sayı:', data?.length);
-
-      const rows = (data ?? []) as PoiQueryRow[];
-      const mapped = rows.map((poi) => {
-        const photos = [...(poi.poi_photos ?? [])]
-          .filter((photo) => !('status' in photo) || photo.status === 'approved')
-          .sort((a, b) => a.order_index - b.order_index);
-        const { poi_photos: _ignored, ...rest } = poi;
-        return {
-          ...rest,
-          photoUrl: photos[0]?.photo_url ?? null,
-          averageRating:
-            typeof rest.rating === 'number' && Number.isFinite(rest.rating)
-              ? rest.rating
-              : null,
-          ratingCount:
-            typeof rest.rating_count === 'number' && Number.isFinite(rest.rating_count)
-              ? rest.rating_count
-              : 0,
-        };
-      });
-
-      // Hamısı + kateqoriya filterində eyni: reytinq ↓, sonra rəy sayı ↓
-      mapped.sort((a, b) => {
-        const ra = a.averageRating ?? -1;
-        const rb = b.averageRating ?? -1;
-        if (rb !== ra) {
-          return rb - ra;
-        }
-        return (b.ratingCount ?? 0) - (a.ratingCount ?? 0);
-      });
-
+      const mapped = await fetchPoisFromDb();
+      console.log('POI sayı (DB):', mapped.length);
       setPois(mapped);
     } catch (err: unknown) {
       console.log('Catch xətası:', err);
@@ -295,7 +323,7 @@ export default function HomeScreen() {
         setLoading(false);
       }
     }
-  }, [selectedRegionId, categoryFilter]);
+  }, [selectedRegionId, categoryFilter, fetchPoisFromDb]);
 
   useEffect(() => {
     let cancelled = false;
@@ -335,35 +363,6 @@ export default function HomeScreen() {
   useEffect(() => {
     fetchPois();
   }, [fetchPois]);
-
-  const fetchPoisRef = useRef(fetchPois);
-  fetchPoisRef.current = fetchPois;
-  const showToastRef = useRef(showToast);
-  showToastRef.current = showToast;
-
-  // Region/filter dəyişəndə arxa fonda API sync; oxuma yenə Supabase-dən.
-  useEffect(() => {
-    if (!selectedRegionId) {
-      return;
-    }
-
-    const debounced = createDebouncedSyncPlaces((result) => {
-      if (result.ok && result.attempted) {
-        // Loading spinner olmadan yenilə — UI donmur
-        void fetchPoisRef.current({ silent: true });
-        return;
-      }
-      if (!result.ok && result.attempted && result.error) {
-        showToastRef.current('Yeniləmə alınmadı — köhnə siyahı saxlanıldı');
-      }
-    });
-
-    debounced.schedule(selectedRegionId, categoryFilter);
-
-    return () => {
-      debounced.cancel();
-    };
-  }, [selectedRegionId, categoryFilter]);
 
   useEffect(() => {
     if (!selectedRegion) {
@@ -493,6 +492,48 @@ export default function HomeScreen() {
     setHighlightedPoiId(poi.id);
     centerMapOnPoi(poi);
     scrollListToPoi(poi.id);
+
+    // Google place — Place Details ilə ad / kateqoriya / rating yenilə
+    const placeId = poi.place_id || (!isDatabasePoiId(poi.id) ? poi.id : null);
+    if (!placeId) {
+      return;
+    }
+    void fetchGooglePlaceRating(placeId).then((details) => {
+      setSelectedPoi((current) => {
+        if (!current || current.id !== poi.id) {
+          return current;
+        }
+        return {
+          ...current,
+          name: details.name?.trim() || current.name,
+          category: details.suggestedCategory ?? current.category,
+          rating: details.rating ?? current.rating,
+          rating_count: details.ratingCount ?? current.rating_count,
+        };
+      });
+      setPois((current) =>
+        current.map((row) => {
+          if (row.id !== poi.id) {
+            return row;
+          }
+          const rating = details.rating ?? row.rating;
+          const ratingCount = details.ratingCount ?? row.rating_count;
+          return {
+            ...row,
+            name: details.name?.trim() || row.name,
+            category: details.suggestedCategory ?? row.category,
+            rating,
+            rating_count: ratingCount,
+            averageRating:
+              typeof rating === 'number' && Number.isFinite(rating) ? rating : row.averageRating,
+            ratingCount:
+              typeof ratingCount === 'number' && Number.isFinite(ratingCount)
+                ? ratingCount
+                : row.ratingCount,
+          };
+        })
+      );
+    });
   }
 
   function clearSelectedPoi() {
@@ -542,7 +583,7 @@ export default function HomeScreen() {
   }
 
   async function handleAdminMarkerDragEnd(poiId: string, event: MarkerDragStartEndEvent) {
-    if (!isAdmin) {
+    if (!isAdmin || !isDatabasePoiId(poiId)) {
       return;
     }
 
@@ -774,16 +815,16 @@ export default function HomeScreen() {
                     zIndex={isSelected ? 1000 : isDimmed ? 1 : 10}
                     opacity={isDimmed && !isAdmin ? 0.45 : 1}
                     onPress={() => handleMarkerPress(poi)}
-                    draggable={isAdmin}
+                    draggable={isAdmin && isDatabasePoiId(poi.id)}
                     onDragStart={
-                      isAdmin
+                      isAdmin && isDatabasePoiId(poi.id)
                         ? () => {
                             setDraggingPoiId(poi.id);
                           }
                         : undefined
                     }
                     onDragEnd={
-                      isAdmin
+                      isAdmin && isDatabasePoiId(poi.id)
                         ? (event) => {
                             void handleAdminMarkerDragEnd(poi.id, event);
                           }
@@ -802,14 +843,11 @@ export default function HomeScreen() {
                           isDimmed && styles.poiMarkerBubbleDimmed,
                         ]}
                       >
-                        <Text
-                          style={[
-                            styles.poiMarkerEmoji,
-                            isSelected && styles.poiMarkerEmojiSelected,
-                          ]}
-                        >
-                          {getCategoryEmoji(poi.category)}
-                        </Text>
+                        <CategoryIcon
+                          category={poi.category}
+                          size={isSelected ? 14 : 12}
+                          color={isSelected ? colors.accentPressed : colors.text}
+                        />
                       </View>
                     )}
                   </Marker>
@@ -827,46 +865,49 @@ export default function HomeScreen() {
                 </View>
               ) : null}
 
-              <TouchableOpacity
-                style={styles.locationDropdown}
-                onPress={() => setShowLocationPicker(true)}
-              >
-                <Text style={styles.dropdownEmoji}>📍</Text>
-                <Text style={styles.dropdownLabel} numberOfLines={1}>
-                  {locationButtonLabel}
-                </Text>
-                <Text style={styles.dropdownCaret}>▼</Text>
-              </TouchableOpacity>
+              <View style={styles.mapFilterStack}>
+                <TouchableOpacity
+                  style={[
+                    styles.mapIconButton,
+                    selectedRegionId ? styles.mapIconButtonActive : null,
+                  ]}
+                  onPress={() => setShowLocationPicker(true)}
+                  accessibilityLabel={`Məkan: ${locationButtonLabel}`}
+                  hitSlop={6}
+                >
+                  <Ionicons
+                    name="location-outline"
+                    size={18}
+                    color={selectedRegionId ? colors.accent : colors.text}
+                  />
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.categoryDropdown}
-                onPress={() => setShowCategoryPicker(true)}
-              >
-                <Text style={styles.dropdownEmoji}>
-                  {selectedCategory ? getCategoryEmoji(selectedCategory) : '🗂️'}
-                </Text>
-                <Text style={styles.dropdownLabel} numberOfLines={1}>
-                  {categoryButtonLabel}
-                </Text>
-                <Text style={styles.dropdownCaret}>▼</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.mapIconButton,
+                    selectedCategory ? styles.mapIconButtonActive : null,
+                  ]}
+                  onPress={() => setShowCategoryPicker(true)}
+                  accessibilityLabel={`Kateqoriya: ${categoryButtonLabel}`}
+                  hitSlop={6}
+                >
+                  <Ionicons
+                    name="options-outline"
+                    size={18}
+                    color={selectedCategory ? colors.accent : colors.text}
+                  />
+                </TouchableOpacity>
+              </View>
 
               <ProfileCornerButton style={styles.profileCorner} />
-
-              <TouchableOpacity
-                style={styles.addPoiButton}
-                onPress={() => setAddPoiVisible(true)}
-                accessibilityLabel="Yeni yer əlavə et"
-              >
-                <Text style={styles.addPoiButtonText}>+</Text>
-              </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.locateButton}
                 onPress={goToCurrentLocation}
                 accessibilityLabel="Cari məkana qayıt"
+                hitSlop={6}
               >
-                <Text style={styles.locateButtonText}>📍</Text>
+                <Ionicons name="locate-outline" size={18} color={colors.text} />
               </TouchableOpacity>
             </View>
           }
@@ -883,7 +924,7 @@ export default function HomeScreen() {
                       hitSlop={8}
                       accessibilityLabel="Paylaş"
                     >
-                      <Text style={styles.shareHeaderButton}>📷 Paylaş</Text>
+                      <Text style={styles.shareHeaderButton}>Paylaş</Text>
                     </TouchableOpacity>
                   </View>
 
@@ -945,12 +986,6 @@ export default function HomeScreen() {
               )}
             </View>
           }
-        />
-
-        <AddPoiModal
-          visible={addPoiVisible}
-          onClose={() => setAddPoiVisible(false)}
-          initialRegionId={selectedRegionId ?? DEFAULT_REGION_ID}
         />
 
         <AdminPoiCategoryModal
@@ -1033,7 +1068,14 @@ export default function HomeScreen() {
                       style={styles.pickerRow}
                       onPress={() => handleSelectCategory(option.value)}
                     >
-                      <Text style={styles.pickerRowLabel}>{option.label}</Text>
+                      <View style={styles.pickerRowLeft}>
+                        <CategoryIcon
+                          category={option.value ?? 'all'}
+                          size={16}
+                          color={selected ? colors.accent : colors.text}
+                        />
+                        <Text style={styles.pickerRowLabel}>{option.label}</Text>
+                      </View>
                       {selected ? <Text style={styles.pickerCheck}>✓</Text> : null}
                     </TouchableOpacity>
                   );
@@ -1071,6 +1113,14 @@ function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
           ? poi.rating
           : null;
     setAverageRating(fallback);
+    setUserScore(null);
+
+    if (!isDatabasePoiId(poi.id)) {
+      // Live Google — yalnız Google rating (Place Details / Nearby)
+      return () => {
+        active = false;
+      };
+    }
 
     (async () => {
       setRatingError(null);
@@ -1095,7 +1145,6 @@ function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
 
       const rows = data ?? [];
       if (rows.length === 0) {
-        // İcma reytinqi yoxdursa Google/xarici rating (pois.rating)
         setAverageRating(fallback);
       } else {
         const sum = rows.reduce((acc, row) => acc + row.score, 0);
@@ -1116,6 +1165,12 @@ function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
 
   async function handleSubmitScore(score: number) {
     if (submittingScore) {
+      return;
+    }
+
+    // Live Google marker — icma reytinqi yalnız DB POI üçün
+    if (!isDatabasePoiId(poi.id)) {
+      setRatingError('Google məkanında icma reytinqi hələ aktiv deyil.');
       return;
     }
 
@@ -1174,15 +1229,16 @@ function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
           <Text style={styles.backButtonText}>← Geri</Text>
         </TouchableOpacity>
         <View style={styles.categoryBadge}>
-          <Text style={styles.categoryBadgeText}>
-            {getCategoryEmoji(poi.category)} {getCategoryLabel(poi.category)}
-          </Text>
+          <CategoryIcon
+            category={poi.category}
+            size={12}
+            color={colors.accentPressed}
+          />
+          <Text style={styles.categoryBadgeText}>{getCategoryLabel(poi.category)}</Text>
         </View>
       </View>
 
-      <Text style={styles.detailName}>
-        {getCategoryEmoji(poi.category)} {poi.name}
-      </Text>
+      <Text style={styles.detailName}>{poi.name}</Text>
 
       <View style={styles.detailMetaRow}>
         <Text style={styles.detailMeta}>📍 {regionLabel}</Text>
@@ -1191,9 +1247,11 @@ function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
         </Text>
       </View>
 
-      <Text style={styles.detailDescription} numberOfLines={3}>
-        {poi.description?.trim() ? poi.description : 'Təsvir yoxdur'}
-      </Text>
+      {poi.description?.trim() ? (
+        <Text style={styles.detailDescription} numberOfLines={3}>
+          {poi.description.trim()}
+        </Text>
+      ) : null}
 
       <View style={styles.detailActions}>
         {poi.phone ? (
@@ -1250,7 +1308,6 @@ function PoiListCard({
   userLocation: { latitude: number; longitude: number } | null;
   onPress: () => void;
 }) {
-  const emoji = getCategoryEmoji(item.category as PoiCategory);
   const distanceLabel = userLocation
     ? calculateDistance(
         userLocation.latitude,
@@ -1270,7 +1327,11 @@ function PoiListCard({
       ]}
     >
       <View style={styles.cardEmojiWrap}>
-        <Text style={styles.cardEmoji}>{emoji}</Text>
+        <CategoryIcon
+          category={item.category}
+          size={15}
+          color={highlighted ? colors.accentPressed : colors.text}
+        />
       </View>
 
       <View style={styles.cardBody}>
@@ -1280,22 +1341,19 @@ function PoiListCard({
           </Text>
           <View style={styles.cardMetaRight}>
             <View style={styles.ratingRow}>
-              <Text style={styles.ratingStar}>⭐</Text>
+              <Text style={styles.ratingStar}>★</Text>
               <Text style={styles.ratingText}>
                 {item.averageRating === null ? '—' : item.averageRating.toFixed(1)}
               </Text>
             </View>
             {distanceLabel ? (
-              <Text style={styles.distanceText}>📍{distanceLabel}</Text>
+              <Text style={styles.distanceText}>{distanceLabel}</Text>
             ) : null}
           </View>
         </View>
 
         <Text style={styles.cardCategory} numberOfLines={1}>
           {getCategoryLabel(item.category)}
-        </Text>
-        <Text style={styles.cardDescription} numberOfLines={1}>
-          {item.description?.trim() ? item.description : 'Təsvir yoxdur'}
         </Text>
       </View>
     </Pressable>
@@ -1316,104 +1374,82 @@ const styles = StyleSheet.create({
   map: {
     ...StyleSheet.absoluteFill,
   },
-  locationDropdown: {
+  mapFilterStack: {
     position: 'absolute',
-    top: 12,
-    left: 12,
+    left: 10,
+    bottom: 10,
     zIndex: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
+    gap: 6,
+  },
+  mapIconButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     backgroundColor: colors.surface,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-    gap: 4,
-    maxWidth: 140,
-  },
-  categoryDropdown: {
-    position: 'absolute',
-    top: 12,
-    right: 60,
-    zIndex: 20,
-    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    elevation: 4,
-    gap: 4,
-    maxWidth: 140,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
   },
-  dropdownEmoji: {
-    fontSize: 14,
-  },
-  dropdownLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text,
-    flexShrink: 1,
-  },
-  dropdownCaret: {
-    fontSize: 10,
-    color: colors.textSecondary,
+  mapIconButtonActive: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
   },
   pickerOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'flex-end',
   },
   pickerSheet: {
     backgroundColor: colors.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '70%',
-    paddingBottom: 24,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: '65%',
+    paddingBottom: 20,
   },
   pickerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 12,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
   pickerTitle: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '700',
     color: colors.text,
   },
   pickerClose: {
-    fontSize: 18,
-    color: colors.textSecondary,
+    fontSize: 16,
+    color: colors.textMuted,
     fontWeight: '600',
   },
   pickerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.chip,
   },
+  pickerRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
   pickerRowLabel: {
-    fontSize: 14,
+    fontSize: 13,
     color: colors.text,
     fontWeight: '500',
   },
   pickerCheck: {
-    fontSize: 16,
+    fontSize: 14,
     color: colors.accent,
     fontWeight: '700',
   },
@@ -1421,47 +1457,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   userMarkerDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     backgroundColor: colors.accent,
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: colors.surface,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 2,
-    elevation: 4,
   },
   userMarkerLabel: {
-    marginTop: 4,
-    fontSize: 10,
-    fontWeight: '700',
+    marginTop: 3,
+    fontSize: 9,
+    fontWeight: '600',
     color: colors.accentPressed,
     backgroundColor: colors.accentSoft,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
     overflow: 'hidden',
   },
   poiMarkerBubble: {
     backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    elevation: 3,
+    borderRadius: 14,
+    padding: 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
   },
   poiMarkerBubbleHighlighted: {
     borderColor: colors.accent,
-    borderWidth: 3,
+    borderWidth: 2,
     backgroundColor: colors.accentSoft,
-    transform: [{ scale: 1.45 }],
-    shadowOpacity: 0.35,
-    elevation: 8,
+    transform: [{ scale: 1.2 }],
   },
   poiMarkerBubbleDimmed: {
     opacity: 0.4,
@@ -1473,251 +1498,219 @@ const styles = StyleSheet.create({
   },
   adminBadge: {
     position: 'absolute',
-    top: 56,
+    top: 48,
     alignSelf: 'center',
-    backgroundColor: 'rgba(220, 38, 38, 0.92)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
+    backgroundColor: 'rgba(220, 38, 38, 0.88)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
     zIndex: 5,
   },
   adminBadgeText: {
     color: colors.textOnAccent,
-    fontSize: 11,
-    fontWeight: '800',
+    fontSize: 10,
+    fontWeight: '700',
     letterSpacing: 0.2,
   },
   poiMarkerEmoji: {
-    fontSize: 18,
+    fontSize: 14,
   },
   poiMarkerEmojiSelected: {
-    fontSize: 22,
+    fontSize: 16,
   },
   detailPanel: {
     flex: 1,
   },
   detailPanelContent: {
-    paddingHorizontal: 14,
-    paddingBottom: 20,
+    paddingHorizontal: 12,
+    paddingBottom: 16,
   },
   detailTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   backButton: {
-    paddingVertical: 4,
-    paddingRight: 8,
+    paddingVertical: 2,
+    paddingRight: 6,
   },
   backButtonText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: colors.accent,
   },
   categoryBadge: {
     backgroundColor: colors.accentSoft,
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   categoryBadgeText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: colors.accentPressed,
   },
   detailName: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   detailMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 10,
+    gap: 10,
+    marginBottom: 8,
   },
   detailMeta: {
-    fontSize: 13,
+    fontSize: 12,
     color: colors.textSecondary,
     fontWeight: '500',
   },
   detailDescription: {
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 12,
+    lineHeight: 17,
     color: colors.textSecondary,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   detailActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 16,
+    gap: 6,
+    marginBottom: 12,
   },
   actionButton: {
     backgroundColor: colors.chip,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   actionButtonText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: colors.text,
   },
   ratingPrompt: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: colors.chipText,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   starRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
   starButton: {
-    fontSize: 28,
+    fontSize: 22,
     color: colors.border,
   },
   starButtonFilled: {
     color: colors.warning,
   },
   ratingError: {
-    marginTop: 8,
-    fontSize: 12,
+    marginTop: 6,
+    fontSize: 11,
     color: colors.dangerText,
   },
   shareHeaderButton: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  addPoiButton: {
-    position: 'absolute',
-    top: 12,
-    right: 60,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    elevation: 5,
-    zIndex: 10,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textSecondary,
   },
   profileCorner: {
     position: 'absolute',
-    top: 14,
-    right: 12,
+    top: 10,
+    right: 10,
     zIndex: 12,
-    ...shadows.card,
-  },
-  addPoiButtonText: {
-    color: colors.textOnAccent,
-    fontSize: 24,
-    fontWeight: 'bold',
-    lineHeight: 28,
   },
   locateButton: {
     position: 'absolute',
-    bottom: 12,
-    right: 12,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    bottom: 10,
+    right: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     backgroundColor: colors.surface,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    elevation: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
     zIndex: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  locateButtonText: {
-    fontSize: 20,
   },
   listPane: {
     flex: 1,
     backgroundColor: colors.surface,
-    paddingTop: 8,
+    paddingTop: 4,
   },
   listHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    marginBottom: 8,
+    paddingHorizontal: 12,
+    marginBottom: 4,
   },
   listTitle: {
     flex: 1,
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '700',
     color: colors.text,
     marginRight: 8,
   },
   listContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 16,
+    paddingHorizontal: 10,
+    paddingBottom: 12,
   },
   card: {
-    height: 80,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 3,
-    borderRadius: 24,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 8,
+    backgroundColor: colors.bg,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginBottom: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
   },
   cardHighlighted: {
     backgroundColor: colors.accentSoft,
-    borderWidth: 2,
     borderColor: colors.accent,
-    shadowOpacity: 0.12,
-    elevation: 6,
+    borderWidth: 1,
   },
   cardDimmed: {
-    opacity: 0.48,
+    opacity: 0.45,
   },
   cardEmojiWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 30,
+    height: 30,
+    borderRadius: 8,
     backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
   },
   cardEmoji: {
-    fontSize: 32,
+    fontSize: 15,
   },
   cardBody: {
     flex: 1,
-    marginLeft: 10,
+    marginLeft: 8,
     justifyContent: 'center',
   },
   cardTopRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    gap: 6,
   },
   cardName: {
     flex: 1,
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.text,
   },
   cardMetaRight: {
@@ -1729,52 +1722,48 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   ratingStar: {
-    fontSize: 11,
+    fontSize: 10,
+    color: colors.warning,
   },
   ratingText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: colors.chipText,
   },
   distanceText: {
-    marginTop: 2,
-    fontSize: 11,
-    color: colors.textSecondary,
+    marginTop: 1,
+    fontSize: 10,
+    color: colors.textMuted,
     fontWeight: '500',
   },
   cardCategory: {
-    marginTop: 2,
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-  cardDescription: {
-    marginTop: 2,
-    fontSize: 12,
+    marginTop: 1,
+    fontSize: 11,
     color: colors.textMuted,
   },
   loader: {
-    marginTop: 24,
+    marginTop: 20,
   },
   errorText: {
-    marginHorizontal: 14,
+    marginHorizontal: 12,
     color: colors.dangerText,
-    fontSize: 13,
+    fontSize: 12,
   },
   emptyWrap: {
     alignItems: 'center',
-    marginTop: 24,
-    paddingHorizontal: 24,
+    marginTop: 20,
+    paddingHorizontal: 20,
   },
   emptyTitle: {
     color: colors.chipText,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
   },
   emptySubtitle: {
-    marginTop: 6,
+    marginTop: 4,
     color: colors.textMuted,
-    fontSize: 13,
+    fontSize: 12,
     textAlign: 'center',
   },
 });

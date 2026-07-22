@@ -31,6 +31,16 @@ export type PlanRouteResult = {
   region?: string;
   regionLabel?: string;
   source?: string;
+  travel?: {
+    from_origin?: boolean;
+    outbound_minutes?: number;
+    return_minutes?: number;
+    depart_origin_at?: string;
+    arrive_region_at?: string;
+    leave_region_by?: string;
+    return_origin_by?: string;
+    distance_km?: number;
+  } | null;
 };
 
 export type PlanRouteWeather = {
@@ -54,6 +64,11 @@ export type PlanRouteInput = {
   groupType?: string;
   weather?: PlanRouteWeather | null;
   pois?: PlanRoutePois;
+  fromOrigin?: boolean;
+  originLat?: number | null;
+  originLng?: number | null;
+  departTime?: string;
+  returnByTime?: string;
 };
 
 function getApiBaseUrl(): string | null {
@@ -89,6 +104,11 @@ async function planRouteViaFastApi(
         groupType: input.groupType ?? 'solo',
         weather: input.weather ?? null,
         pois: input.pois ?? null,
+        fromOrigin: Boolean(input.fromOrigin),
+        originLat: input.originLat ?? null,
+        originLng: input.originLng ?? null,
+        departTime: input.departTime ?? '08:00',
+        returnByTime: input.returnByTime ?? '21:00',
       }),
       signal: controller.signal,
     });
@@ -128,6 +148,7 @@ async function planRouteViaFastApi(
       best_time: data.best_time,
       region: data.region,
       regionLabel: data.regionLabel,
+      travel: (data as PlanRouteResult).travel ?? null,
       source: data.source ?? 'fastapi_geo',
     };
   } catch (err) {

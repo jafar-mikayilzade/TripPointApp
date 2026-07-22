@@ -19,11 +19,14 @@ import { sendEmailVerificationLink } from '../../lib/emailVerification';
 import { ensureProfile } from '../../lib/ensureProfile';
 import { getErrorMessage } from '../../lib/errors';
 import {
+  TEXT_FORMAT_ERROR,
   getPasswordRuleStatus,
+  hasDisallowedTextSymbols,
   sanitizeFullNameInput,
   validateEmail,
   validateFullName,
   validatePassword,
+  validateTextWordPatterns,
 } from '../../lib/formValidation';
 import { signInWithGoogle } from '../../lib/googleAuth';
 import { supabase } from '../../lib/supabase';
@@ -39,6 +42,7 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [passwordFocused, setPasswordFocused] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -68,11 +72,13 @@ export default function RegisterScreen() {
   async function handleRegister() {
     setErrorMessage(null);
 
-    const nameError = validateFullName(fullName);
-    if (nameError) {
-      setErrorMessage(nameError);
+    const nameValidation = validateFullName(fullName);
+    if (nameValidation) {
+      setNameError(nameValidation);
+      setErrorMessage(nameValidation);
       return;
     }
+    setNameError(null);
 
     if (!validateEmailField(email)) {
       return;
@@ -249,7 +255,20 @@ export default function RegisterScreen() {
         <FormField
           label="Ad soyad"
           value={fullName}
-          onChangeText={(text) => setFullName(sanitizeFullNameInput(text))}
+          onChangeText={(text) => {
+            const lettersOnly = text.replace(/[^\p{L}\s]/gu, '');
+            const cleaned = sanitizeFullNameInput(text);
+            if (hasDisallowedTextSymbols(text)) {
+              setNameError(TEXT_FORMAT_ERROR);
+            } else if (cleaned.length < lettersOnly.length) {
+              setNameError(validateTextWordPatterns(lettersOnly) ?? TEXT_FORMAT_ERROR);
+            } else {
+              setNameError(null);
+            }
+            setFullName(cleaned);
+          }}
+          onBlur={() => setNameError(validateFullName(fullName))}
+          error={nameError}
           placeholder="Adınız və soyadınız"
           autoCapitalize="words"
           returnKeyType="next"

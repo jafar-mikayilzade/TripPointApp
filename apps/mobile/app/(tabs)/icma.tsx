@@ -24,7 +24,7 @@ import { getErrorMessage } from '../../lib/errors';
 import { supabase } from '../../lib/supabase';
 import type { Listing, ListingType, Profile } from '../../types/database';
 
-import { colors, radii, shadows, space } from '../../constants/theme';
+import { colors } from '../../constants/theme';
 
 type ListingFilter = 'all' | ListingType;
 
@@ -175,7 +175,7 @@ export default function IcmaScreen() {
         </View>
         <View style={styles.headerActions}>
           <Pressable style={styles.addButton} onPress={() => setCreateVisible(true)} hitSlop={8}>
-            <FontAwesome name="plus" size={18} color={colors.textOnAccent} />
+            <FontAwesome name="plus" size={14} color={colors.textOnAccent} />
           </Pressable>
           <ProfileCornerButton />
         </View>
@@ -347,13 +347,13 @@ function SkeletonCard() {
         <View style={styles.skeletonAvatar} />
         <View style={styles.cardBody}>
           <View style={styles.skeletonTop}>
-            <View style={[styles.skeletonLine, { width: 72, height: 16, marginTop: 0 }]} />
-            <View style={[styles.skeletonLine, { width: 48, height: 12, marginTop: 0 }]} />
+            <View style={[styles.skeletonLine, { width: 56, height: 12, marginTop: 0 }]} />
+            <View style={[styles.skeletonLine, { width: 40, height: 10, marginTop: 0 }]} />
           </View>
-          <View style={[styles.skeletonLine, { width: '70%', marginTop: 8 }]} />
+          <View style={[styles.skeletonLine, { width: '65%', marginTop: 6 }]} />
           <View style={styles.skeletonTop}>
-            <View style={[styles.skeletonLine, { width: '55%', marginTop: 8 }]} />
-            <View style={[styles.skeletonLine, { width: 40, marginTop: 8 }]} />
+            <View style={[styles.skeletonLine, { width: '50%', marginTop: 6 }]} />
+            <View style={[styles.skeletonLine, { width: 36, marginTop: 6 }]} />
           </View>
         </View>
       </View>
@@ -370,91 +370,94 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 14,
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 8,
   },
   titleBlock: {
     flex: 1,
     minWidth: 0,
-    paddingRight: 12,
+    paddingRight: 10,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   title: {
-    fontSize: 34,
+    fontSize: 22,
     fontWeight: '700',
     color: colors.text,
-    letterSpacing: -0.8,
+    letterSpacing: -0.4,
     textTransform: 'lowercase',
   },
   subtitle: {
-    marginTop: 4,
-    fontSize: 13,
+    marginTop: 2,
+    fontSize: 12,
     fontWeight: '500',
-    color: colors.textSecondary,
+    color: colors.textMuted,
   },
   addButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    ...shadows.fab,
   },
   filterScroll: {
     flexGrow: 0,
     flexShrink: 0,
   },
   filterRow: {
-    paddingHorizontal: space.lg,
-    paddingBottom: space.md,
-    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    gap: 6,
     alignItems: 'center',
   },
   filterChip: {
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: radii.pill,
-    backgroundColor: colors.chip,
-    marginRight: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    marginRight: 2,
   },
   filterChipSelected: {
     backgroundColor: colors.chipSelected,
+    borderColor: colors.chipSelected,
   },
   filterText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: colors.chipText,
-    lineHeight: 18,
+    lineHeight: 16,
   },
   filterTextSelected: {
     color: colors.textOnAccent,
   },
   listPad: {
-    paddingHorizontal: space.lg,
+    paddingHorizontal: 10,
   },
   listContent: {
-    paddingHorizontal: space.lg,
-    paddingBottom: 28,
+    paddingHorizontal: 10,
+    paddingBottom: 20,
     flexGrow: 1,
   },
   card: {
-    borderRadius: radii.lg,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    marginBottom: 8,
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    marginBottom: 4,
     backgroundColor: colors.surface,
-    ...shadows.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
   },
   cardInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
   },
   cardBody: {
     flex: 1,
@@ -464,106 +467,106 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
-    marginBottom: 6,
+    gap: 8,
+    marginBottom: 3,
   },
   badge: {
-    borderRadius: radii.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
   },
   badgeText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
   },
   topRight: {
     flexShrink: 0,
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
     color: colors.text,
-    letterSpacing: -0.2,
   },
   cardTitle: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.text,
-    letterSpacing: -0.2,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   pairRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 8,
   },
   pairLeft: {
     flex: 1,
     minWidth: 0,
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '500',
-    color: colors.textSecondary,
+    color: colors.textMuted,
   },
   pairRight: {
     flexShrink: 0,
     maxWidth: '42%',
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: colors.textMuted,
     textAlign: 'right',
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 8,
   },
   avatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: colors.surfaceMuted,
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarInitial: {
-    fontSize: 18,
+    fontSize: 12,
     fontWeight: '700',
     color: colors.textSecondary,
   },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 64,
-    paddingHorizontal: 24,
+    paddingTop: 48,
+    paddingHorizontal: 20,
   },
   emptyTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    marginBottom: 14,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginBottom: 10,
   },
   emptyButton: {
     backgroundColor: colors.accent,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   emptyButtonText: {
     color: colors.textOnAccent,
-    fontWeight: '700',
-    fontSize: 14,
+    fontWeight: '600',
+    fontSize: 12,
   },
   errorText: {
-    marginHorizontal: 16,
-    marginBottom: 8,
+    marginHorizontal: 12,
+    marginBottom: 6,
     color: colors.dangerText,
-    fontSize: 13,
+    fontSize: 12,
   },
   skeletonCard: {
-    borderRadius: radii.lg,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginBottom: 8,
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    marginBottom: 4,
     backgroundColor: colors.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
   },
   skeletonTop: {
     flexDirection: 'row',
@@ -571,14 +574,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   skeletonLine: {
-    height: 12,
-    borderRadius: 6,
+    height: 10,
+    borderRadius: 4,
     backgroundColor: colors.border,
   },
   skeletonAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 8,
     backgroundColor: colors.border,
   },
 });

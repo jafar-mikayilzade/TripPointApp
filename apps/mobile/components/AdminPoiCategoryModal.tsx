@@ -10,8 +10,9 @@ import {
   View,
 } from 'react-native';
 
+import { CategoryIcon } from './CategoryIcon';
 import { ADMIN_POI_CATEGORIES, type GoogleMapPoiPayload } from '../lib/adminMap';
-import { getCategoryEmoji, getCategoryLabel } from '../lib/categoryUtils';
+import { getCategoryLabel } from '../lib/categoryUtils';
 import type { PoiCategory } from '../types/database';
 
 import { colors } from '../constants/theme';
@@ -65,10 +66,13 @@ export function AdminPoiCategoryModal({
           ) : null}
 
           {suggested ? (
-            <Text style={styles.suggestHint}>
-              Təklif olunan kateqoriya: {getCategoryEmoji(suggested)}{' '}
-              {getCategoryLabel(suggested)} — dəyişə bilərsiniz
-            </Text>
+            <View style={styles.suggestRow}>
+              <Text style={styles.suggestHint}>Təklif olunan kateqoriya:</Text>
+              <CategoryIcon category={suggested} size={14} color={colors.accent} />
+              <Text style={styles.suggestHint}>
+                {getCategoryLabel(suggested)} — dəyişə bilərsiniz
+              </Text>
+            </View>
           ) : (
             <Text style={styles.suggestHintMuted}>
               Kateqoriya bilinmədi — öz kateqoriyanızı seçin
@@ -97,7 +101,11 @@ export function AdminPoiCategoryModal({
                   onPress={() => setCategory(item)}
                   disabled={loading}
                 >
-                  <Text style={styles.optionEmoji}>{getCategoryEmoji(item)}</Text>
+                  <CategoryIcon
+                    category={item}
+                    size={16}
+                    color={selected ? colors.accent : colors.text}
+                  />
                   <Text style={[styles.optionText, selected && styles.optionTextSelected]}>
                     {getCategoryLabel(item)}
                   </Text>
@@ -163,10 +171,16 @@ const styles = StyleSheet.create({
     color: colors.warning,
   },
   suggestHint: {
-    marginTop: 8,
     fontSize: 12,
     fontWeight: '600',
     color: colors.accent,
+  },
+  suggestRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 4,
   },
   suggestHintMuted: {
     marginTop: 8,

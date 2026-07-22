@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import validate_settings
-from app.routers import health, sync, weather, route_candidates, plan_route
+from app.routers import health, sync, weather, route_candidates, plan_route, live_places
 
 
 def create_app() -> FastAPI:
@@ -25,4 +25,5 @@ def create_app() -> FastAPI:
     application.include_router(weather.router)
     application.include_router(route_candidates.router)
     application.include_router(plan_route.router)
+    application.include_router(live_places.router)
     return application

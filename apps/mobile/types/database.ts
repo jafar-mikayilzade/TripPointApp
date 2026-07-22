@@ -110,6 +110,55 @@ export type Favorite = {
   created_at: string;
 };
 
+export type SavedRouteSource = 'manual' | 'ai';
+
+export type SavedRouteRow = {
+  id: string;
+  user_id: string;
+  source: SavedRouteSource;
+  title: string;
+  summary: string | null;
+  region: string | null;
+  days_count: number;
+  budget: string | null;
+  interests: string[] | null;
+  group_type: string | null;
+  from_origin: boolean;
+  origin_lat: number | null;
+  origin_lng: number | null;
+  total_cost: string | null;
+  best_time: string | null;
+  travel: Record<string, unknown> | null;
+  stops: unknown;
+  listing_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SubscriptionTargetType = 'listing' | 'organizer';
+
+export type Subscription = {
+  id: string;
+  user_id: string;
+  target_type: SubscriptionTargetType;
+  target_id: string;
+  created_at: string;
+};
+
+export type NotificationKind = 'tour_update' | 'organizer_new_tour' | 'tour_cancelled';
+
+export type AppNotificationRow = {
+  id: string;
+  user_id: string;
+  kind: NotificationKind;
+  title: string;
+  body: string | null;
+  listing_id: string | null;
+  actor_id: string | null;
+  read_at: string | null;
+  created_at: string;
+};
+
 export type Listing = {
   id: string;
   created_by: string;
@@ -133,6 +182,8 @@ export type Listing = {
   is_recurring: boolean;
   contact_phone: string | null;
   service_category: LocalServiceCategory | null;
+  /** Full route: app POIs + map/custom places */
+  route_stops: unknown;
   created_at: string;
   updated_at: string;
 };
@@ -284,6 +335,27 @@ export type Database = {
         Insert: Pick<Favorite, 'user_id' | 'target_type' | 'target_id'> &
           Partial<Omit<Favorite, 'user_id' | 'target_type' | 'target_id'>>;
         Update: Partial<Favorite>;
+        Relationships: [];
+      };
+      saved_routes: {
+        Row: SavedRouteRow;
+        Insert: Pick<SavedRouteRow, 'user_id' | 'source' | 'title'> &
+          Partial<Omit<SavedRouteRow, 'user_id' | 'source' | 'title'>>;
+        Update: Partial<SavedRouteRow>;
+        Relationships: [];
+      };
+      subscriptions: {
+        Row: Subscription;
+        Insert: Pick<Subscription, 'user_id' | 'target_type' | 'target_id'> &
+          Partial<Omit<Subscription, 'user_id' | 'target_type' | 'target_id'>>;
+        Update: Partial<Subscription>;
+        Relationships: [];
+      };
+      notifications: {
+        Row: AppNotificationRow;
+        Insert: Pick<AppNotificationRow, 'user_id' | 'kind' | 'title'> &
+          Partial<Omit<AppNotificationRow, 'user_id' | 'kind' | 'title'>>;
+        Update: Partial<AppNotificationRow>;
         Relationships: [];
       };
       listings: {

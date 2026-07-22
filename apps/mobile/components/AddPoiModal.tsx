@@ -19,13 +19,23 @@ import MapView, { Marker, type MapPressEvent } from './AppMap';
 
 import { DEFAULT_REGION_ID, REGIONS } from '../constants/regions';
 import { getErrorMessage } from '../lib/errors';
-import { formatAzPhoneE164, validateAzPhone } from '../lib/formValidation';
+import {
+  TEXT_FORMAT_ERROR,
+  formatAzPhoneE164,
+  hasDisallowedTextSymbols,
+  sanitizeFreeTextWordPatterns,
+  sanitizeLettersOnlyInput,
+  validateAzPhone,
+  validateLettersOnlyField,
+  validateTextWordPatterns,
+} from '../lib/formValidation';
 import { notifyAdminsViaWhatsApp } from '../lib/adminNotify';
 import { parseCoordsFromGoogleMapsUrl, POI_CATEGORY_OPTIONS } from '../lib/poi';
 import { supabase } from '../lib/supabase';
 import { uploadImage } from '../lib/uploadImage';
 import type { PoiCategory } from '../types/database';
 import { PhoneField } from './PhoneField';
+import { CategoryIcon } from './CategoryIcon';
 
 import { colors } from '../constants/theme';
 
@@ -53,6 +63,8 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
   const [imageUris, setImageUris] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
 
   const selectedRegion = useMemo(
     () => REGIONS.find((r) => r.id === regionId) ?? REGIONS[0],
@@ -76,6 +88,8 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
     setImageUris([]);
     setLoading(false);
     setErrorMessage(null);
+    setNameError(null);
+    setPhoneError(null);
   }, [visible, initialRegionId]);
 
   function handleMapPress(event: MapPressEvent) {
@@ -132,8 +146,10 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
   async function handleSubmit() {
     setErrorMessage(null);
 
-    if (!name.trim()) {
-      setErrorMessage('Ad məcburidir.');
+    const nameValidation = validateLettersOnlyField(name, 'Ad');
+    if (nameValidation) {
+      setNameError(nameValidation);
+      setErrorMessage(nameValidation);
       return;
     }
 
@@ -142,9 +158,13 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
       return;
     }
 
-    const phoneError = validateAzPhone(phone, false);
-    if (phoneError) {
-      setErrorMessage(phoneError);
+    const phoneValidation = validateAzPhone(phone, false);
+    if (phoneValidation) {
+      setPhoneError(phoneValidation);
+      setErrorMessage(phoneValidation);
+      if (phone.trim()) {
+        setPhone('');
+      }
       return;
     }
 
@@ -264,13 +284,26 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
               Ad <Text style={styles.required}>*</Text>
             </Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, nameError ? styles.inputError : null]}
               value={name}
-              onChangeText={setName}
+              onChangeText={(text) => {
+                const lettersOnly = text.replace(/[^\p{L}\s]/gu, '');
+                const cleaned = sanitizeLettersOnlyInput(text);
+                if (hasDisallowedTextSymbols(text)) {
+                  setNameError(TEXT_FORMAT_ERROR);
+                } else if (cleaned.length < lettersOnly.length) {
+                  setNameError(validateTextWordPatterns(lettersOnly) ?? TEXT_FORMAT_ERROR);
+                } else {
+                  setNameError(null);
+                }
+                setName(cleaned);
+              }}
+              onBlur={() => setNameError(validateLettersOnlyField(name, 'Ad'))}
               placeholder="Yerin adı"
               placeholderTextColor={colors.textMuted}
               editable={!loading}
             />
+            {nameError ? <Text style={styles.fieldHintError}>{nameError}</Text> : null}
 
             <Text style={styles.label}>Kateqoriya</Text>
             <ScrollView
@@ -287,6 +320,11 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
                     disabled={loading}
                     style={[styles.chip, selected && styles.chipSelected]}
                   >
+                    <CategoryIcon
+                      category={option.value}
+                      size={13}
+                      color={selected ? colors.textOnAccent : colors.text}
+                    />
                     <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
                       {option.label}
                     </Text>
@@ -322,7 +360,7 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
             <TextInput
               style={[styles.input, styles.textArea]}
               value={description}
-              onChangeText={setDescription}
+              onChangeText={(text) => setDescription(sanitizeFreeTextWordPatterns(text))}
               placeholder="Qısa təsvir..."
               placeholderTextColor={colors.textMuted}
               multiline
@@ -334,6 +372,8 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
               label="Telefon (istəyə bağlı)"
               value={phone}
               onChangeLocal={setPhone}
+              error={phoneError}
+              onValidationError={setPhoneError}
               editable={!loading}
             />
 
@@ -493,6 +533,16 @@ const styles = StyleSheet.create({
     color: colors.text,
     backgroundColor: colors.surface,
   },
+  inputError: {
+    borderColor: colors.danger,
+  },
+  fieldHintError: {
+    marginTop: 6,
+    marginBottom: 4,
+    fontSize: 12,
+    color: colors.danger,
+    lineHeight: 16,
+  },
   textArea: {
     minHeight: 88,
   },
@@ -502,17 +552,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: colors.chip,
-    marginRight: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    marginRight: 6,
   },
   chipSelected: {
     backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
   chipText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: colors.chipText,
   },

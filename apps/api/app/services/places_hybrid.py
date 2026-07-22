@@ -20,7 +20,7 @@ from app.services.places_osm import _fetch_single_category
 # "all" sync: one call per Google type (lodging covers hotel/hostel/guesthouse)
 HYBRID_GOOGLE_ALL_ORDER = ("restaurant", "hotel")
 # Pause between OSM categories — public Overpass rate-limits hard on Railway
-OSM_GAP_SECONDS = 2.5
+OSM_GAP_SECONDS = 4.5
 # Skip noisy/empty buckets on region-wide sync to cut Overpass load
 HYBRID_OSM_ALL_ORDER = tuple(
     c for c in HYBRID_OSM_SYNC_ORDER if c not in {"other"}

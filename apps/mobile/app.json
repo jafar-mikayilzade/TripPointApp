@@ -3,7 +3,7 @@
     "name": "TripPoint",
     "slug": "trippoint-app",
     "scheme": "trippoint",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "com.jafar.TripPoint",
-      "versionCode": 7,
+      "versionCode": 9,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",

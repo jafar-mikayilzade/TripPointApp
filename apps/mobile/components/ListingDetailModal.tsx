@@ -16,6 +16,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { REGIONS } from '../constants/regions';
 import { FavoriteButton } from './FavoriteButton';
@@ -32,6 +33,16 @@ import {
   reportListing,
   updateListingAsAdmin,
 } from '../lib/moderation';
+import {
+  isSubscribed,
+  notifyTourSubscribersUpdate,
+  toggleSubscription,
+} from '../lib/subscriptions';
+import {
+  openStopInMaps,
+  resolveListingRouteStops,
+  type ListingRouteStop,
+} from '../lib/listingRouteStops';
 import { supabase } from '../lib/supabase';
 import { useIsAdmin } from '../lib/useIsAdmin';
 import { confirmDelete, deleteListing } from '../lib/userContentDelete';
@@ -156,11 +167,14 @@ export function ListingDetailModal({
   onClose,
   onDeleted,
 }: ListingDetailModalProps) {
+  const insets = useSafeAreaInsets();
+  const bottomSafe = Math.max(insets.bottom, 12);
   const router = useRouter();
   const { isAdmin } = useIsAdmin();
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [creatorRating, setCreatorRating] = useState<number | null>(null);
   const [routePois, setRoutePois] = useState<string[]>([]);
+  const [routeStops, setRouteStops] = useState<ListingRouteStop[]>([]);
   const [routeListOpen, setRouteListOpen] = useState(false);
   const [loadingExtras, setLoadingExtras] = useState(false);
   const [infoToast, setInfoToast] = useState<string | null>(null);
@@ -187,7 +201,9 @@ export function ListingDetailModal({
   const [updatingParticipantId, setUpdatingParticipantId] = useState<string | null>(null);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [subscribedTour, setSubscribedTour] = useState(false);
+  const [subscribedOrganizer, setSubscribedOrganizer] = useState(false);
+  const [subBusy, setSubBusy] = useState(false);
 
   const fetchParticipants = useCallback(async () => {
     if (!listing) {
@@ -244,10 +260,10 @@ export function ListingDetailModal({
     if (!visible || !routeListOpen || loadingExtras) {
       return;
     }
-    if (routePois.length === 0) {
+    if (routeStops.length === 0 && routePois.length === 0) {
       showInfoToast('Yer siyahısı yoxdur');
     }
-  }, [visible, routeListOpen, loadingExtras, routePois.length]);
+  }, [visible, routeListOpen, loadingExtras, routeStops.length, routePois.length]);
 
   useEffect(() => {
     if (!visible || !showParticipants || loadingParticipants) {
@@ -294,7 +310,6 @@ export function ListingDetailModal({
     async function loadExtras() {
       setLoadingExtras(true);
       setErrorMessage(null);
-      setSuccessMessage(null);
       setShowJoinForm(false);
       setShowParticipants(false);
       setShowReportForm(false);
@@ -302,8 +317,11 @@ export function ListingDetailModal({
       setJoinMessage('');
       setReportDetails('');
       setRoutePois([]);
+      setRouteStops([]);
       setRouteListOpen(false);
       setCreatorRating(null);
+      setSubscribedTour(false);
+      setSubscribedOrganizer(false);
 
       const {
         data: { user },
@@ -315,21 +333,54 @@ export function ListingDetailModal({
 
       setCurrentUserId(user?.id ?? null);
 
-      const [listingRatingsResult, routePoisResult] = await Promise.all([
-        supabase
-          .from('ratings')
-          .select('score')
-          .eq('target_type', 'listing')
-          .eq('target_id', listing!.id),
-        listing!.type === 'tour' || listing!.type === 'carpool'
-          ? supabase.rpc('get_listing_route_poi_names', {
-              p_listing_id: listing!.id,
-            })
-          : Promise.resolve({ data: null, error: null }),
-      ]);
+      const subChecks =
+        user && listing!.type === 'tour'
+          ? Promise.all([
+              isSubscribed('listing', listing!.id),
+              listing!.created_by && listing!.created_by !== user.id
+                ? isSubscribed('organizer', listing!.created_by)
+                : Promise.resolve(false),
+            ])
+          : Promise.resolve([false, false] as const);
+
+      const [listingRatingsResult, routePoisResult, subResult, routeStopsResult] =
+        await Promise.all([
+          supabase
+            .from('ratings')
+            .select('score')
+            .eq('target_type', 'listing')
+            .eq('target_id', listing!.id),
+          listing!.type === 'tour' || listing!.type === 'carpool'
+            ? supabase.rpc('get_listing_route_poi_names', {
+                p_listing_id: listing!.id,
+              })
+            : Promise.resolve({ data: null, error: null }),
+          subChecks,
+          listing!.type === 'tour' || listing!.type === 'carpool'
+            ? supabase
+                .from('listings')
+                .select('route_stops, description')
+                .eq('id', listing!.id)
+                .maybeSingle()
+            : Promise.resolve({ data: null, error: null }),
+        ]);
 
       if (!isActive) {
         return;
+      }
+
+      setSubscribedTour(Boolean(subResult[0]));
+      setSubscribedOrganizer(Boolean(subResult[1]));
+
+      const resolvedStops = resolveListingRouteStops({
+        route_stops: routeStopsResult.error
+          ? []
+          : (routeStopsResult.data?.route_stops ?? listing!.route_stops ?? []),
+        description: routeStopsResult.data?.description ?? listing!.description,
+      });
+      if (resolvedStops.length > 0) {
+        setRouteStops(resolvedStops);
+        setRoutePois(resolvedStops.map((s) => s.name));
       }
 
       if (
@@ -344,16 +395,17 @@ export function ListingDetailModal({
       }
 
       if (
+        resolvedStops.length === 0 &&
         (listing!.type === 'tour' || listing!.type === 'carpool') &&
         !routePoisResult.error
       ) {
         const rpcRows = Array.isArray(routePoisResult.data) ? routePoisResult.data : [];
         if (rpcRows.length > 0) {
-          setRoutePois(
-            rpcRows
-              .map((row: { name?: string | null }) => row.name)
-              .filter((name): name is string => Boolean(name))
-          );
+          const names = rpcRows
+            .map((row: { name?: string | null }) => row.name)
+            .filter((name): name is string => Boolean(name));
+          setRoutePois(names);
+          setRouteStops(names.map((name) => ({ name, lat: null, lng: null })));
         } else {
           // Fallback if RPC not deployed yet
           const { data: linkRows, error: linkError } = await supabase
@@ -381,7 +433,11 @@ export function ListingDetailModal({
 
             if (pois) {
               const nameById = new Map(pois.map((poi) => [poi.id, poi.name]));
-              setRoutePois(poiIds.map((id) => nameById.get(id) ?? id).filter(Boolean));
+              const names = poiIds
+                .map((id) => nameById.get(id) ?? id)
+                .filter(Boolean) as string[];
+              setRoutePois(names);
+              setRouteStops(names.map((name) => ({ name, lat: null, lng: null })));
             }
           }
         }
@@ -442,7 +498,6 @@ export function ListingDetailModal({
 
     setJoining(true);
     setErrorMessage(null);
-    setSuccessMessage(null);
 
     try {
       const { error } = await supabase.from('listing_participants').insert({
@@ -457,7 +512,7 @@ export function ListingDetailModal({
         return;
       }
 
-      setSuccessMessage('Sorğunuz göndərildi, təsdiq gözlənilir');
+      showInfoToast('Sorğunuz göndərildi, təsdiq gözlənilir');
       setShowJoinForm(false);
       setJoinMessage('');
     } catch (err) {
@@ -537,20 +592,13 @@ export function ListingDetailModal({
 
     setShowReportForm(false);
     setReportDetails('');
-    setSuccessMessage('Şikayətiniz qəbul olundu. Adminə göndərildi.');
-    Alert.alert('Şikayət göndərildi', 'Admin ən qısa zamanda yoxlayacaq.', [
-      {
-        text: 'OK',
-        onPress: () => {
-          const reasonLabel =
-            LISTING_REPORT_REASONS.find((item) => item.id === reportReason)?.label ?? reportReason;
-          void notifyAdminsViaWhatsApp(
-            'listing_report',
-            `"${listing.title}" — ${reasonLabel}`
-          );
-        },
-      },
-    ]);
+    showInfoToast('Şikayətiniz qəbul olundu');
+    const reasonLabel =
+      LISTING_REPORT_REASONS.find((item) => item.id === reportReason)?.label ?? reportReason;
+    void notifyAdminsViaWhatsApp(
+      'listing_report',
+      `"${listing.title}" — ${reasonLabel}`
+    );
   }
 
   async function handleAdminSave() {
@@ -569,8 +617,51 @@ export function ListingDetailModal({
       return;
     }
     setShowAdminEdit(false);
-    setSuccessMessage('Elan yeniləndi.');
+    showInfoToast('Elan yeniləndi');
+    if (listing.type === 'tour' && currentUserId) {
+      void notifyTourSubscribersUpdate({
+        listingId: listing.id,
+        title: editTitle.trim() || listing.title,
+        actorId: currentUserId,
+      });
+    }
     onDeleted?.();
+  }
+
+  async function handleToggleTourSub() {
+    if (!listing || subBusy || currentUserId === listing.created_by) {
+      return;
+    }
+    setSubBusy(true);
+    const result = await toggleSubscription('listing', listing.id);
+    setSubBusy(false);
+    if (result.error) {
+      setErrorMessage(result.error);
+      return;
+    }
+    setSubscribedTour(result.subscribed);
+    showInfoToast(
+      result.subscribed ? 'Tura abunə oldunuz' : 'Tur abunəliyindən çıxdınız'
+    );
+  }
+
+  async function handleToggleOrganizerSub() {
+    if (!listing?.created_by || subBusy || currentUserId === listing.created_by) {
+      return;
+    }
+    setSubBusy(true);
+    const result = await toggleSubscription('organizer', listing.created_by);
+    setSubBusy(false);
+    if (result.error) {
+      setErrorMessage(result.error);
+      return;
+    }
+    setSubscribedOrganizer(result.subscribed);
+    showInfoToast(
+      result.subscribed
+        ? 'Təşkilatçıya abunə oldunuz'
+        : 'Təşkilatçı abunəliyindən çıxdınız'
+    );
   }
 
   if (!listing) {
@@ -592,7 +683,7 @@ export function ListingDetailModal({
         style={styles.overlay}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { paddingBottom: bottomSafe }]}>
           <View style={styles.sheetHeader}>
             <FavoriteButton targetType="listing" targetId={listing.id} />
             <Pressable onPress={onClose} style={styles.closeButton} hitSlop={12}>
@@ -684,12 +775,35 @@ export function ListingDetailModal({
                 >
                   <Text style={styles.routeToggleText}>
                     {routeListOpen ? '▾' : '▸'} Marşrut siyahısına bax
-                    {routePois.length > 0 ? ` (${routePois.length})` : ''}
+                    {routeStops.length > 0
+                      ? ` (${routeStops.length})`
+                      : routePois.length > 0
+                        ? ` (${routePois.length})`
+                        : ''}
                   </Text>
                 </Pressable>
                 {routeListOpen ? (
                   loadingExtras ? (
                     <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
+                  ) : routeStops.length > 0 ? (
+                    routeStops.map((stop, index) => (
+                      <Pressable
+                        key={`${stop.name}-${index}`}
+                        style={styles.poiItemRow}
+                        onPress={() =>
+                          void openStopInMaps(stop).catch((err) =>
+                            setErrorMessage(getErrorMessage(err))
+                          )
+                        }
+                      >
+                        <Text style={styles.poiItem}>
+                          {index + 1}. {stop.name}
+                        </Text>
+                        <Text style={styles.poiMapsLink}>
+                          {stop.poi_id ? 'App' : 'Maps'}
+                        </Text>
+                      </Pressable>
+                    ))
                   ) : routePois.length === 0 ? null : (
                     routePois.map((name, index) => (
                       <Text key={`${name}-${index}`} style={styles.poiItem}>
@@ -715,12 +829,35 @@ export function ListingDetailModal({
                 >
                   <Text style={styles.routeToggleText}>
                     {routeListOpen ? '▾' : '▸'} Marşrut siyahısına bax
-                    {routePois.length > 0 ? ` (${routePois.length})` : ''}
+                    {routeStops.length > 0
+                      ? ` (${routeStops.length})`
+                      : routePois.length > 0
+                        ? ` (${routePois.length})`
+                        : ''}
                   </Text>
                 </Pressable>
                 {routeListOpen ? (
                   loadingExtras ? (
                     <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
+                  ) : routeStops.length > 0 ? (
+                    routeStops.map((stop, index) => (
+                      <Pressable
+                        key={`${stop.name}-${index}`}
+                        style={styles.poiItemRow}
+                        onPress={() =>
+                          void openStopInMaps(stop).catch((err) =>
+                            setErrorMessage(getErrorMessage(err))
+                          )
+                        }
+                      >
+                        <Text style={styles.poiItem}>
+                          {index + 1}. {stop.name}
+                        </Text>
+                        <Text style={styles.poiMapsLink}>
+                          {stop.poi_id ? 'App' : 'Maps'}
+                        </Text>
+                      </Pressable>
+                    ))
                   ) : routePois.length === 0 ? null : (
                     routePois.map((name, index) => (
                       <Text key={`${name}-${index}`} style={styles.poiItem}>
@@ -730,6 +867,49 @@ export function ListingDetailModal({
                   )
                 ) : null}
               </>
+            ) : null}
+
+            {listing.type === 'tour' && !isOwner && currentUserId ? (
+              <View style={styles.subscribeRow}>
+                <Pressable
+                  style={[
+                    styles.subscribeBtn,
+                    subscribedTour && styles.subscribeBtnActive,
+                    subBusy && styles.buttonDisabled,
+                  ]}
+                  onPress={() => void handleToggleTourSub()}
+                  disabled={subBusy}
+                >
+                  <Text
+                    style={[
+                      styles.subscribeBtnText,
+                      subscribedTour && styles.subscribeBtnTextActive,
+                    ]}
+                  >
+                    {subscribedTour ? 'Tur abunəliyi ✓' : 'Tura abunə ol'}
+                  </Text>
+                </Pressable>
+                {listing.created_by ? (
+                  <Pressable
+                    style={[
+                      styles.subscribeBtn,
+                      subscribedOrganizer && styles.subscribeBtnActive,
+                      subBusy && styles.buttonDisabled,
+                    ]}
+                    onPress={() => void handleToggleOrganizerSub()}
+                    disabled={subBusy}
+                  >
+                    <Text
+                      style={[
+                        styles.subscribeBtnText,
+                        subscribedOrganizer && styles.subscribeBtnTextActive,
+                      ]}
+                    >
+                      {subscribedOrganizer ? 'Təşkilatçı ✓' : 'Təşkilatçıya abunə'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
             ) : null}
 
             {listing.type === 'local_service' ? (
@@ -743,7 +923,6 @@ export function ListingDetailModal({
             ) : null}
 
             {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-            {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
 
             {!isOwner ? (
               <View style={styles.actions}>
@@ -776,7 +955,6 @@ export function ListingDetailModal({
                       style={styles.joinButton}
                       onPress={() => {
                         setShowJoinForm(true);
-                        setSuccessMessage(null);
                         setErrorMessage(null);
                       }}
                     >
@@ -840,7 +1018,6 @@ export function ListingDetailModal({
                     style={styles.reportButton}
                     onPress={() => {
                       setShowReportForm(true);
-                      setSuccessMessage(null);
                       setErrorMessage(null);
                     }}
                   >
@@ -1021,7 +1198,7 @@ export function ListingDetailModal({
             ) : null}
           </ScrollView>
 
-          <View style={styles.toastHost} pointerEvents="none">
+          <View style={[styles.toastHost, { bottom: bottomSafe + 12 }]} pointerEvents="none">
             <TransientHint
               key={infoToastKey}
               message={infoToast ?? ''}
@@ -1047,14 +1224,12 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingTop: 12,
-    paddingBottom: 28,
     overflow: 'hidden',
   },
   toastHost: {
     position: 'absolute',
     left: 16,
     right: 16,
-    bottom: 36,
     zIndex: 30,
     alignItems: 'center',
   },
@@ -1192,10 +1367,23 @@ const styles = StyleSheet.create({
     color: colors.accent,
   },
   poiItem: {
+    flex: 1,
     fontSize: 13,
     color: colors.textSecondary,
     marginLeft: 8,
-    marginBottom: 4,
+    marginBottom: 0,
+  },
+  poiItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 4,
+    paddingRight: 4,
+  },
+  poiMapsLink: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.accent,
   },
   muted: {
     fontSize: 13,
@@ -1205,6 +1393,33 @@ const styles = StyleSheet.create({
   inlineLoader: {
     alignSelf: 'flex-start',
     marginBottom: 8,
+  },
+  subscribeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  subscribeBtn: {
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  subscribeBtnActive: {
+    backgroundColor: colors.successSoft,
+    borderColor: colors.success,
+  },
+  subscribeBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  subscribeBtnTextActive: {
+    color: colors.success,
   },
   actions: {
     marginTop: 16,

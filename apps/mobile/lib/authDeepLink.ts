@@ -1,11 +1,11 @@
 import * as Linking from 'expo-linking';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
 
+import { AUTH_CALLBACK_URL } from './authConstants';
 import { markEmailVerified } from './emailVerification';
 import { supabase } from './supabase';
 
-/** Supabase email confirm / magic link sonrası app-ə qayıdış. */
-export const AUTH_CALLBACK_URL = 'trippoint://auth/callback';
+export { AUTH_CALLBACK_URL };
 
 /**
  * Deep link URL-dən Supabase session yaradır.

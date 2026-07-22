@@ -14,10 +14,15 @@ from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
 from app.services.geo_route import (
     build_day_clusters,
     cluster_centroid,
+    grow_compact_tour,
     haversine_km,
+    insert_poi_at,
+    insertion_detour_km,
     nearest_poi_to_point,
     order_stops_geo,
+    pick_poi_min_insert,
     poi_coord,
+    tour_length_km,
     trim_cluster_diameter,
 )
 from app.services.rank_pois import (
@@ -56,10 +61,16 @@ DURATION_MINUTES: dict[str, int] = {
 FOOD_CATS = frozenset({"restaurant", "home_restaurant", "cafe"})
 HOTEL_CATS = frozenset({"hotel", "hostel", "guesthouse"})
 
-MAX_RESTAURANT_KM = 10.0
+MAX_RESTAURANT_KM = 8.0
 ATTRACTIONS_PER_DAY = 3
+# Tight corridor — opposite-side stops must not enter the day set
+MAX_DAY_DIAMETER_KM = 8.0
+MAX_ADD_FROM_PATH_KM = 3.5
+# Food/hotel only if they barely bend the path
+MAX_FOOD_DETOUR_KM = 1.2
+MAX_HOTEL_FROM_PATH_END_KM = 6.0
 
-# Fixed daypart anchors (minutes from midnight)
+# Fixed daypart anchors (minutes from midnight) — overridden by travel window
 BREAKFAST_AT = 9 * 60  # 09:00
 LUNCH_AT = 13 * 60  # 13:00
 ATTRACTION_START = 10 * 60 + 30  # 10:30 if no breakfast gap
@@ -168,126 +179,201 @@ def pick_day_pieces(
     restaurants: list[dict[str, Any]],
     used: set[str],
     interest_cats: set[str],
+    origin_lat: float,
+    origin_lng: float,
 ) -> dict[str, Any]:
-    """Pick attractions + optional breakfast/lunch near cluster (not yet ordered)."""
-    cluster = trim_cluster_diameter(cluster, max_diameter_km=25.0)
+    """
+    Geography-first day set: grow a compact open tour from the cluster.
+    Food is NOT picked here — only added later if detour is tiny.
+    """
+    del restaurants  # lunch/breakfast deferred to assemble (detour-gated)
+    cluster = trim_cluster_diameter(cluster, max_diameter_km=MAX_DAY_DIAMETER_KM)
     if not cluster:
-        return {"attractions": [], "breakfast": None, "lunch": None}
+        return {"attractions": []}
 
-    preferred = [
-        p
-        for p in cluster
-        if not interest_cats or str(p.get("category") or "") in interest_cats
-    ]
-    other = [p for p in cluster if p not in preferred]
+    anchor = cluster_centroid(cluster)
+    lat = anchor[0] if anchor else origin_lat
+    lng = anchor[1] if anchor else origin_lng
 
-    attractions = _pick_unique(preferred, used=used, limit=ATTRACTIONS_PER_DAY)
-    if len(attractions) < ATTRACTIONS_PER_DAY:
-        attractions.extend(
-            _pick_unique(other, used=used, limit=ATTRACTIONS_PER_DAY - len(attractions))
-        )
-    if not attractions:
-        attractions = _pick_unique(cluster, used=used, limit=min(2, len(cluster)))
+    attractions = grow_compact_tour(
+        cluster,
+        origin_lat=lat,
+        origin_lng=lng,
+        used=used,
+        limit=ATTRACTIONS_PER_DAY,
+        max_diameter_km=MAX_DAY_DIAMETER_KM,
+        max_add_from_path_km=MAX_ADD_FROM_PATH_KM,
+        prefer_categories=interest_cats or None,
+    )
+    for poi in attractions:
+        pid = str(poi.get("id") or "")
+        if pid:
+            used.add(pid)
 
-    centroid = cluster_centroid(attractions) or cluster_centroid(cluster)
-    breakfast = None
-    lunch = None
-    if centroid:
-        lunch = _nearest_food(
-            restaurants, lat=centroid[0], lng=centroid[1], used=used
-        )
-        if lunch is not None:
-            used.add(str(lunch.get("id") or ""))
-        # Optional light breakfast if another food spot exists nearby
-        breakfast = _nearest_food(
-            restaurants, lat=centroid[0], lng=centroid[1], used=used, max_km=8.0
-        )
-        if breakfast is not None:
-            used.add(str(breakfast.get("id") or ""))
+    return {"attractions": attractions}
 
-    return {
-        "attractions": attractions,
-        "breakfast": breakfast,
-        "lunch": lunch,
-    }
+
+def _role_id(poi: dict[str, Any]) -> str:
+    return str(poi.get("id") or "")
+
+
+def _try_add_food(
+    path: list[dict[str, Any]],
+    restaurants: list[dict[str, Any]],
+    *,
+    used_ids: set[str],
+    index_min: int,
+    index_max: int | None,
+    max_detour_km: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Insert at most one food stop if open-path detour stays under max_detour_km."""
+    if not path or not restaurants:
+        return path, None
+    poi, idx = pick_poi_min_insert(
+        path,
+        restaurants,
+        exclude_ids=used_ids,
+        max_km_from_path=MAX_RESTAURANT_KM,
+        index_min=index_min,
+        index_max=index_max,
+    )
+    if poi is None:
+        return path, None
+    detour = insertion_detour_km(path, poi, idx)
+    if detour > max_detour_km:
+        return path, None
+    used_ids.add(_role_id(poi))
+    return insert_poi_at(path, poi, idx), poi
 
 
 def assemble_day_stops(
     *,
     attractions: list[dict[str, Any]],
-    breakfast: dict[str, Any] | None,
-    lunch: dict[str, Any] | None,
     hotel: dict[str, Any] | None,
+    restaurants: list[dict[str, Any]] | None = None,
+    used: set[str] | None = None,
+    window_start_min: int | None = None,
+    window_end_min: int | None = None,
+    allow_hotel: bool = True,
 ) -> list[dict[str, Any]]:
     """
-    Geo-order attractions, then place breakfast morning / lunch midday / hotel evening.
-    Times are assigned by daypart (not naive cumulative from a mixed list).
+    Domain rule: walk order = map order.
+
+    1) Compact attractions geo-ordered
+    2) Food only if detour is tiny
+    3) Times fit [window_start, window_end] — trim stops that don't fit
+    4) Hotel last only if allowed + near path end (multi-day)
     """
-    if not attractions and not breakfast and not lunch and not hotel:
+    restaurants = restaurants or []
+    used_ids = used if used is not None else set()
+    start_anchor = window_start_min if window_start_min is not None else ATTRACTION_START
+    end_anchor = window_end_min if window_end_min is not None else 19 * 60
+    lunch_anchor = max(LUNCH_AT, start_anchor + 90)
+
+    path = order_stops_geo(attractions) if attractions else []
+    if not path and not (hotel and allow_hotel):
         return []
 
-    ordered_attr = order_stops_geo(attractions) if attractions else []
+    breakfast: dict[str, Any] | None = None
+    lunch: dict[str, Any] | None = None
+
+    if path:
+        mid = max(1, len(path) // 2)
+        path, lunch = _try_add_food(
+            path,
+            restaurants,
+            used_ids=used_ids,
+            index_min=max(0, mid - 1),
+            index_max=min(len(path), mid + 1),
+            max_detour_km=MAX_FOOD_DETOUR_KM,
+        )
+        # Breakfast only if day starts early enough (before ~11:00)
+        if start_anchor <= 11 * 60:
+            path, breakfast = _try_add_food(
+                path,
+                restaurants,
+                used_ids=used_ids,
+                index_min=0,
+                index_max=min(1, len(path)),
+                max_detour_km=MAX_FOOD_DETOUR_KM,
+            )
+        path = order_stops_geo(path)
+        if breakfast is not None and path:
+            bid = _role_id(breakfast)
+            if _role_id(path[-1]) == bid and _role_id(path[0]) != bid:
+                path = list(reversed(path))
+
+    lunch_id = _role_id(lunch) if lunch else ""
+    breakfast_id = _role_id(breakfast) if breakfast else ""
 
     stops: list[dict[str, Any]] = []
+    last_poi: dict[str, Any] | None = None
+    t = start_anchor
+    if breakfast is not None and start_anchor <= BREAKFAST_AT + 30:
+        t = max(start_anchor, BREAKFAST_AT)
 
-    # Morning breakfast
-    cursor = BREAKFAST_AT
-    if breakfast is not None:
-        stops.append(_stop_payload(breakfast, time_min=cursor, daypart="breakfast"))
-        cursor = BREAKFAST_AT + _poi_duration(breakfast) + 20
-    else:
-        cursor = ATTRACTION_START
+    for i, poi in enumerate(path):
+        pid = _role_id(poi)
+        dur = _poi_duration(poi)
+        if breakfast_id and pid == breakfast_id:
+            daypart = "breakfast"
+            time_min = t if i > 0 else max(start_anchor, min(t, BREAKFAST_AT + 60))
+        elif lunch_id and pid == lunch_id:
+            daypart = "lunch"
+            time_min = max(lunch_anchor, t)
+        else:
+            daypart = "attraction"
+            cat = str(poi.get("category") or "")
+            if not lunch_id and cat in FOOD_CATS and 0 < i < len(path) - 1:
+                daypart = "lunch"
+                time_min = max(lunch_anchor, t)
+            else:
+                time_min = t
 
-    # Prefix before lunch, suffix after — never reorder geo path (no zigzag).
-    morning_budget_end = LUNCH_AT - 15
-    morning_attrs: list[dict[str, Any]] = []
-    afternoon_attrs: list[dict[str, Any]] = []
+        # Must finish this stop before leaving the region
+        if time_min + dur > end_anchor:
+            break
 
-    if lunch is None or not ordered_attr:
-        morning_attrs = list(ordered_attr)
-    else:
-        t = cursor
-        split_at = len(ordered_attr)
-        for i, poi in enumerate(ordered_attr):
-            dur = _poi_duration(poi)
-            # Keep at least one morning stop when schedule allows
-            if i == 0 and t < LUNCH_AT - 45:
-                morning_attrs.append(poi)
-                t += dur + 25
-                continue
-            if t + dur > morning_budget_end:
-                split_at = i
-                break
-            morning_attrs.append(poi)
-            t += dur + 25
-        afternoon_attrs = ordered_attr[split_at:]
-        # Ensure lunch sits mid-day when everything fit before noon
-        if not afternoon_attrs and len(morning_attrs) > 1:
-            split = max(1, len(morning_attrs) // 2)
-            afternoon_attrs = morning_attrs[split:]
-            morning_attrs = morning_attrs[:split]
+        stops.append(_stop_payload(poi, time_min=time_min, daypart=daypart))
+        t = time_min + dur + 25
+        last_poi = poi
 
-    t = cursor
-    for poi in morning_attrs:
-        stops.append(_stop_payload(poi, time_min=t, daypart="attraction"))
-        t += _poi_duration(poi) + 25
-
-    if lunch is not None:
-        lunch_time = max(LUNCH_AT, t)
-        stops.append(_stop_payload(lunch, time_min=lunch_time, daypart="lunch"))
-        t = lunch_time + _poi_duration(lunch) + 25
-    else:
-        t = max(t, LUNCH_AT)
-
-    for poi in afternoon_attrs:
-        stops.append(_stop_payload(poi, time_min=t, daypart="attraction"))
-        t += _poi_duration(poi) + 25
-
-    if hotel is not None:
-        hotel_time = max(EVENING_HOTEL_AT, t)
-        stops.append(_stop_payload(hotel, time_min=hotel_time, daypart="hotel"))
+    if allow_hotel and hotel is not None and last_poi is not None:
+        end = poi_coord(last_poi)
+        h = poi_coord(hotel)
+        if end and h and haversine_km(end[0], end[1], h[0], h[1]) <= MAX_HOTEL_FROM_PATH_END_KM:
+            hotel_time = max(EVENING_HOTEL_AT, t)
+            stops.append(_stop_payload(hotel, time_min=hotel_time, daypart="hotel"))
 
     return stops
+
+
+def _travel_leg_stop(
+    *,
+    name: str,
+    time_min: int,
+    duration_min: int,
+    lat: float,
+    lng: float,
+    daypart: str,
+) -> dict[str, Any]:
+    return {
+        "id": None,
+        "poi_id": "",
+        "name": name,
+        "category": "travel",
+        "description": None,
+        "lat": lat,
+        "lng": lng,
+        "region": None,
+        "rating": None,
+        "rating_count": None,
+        "time": _minutes_to_hhmm(time_min),
+        "duration": _duration_label(duration_min),
+        "duration_minutes": duration_min,
+        "daypart": daypart,
+        "tip": "",
+    }
 
 
 def pick_base_hotel(
@@ -329,7 +415,14 @@ def build_skeleton(
     accommodations: list[dict[str, Any]],
     attractions: list[dict[str, Any]],
     weather: dict[str, Any] | None,
+    origin_lat: float | None = None,
+    origin_lng: float | None = None,
+    from_origin: bool = False,
+    depart_time: str | None = "08:00",
+    return_by_time: str | None = "21:00",
 ) -> dict[str, Any]:
+    from app.services.travel_window import build_travel_context, parse_hhmm
+
     region_key = region.strip().lower()
     db_region = REGION_DB_ID.get(region_key, region_key)
     coords = REGION_COORDINATES.get(region_key) or REGION_COORDINATES.get(db_region)
@@ -350,6 +443,17 @@ def build_skeleton(
     interest_cats = _interest_sets(interests)
     days_n = max(1, int(days))
 
+    travel = build_travel_context(
+        origin_lat=origin_lat,
+        origin_lng=origin_lng,
+        region_lat=start_lat,
+        region_lng=start_lng,
+        days=days_n,
+        depart_time=depart_time,
+        return_by_time=return_by_time,
+        from_origin=from_origin,
+    )
+
     clusters = build_day_clusters(
         attractions,
         days=days_n,
@@ -357,8 +461,9 @@ def build_skeleton(
         origin_lng=start_lng,
     )
 
+    allow_hotel = bool(travel.get("allow_hotel"))
     base_hotel = None
-    if days_n >= 2 and accommodations:
+    if allow_hotel and accommodations:
         first_nonempty = next((c for c in clusters if c), [])
         base_hotel = pick_base_hotel(
             accommodations,
@@ -372,6 +477,7 @@ def build_skeleton(
         used.add(str(base_hotel["id"]))
 
     day_payloads: list[dict[str, Any]] = []
+    last_day_end = int(travel.get("last_day_end_min") or travel.get("day_end_min") or 19 * 60)
 
     for day_i in range(1, days_n + 1):
         cluster = clusters[day_i - 1] if day_i - 1 < len(clusters) else []
@@ -385,15 +491,105 @@ def build_skeleton(
             restaurants=restaurants,
             used=used,
             interest_cats=interest_cats,
+            origin_lat=start_lat,
+            origin_lng=start_lng,
         )
-        hotel = base_hotel if (base_hotel is not None and day_i < days_n) else None
+
+        # Time windows
+        if day_i == 1:
+            w_start = int(travel.get("day_start_min") or ATTRACTION_START)
+        else:
+            w_start = BREAKFAST_AT
+        if day_i == days_n:
+            w_end = last_day_end
+        else:
+            w_end = 20 * 60
+
+        hotel = (
+            base_hotel
+            if (base_hotel is not None and allow_hotel and day_i < days_n)
+            else None
+        )
 
         stops = assemble_day_stops(
             attractions=pieces["attractions"],
-            breakfast=pieces["breakfast"],
-            lunch=pieces["lunch"],
             hotel=hotel,
+            restaurants=restaurants,
+            used=used,
+            window_start_min=w_start,
+            window_end_min=w_end,
+            allow_hotel=allow_hotel and day_i < days_n,
         )
+
+        # Prepend outbound travel leg on day 1 when coming from elsewhere
+        if travel.get("from_origin") and day_i == 1 and stops:
+            depart_m = parse_hhmm(travel.get("depart_origin_at"), 8 * 60)
+            out_m = int(travel.get("outbound_minutes") or 0)
+            o_lat = float(travel.get("origin_lat") or start_lat)
+            o_lng = float(travel.get("origin_lng") or start_lng)
+            stops = [
+                _travel_leg_stop(
+                    name="Yola çıxış (cari məkan)",
+                    time_min=depart_m,
+                    duration_min=out_m,
+                    lat=o_lat,
+                    lng=o_lng,
+                    daypart="travel_out",
+                ),
+                _travel_leg_stop(
+                    name=f"{db_region.title()} — çatış",
+                    time_min=int(travel.get("day_start_min") or w_start),
+                    duration_min=15,
+                    lat=start_lat,
+                    lng=start_lng,
+                    daypart="travel_arrive",
+                ),
+            ] + stops
+
+        # Append return leg on last day
+        if travel.get("from_origin") and day_i == days_n and stops:
+            leave_m = parse_hhmm(travel.get("leave_region_by"), last_day_end)
+            ret_m = int(travel.get("return_minutes") or 0)
+            o_lat = float(travel.get("origin_lat") or start_lat)
+            o_lng = float(travel.get("origin_lng") or start_lng)
+            # Ensure leave is after last visit
+            last_visit = stops[-1]
+            last_t = parse_hhmm(str(last_visit.get("time") or ""), leave_m)
+            last_dur = int(last_visit.get("duration_minutes") or 0)
+            leave_m = max(leave_m, last_t + last_dur)
+            stops = stops + [
+                _travel_leg_stop(
+                    name="Geri dönüş — yola çıxış",
+                    time_min=leave_m,
+                    duration_min=ret_m,
+                    lat=start_lat,
+                    lng=start_lng,
+                    daypart="travel_return",
+                ),
+                _travel_leg_stop(
+                    name="Evə / Bakıya çatış",
+                    time_min=leave_m + ret_m,
+                    duration_min=15,
+                    lat=o_lat,
+                    lng=o_lng,
+                    daypart="travel_home",
+                ),
+            ]
+
+        notes = ""
+        if travel.get("from_origin") and day_i == 1:
+            notes = (
+                f"Çıxış {travel.get('depart_origin_at')} → "
+                f"rayona çatış ~{travel.get('arrive_region_at')} "
+                f"(~{travel.get('outbound_minutes')} dəq / {travel.get('distance_km')} km)."
+            )
+        if travel.get("from_origin") and day_i == days_n:
+            extra = (
+                f" Geri dönüş üçün ən gec {travel.get('leave_region_by')} "
+                f"yola çıxın — {travel.get('return_origin_by')} evdə olun."
+            )
+            notes = (notes + extra).strip()
+
         if not stops:
             continue
 
@@ -403,7 +599,7 @@ def build_skeleton(
                 "title": f"{day_i}. gün",
                 "stops": stops,
                 "estimated_cost": _budget_day_cost(budget),
-                "notes": "",
+                "notes": notes,
             }
         )
 
@@ -414,17 +610,27 @@ def build_skeleton(
         day["day"] = i
         day["title"] = f"{i}. gün"
 
+    best_time = ""
+    if travel.get("from_origin"):
+        best_time = (
+            f"Çıxış {travel.get('depart_origin_at')}, "
+            f"rayonda {travel.get('arrive_region_at')}–{travel.get('leave_region_by')}, "
+            f"evə {travel.get('return_origin_by')}."
+        )
+
     return {
         "summary": "",
         "days": day_payloads,
         "total_cost": _budget_total(budget, len(day_payloads)),
-        "best_time": "",
+        "best_time": best_time,
         "region": db_region,
+        "travel": travel if travel.get("from_origin") else None,
         "meta": {
             "budget": budget,
             "interests": interests,
             "group_type": group_type,
-            "ordered_by": "geo_clusters_daypart_open_tsp",
+            "ordered_by": "geo_first_compact_tour_travel_window",
+            "allow_hotel": allow_hotel,
         },
     }
 

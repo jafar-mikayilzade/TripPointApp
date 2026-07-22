@@ -6,6 +6,7 @@ import {
   normalizeAzPhoneLocal,
   parseAzPhoneLocal,
   sanitizeAzPhoneLocalInput,
+  validateAzPhone,
 } from '../lib/formValidation';
 
 import { colors } from '../constants/theme';
@@ -17,19 +18,22 @@ type PhoneFieldProps = Omit<TextInputProps, 'value' | 'onChangeText' | 'keyboard
   /** Yerli rəqəmlər (yazarkən 0 saxlanıla bilər; blur-da normallaşır) */
   onChangeLocal: (localDigits: string) => void;
   error?: string | null;
+  /** Blur zamanı validasiya nəticəsi (null = OK) */
+  onValidationError?: (error: string | null) => void;
   required?: boolean;
   editable?: boolean;
 };
 
 /**
  * Sabit +994 prefiksi + yalnız rəqəm.
- * Başdakı 0 xanadan çıxanda (blur) silinir.
+ * Başdakı 0 xanadan çıxanda (blur) silinir; operator kodu yoxlanır.
  */
 export function PhoneField({
   label,
   value,
   onChangeLocal,
   error,
+  onValidationError,
   required = false,
   editable = true,
   style,
@@ -46,10 +50,21 @@ export function PhoneField({
 
   function handleChange(text: string) {
     onChangeLocal(sanitizeAzPhoneLocalInput(text));
+    onValidationError?.(null);
   }
 
   function handleBlur(event: Parameters<NonNullable<TextInputProps['onBlur']>>[0]) {
-    onChangeLocal(normalizeAzPhoneLocal(value));
+    const normalized = normalizeAzPhoneLocal(value);
+    const validationError = validateAzPhone(normalized, required);
+
+    if (validationError && normalized) {
+      // Səhv format: növbəti addımda xana boş olsun
+      onChangeLocal('');
+      onValidationError?.(validationError);
+    } else {
+      onChangeLocal(normalized);
+      onValidationError?.(validationError);
+    }
     onBlur?.(event);
   }
 
@@ -84,21 +99,23 @@ export function PhoneField({
           {...inputProps}
         />
       </View>
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   field: {
-    marginBottom: 16,
+    marginBottom: 8,
+    marginTop: 4,
     minWidth: 0,
     width: '100%',
   },
   label: {
-    fontSize: 13,
+    fontSize: 12,
     color: colors.chipText,
-    marginBottom: 6,
-    fontWeight: '500',
+    marginBottom: 4,
+    fontWeight: '600',
   },
   requiredMark: {
     color: colors.danger,
@@ -107,9 +124,9 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderSoft,
-    borderRadius: 16,
+    borderRadius: 10,
     backgroundColor: colors.surface,
     overflow: 'hidden',
     minWidth: 0,
@@ -121,29 +138,28 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   prefix: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 15,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    fontSize: 13,
     fontWeight: '700',
     color: colors.text,
     backgroundColor: colors.chip,
-    borderRightWidth: 1,
-    borderRightColor: colors.border,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: colors.borderSoft,
   },
   input: {
     flex: 1,
     minWidth: 0,
     paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 15,
+    paddingVertical: 10,
+    fontSize: 14,
     color: colors.text,
   },
   errorText: {
-    marginTop: 6,
+    marginTop: 4,
     fontSize: 12,
     color: colors.danger,
     lineHeight: 16,
     flexShrink: 1,
   },
 });
-

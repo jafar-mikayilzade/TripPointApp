@@ -1,5 +1,6 @@
 import type { PoiCategory } from '../types/database';
 
+/** @deprecated UI üçün CategoryIcon istifadə et — yalnız köhnə mətn/paylaşım üçün. */
 export function getCategoryEmoji(category: string): string {
   const map: Record<string, string> = {
     restaurant: '🍽️',
@@ -43,27 +44,23 @@ export type HomeCategoryFilterId = 'all' | PoiCategory;
 export const HOME_CATEGORY_FILTERS: {
   id: HomeCategoryFilterId;
   label: string;
-  emoji: string;
 }[] = [
-  { id: 'all', label: 'Hamısı', emoji: '🗺️' },
-  { id: 'restaurant', label: 'Restoran', emoji: '🍽️' },
-  { id: 'hotel', label: 'Otel', emoji: '🏨' },
-  { id: 'hostel', label: 'Hostel', emoji: '🛏️' },
-  { id: 'home_restaurant', label: 'Ev restoranı', emoji: '🏠' },
-  { id: 'guesthouse', label: 'Qonaq evi', emoji: '🏡' },
-  { id: 'nature', label: 'Təbiət', emoji: '🌿' },
-  { id: 'waterfall', label: 'Şəlalə', emoji: '💧' },
-  { id: 'mountain', label: 'Dağ', emoji: '⛰️' },
-  { id: 'lake', label: 'Göl', emoji: '🏞️' },
-  { id: 'historical', label: 'Tarixi', emoji: '🏛️' },
-  { id: 'monument', label: 'Abidə', emoji: '🗿' },
-  { id: 'other', label: 'Digər', emoji: '📍' },
+  { id: 'all', label: 'Hamısı' },
+  { id: 'restaurant', label: 'Restoran' },
+  { id: 'hotel', label: 'Otel' },
+  { id: 'hostel', label: 'Hostel' },
+  { id: 'home_restaurant', label: 'Ev restoranı' },
+  { id: 'guesthouse', label: 'Qonaq evi' },
+  { id: 'nature', label: 'Təbiət' },
+  { id: 'waterfall', label: 'Şəlalə' },
+  { id: 'mountain', label: 'Dağ' },
+  { id: 'lake', label: 'Göl' },
+  { id: 'historical', label: 'Tarixi' },
+  { id: 'monument', label: 'Abidə' },
+  { id: 'other', label: 'Digər' },
 ];
 
 export function getHomeCategoryChipLabel(id: HomeCategoryFilterId): string {
   const item = HOME_CATEGORY_FILTERS.find((f) => f.id === id);
-  if (!item) {
-    return '🗺️ Hamısı';
-  }
-  return `${item.emoji} ${item.label}`;
+  return item?.label ?? 'Hamısı';
 }

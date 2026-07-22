@@ -18,16 +18,23 @@ def fetch_places_from_google(
     latitude: float,
     longitude: float,
     category: str,
+    *,
+    radius_meters: int | None = None,
+    timeout_seconds: float = 30,
 ) -> list[dict[str, Any]]:
     google_type = GOOGLE_TYPE_MAP.get(category, "tourist_attraction")
     params = {
         "location": f"{latitude},{longitude}",
-        "radius": SEARCH_RADIUS_METERS,
+        "radius": int(radius_meters or SEARCH_RADIUS_METERS),
         "type": google_type,
         "key": GOOGLE_PLACES_API_KEY,
     }
 
-    response = requests.get(GOOGLE_NEARBY_SEARCH_URL, params=params, timeout=30)
+    response = requests.get(
+        GOOGLE_NEARBY_SEARCH_URL,
+        params=params,
+        timeout=timeout_seconds,
+    )
     response.raise_for_status()
     payload = response.json()
 

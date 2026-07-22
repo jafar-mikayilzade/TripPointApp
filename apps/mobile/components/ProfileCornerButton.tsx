@@ -52,7 +52,7 @@ export function ProfileCornerButton({ style }: Props) {
       {avatarUrl ? (
         <Image source={{ uri: avatarUrl }} style={styles.avatar} />
       ) : (
-        <Ionicons name="person" size={18} color={colors.text} />
+        <Ionicons name="person" size={16} color={colors.text} />
       )}
     </Pressable>
   );
@@ -60,19 +60,19 @@ export function ProfileCornerButton({ style }: Props) {
 
 const styles = StyleSheet.create({
   btn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     backgroundColor: colors.surface,
-    borderWidth: 1.5,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
   },
 });

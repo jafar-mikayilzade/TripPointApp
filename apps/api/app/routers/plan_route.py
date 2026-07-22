@@ -9,9 +9,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
-from app.db import supabase
+from app.services.live_route_candidates import load_live_route_candidates
 from app.services.plan_itinerary import build_skeleton, enrich_with_claude
-from app.services.rank_pois import bucket_route_candidates
 
 router = APIRouter(tags=["route"])
 
@@ -48,23 +47,12 @@ class PlanRouteIn(BaseModel):
     groupType: str | None = "solo"
     weather: WeatherIn | None = None
     pois: PoisIn | None = None
-
-
-def _load_buckets_from_db(region_key: str, per_bucket: int = 12) -> dict[str, list[dict[str, Any]]]:
-    db_region = REGION_DB_ID.get(region_key, region_key)
-    result = (
-        supabase.table("pois")
-        .select(
-            "id, name, category, description, lat, lng, region, rating, rating_count"
-        )
-        .eq("status", "approved")
-        .ilike("region", db_region)
-        .neq("category", "cafe")
-        .limit(200)
-        .execute()
-    )
-    rows = list(result.data or [])
-    return bucket_route_candidates(rows, per_bucket=per_bucket)
+    # Travel-from-home (e.g. Baku → Quba day trip)
+    fromOrigin: bool = False
+    originLat: float | None = None
+    originLng: float | None = None
+    departTime: str | None = "08:00"
+    returnByTime: str | None = "21:00"
 
 
 @router.post("/api/plan-route")
@@ -81,6 +69,8 @@ def plan_route_endpoint(body: PlanRouteIn) -> JSONResponse:
 
     db_region = REGION_DB_ID.get(region_key, region_key)
     region_label = REGION_LABELS.get(region_key) or REGION_LABELS.get(db_region) or db_region
+    interests = [str(i) for i in (body.interests or [])]
+    candidate_source = "client"
 
     if body.pois and (
         body.pois.restaurants or body.pois.accommodations or body.pois.attractions
@@ -89,10 +79,17 @@ def plan_route_endpoint(body: PlanRouteIn) -> JSONResponse:
         accommodations = list(body.pois.accommodations)
         attractions = list(body.pois.attractions)
     else:
-        buckets = _load_buckets_from_db(region_key)
+        loaded = load_live_route_candidates(
+            region_key,
+            per_bucket=12,
+            interests=interests or None,
+            source="google",
+        )
+        buckets = loaded["buckets"]
         restaurants = buckets["restaurants"]
         accommodations = buckets["accommodations"]
         attractions = buckets["attractions"]
+        candidate_source = str(loaded.get("source") or "google")
 
     if not (restaurants or accommodations or attractions):
         raise HTTPException(
@@ -101,7 +98,6 @@ def plan_route_endpoint(body: PlanRouteIn) -> JSONResponse:
         )
 
     weather = body.weather.model_dump() if body.weather else None
-    interests = [str(i) for i in (body.interests or [])]
     group_type = (body.groupType or "solo").strip() or "solo"
 
     try:
@@ -115,6 +111,11 @@ def plan_route_endpoint(body: PlanRouteIn) -> JSONResponse:
             accommodations=accommodations,
             attractions=attractions,
             weather=weather,
+            origin_lat=body.originLat,
+            origin_lng=body.originLng,
+            from_origin=bool(body.fromOrigin),
+            depart_time=body.departTime or "08:00",
+            return_by_time=body.returnByTime or "21:00",
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
@@ -129,7 +130,7 @@ def plan_route_endpoint(body: PlanRouteIn) -> JSONResponse:
         weather=weather,
     )
 
-    # Strip internal meta noise for mobile (keep compatible fields)
+    travel = plan.pop("travel", None) or skeleton.get("travel")
     plan.pop("meta", None)
 
     return JSONResponse(
@@ -138,9 +139,11 @@ def plan_route_endpoint(body: PlanRouteIn) -> JSONResponse:
             "summary": plan.get("summary"),
             "days": plan.get("days"),
             "total_cost": plan.get("total_cost"),
-            "best_time": plan.get("best_time"),
+            "best_time": plan.get("best_time") or skeleton.get("best_time"),
             "region": db_region,
             "regionLabel": region_label,
+            "travel": travel,
             "source": "fastapi_geo",
+            "candidatesSource": candidate_source,
         }
     )

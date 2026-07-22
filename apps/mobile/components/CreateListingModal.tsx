@@ -11,21 +11,27 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DEFAULT_REGION_ID, REGIONS } from '../constants/regions';
 import { getErrorMessage } from '../lib/errors';
 import {
   FIELD_EMPTY_PLACEHOLDER,
+  TEXT_FORMAT_ERROR,
   buildCarpoolTitle,
   formatAzPhoneE164,
+  hasDisallowedTextSymbols,
   parsePositiveNumber,
   sanitizeAzPhoneLocalInput,
+  sanitizeFreeTextWordPatterns,
   sanitizeLettersOnlyInput,
   sanitizePositiveIntInput,
   validateAzPhone,
   validateLettersOnlyField,
+  validateTextWordPatterns,
 } from '../lib/formValidation';
 import { isBeforeSelectableHour, nextSelectableHour } from '../lib/listingSchedule';
+import { notifyOrganizerNewTour } from '../lib/subscriptions';
 import { supabase } from '../lib/supabase';
 import type {
   ListingPriceType,
@@ -51,24 +57,33 @@ type FieldErrors = Partial<
   >
 >;
 
-const TYPE_CARDS: { type: ListingType; emoji: string; title: string; subtitle: string }[] = [
+const TYPE_CARDS: {
+  type: ListingType;
+  title: string;
+  subtitle: string;
+  tint: string;
+  soft: string;
+}[] = [
   {
     type: 'tour',
-    emoji: '🗺',
     title: 'Tur',
     subtitle: 'Qrup turu təşkil edirəm',
+    tint: colors.success,
+    soft: colors.successSoft,
   },
   {
     type: 'local_service',
-    emoji: '🏔',
     title: 'Yerli Xidmət',
     subtitle: 'Yerli olaraq xidmət təklif edirəm',
+    tint: colors.warning,
+    soft: colors.warningSoft,
   },
   {
     type: 'carpool',
-    emoji: '🚗',
     title: 'Carpool',
     subtitle: 'Şəxsi maşınımla gedirəm, yer var',
+    tint: colors.accent,
+    soft: colors.accentSoft,
   },
 ];
 
@@ -89,6 +104,9 @@ const PRICE_TYPES: { value: ListingPriceType; label: string }[] = [
 ];
 
 export function CreateListingModal({ visible, onClose, onCreated }: CreateListingModalProps) {
+  const insets = useSafeAreaInsets();
+  const bottomSafe = Math.max(insets.bottom, 12);
+
   const [step, setStep] = useState<1 | 2>(1);
   const [listingType, setListingType] = useState<ListingType | null>(null);
 
@@ -255,6 +273,43 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     });
   }
 
+  function setFieldError(key: keyof FieldErrors, message: string | null) {
+    if (!message) {
+      clearFieldError(key);
+      return;
+    }
+    setFieldErrors((prev) => ({ ...prev, [key]: message }));
+  }
+
+  function handleLettersChange(
+    key: 'title' | 'origin' | 'destination',
+    text: string,
+    setter: (value: string) => void
+  ) {
+    const lettersOnly = text.replace(/[^\p{L}\s]/gu, '');
+    const cleaned = sanitizeLettersOnlyInput(text);
+
+    if (hasDisallowedTextSymbols(text)) {
+      setFieldError(key, TEXT_FORMAT_ERROR);
+    } else if (cleaned.length < lettersOnly.length) {
+      setFieldError(
+        key,
+        validateTextWordPatterns(lettersOnly) ?? TEXT_FORMAT_ERROR
+      );
+    } else {
+      clearFieldError(key);
+    }
+    setter(cleaned);
+  }
+
+  function handleLettersBlur(
+    key: 'title' | 'origin' | 'destination',
+    value: string,
+    label: string
+  ) {
+    setFieldError(key, validateLettersOnlyField(value, label));
+  }
+
   function selectType(type: ListingType) {
     const soonest = nextSelectableHour();
     setMinDeparture(soonest);
@@ -293,23 +348,27 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     }
 
     if (listingType === 'carpool') {
-      if (validateLettersOnlyField(originText, 'Haradan')) {
-        errors.origin = 'empty';
+      const originErr = validateLettersOnlyField(originText, 'Haradan');
+      if (originErr) {
+        errors.origin = originErr;
       }
-      if (validateLettersOnlyField(destinationText, 'Haraya')) {
-        errors.destination = 'empty';
+      const destErr = validateLettersOnlyField(destinationText, 'Haraya');
+      if (destErr) {
+        errors.destination = destErr;
       }
       if (!isFree && parsedPrice === null) {
         errors.price = 'empty';
       }
-      if (validateAzPhone(contactPhone, true)) {
-        errors.phone = 'empty';
+      const phoneErr = validateAzPhone(contactPhone, true);
+      if (phoneErr) {
+        errors.phone = phoneErr;
       }
     }
 
     if (listingType === 'tour') {
-      if (validateLettersOnlyField(title, 'Başlıq')) {
-        errors.title = 'empty';
+      const titleErr = validateLettersOnlyField(title, 'Başlıq');
+      if (titleErr) {
+        errors.title = titleErr;
       }
       if (parsedPrice === null) {
         errors.price = 'empty';
@@ -318,20 +377,23 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
       if (!capacityText || !Number.isFinite(tourCapacity) || tourCapacity <= 0) {
         errors.capacity = 'empty';
       }
-      if (validateAzPhone(contactPhone, true)) {
-        errors.phone = 'empty';
+      const phoneErr = validateAzPhone(contactPhone, true);
+      if (phoneErr) {
+        errors.phone = phoneErr;
       }
     }
 
     if (listingType === 'local_service') {
-      if (validateLettersOnlyField(title, 'Başlıq')) {
-        errors.title = 'empty';
+      const titleErr = validateLettersOnlyField(title, 'Başlıq');
+      if (titleErr) {
+        errors.title = titleErr;
       }
       if (priceType !== 'free' && priceType !== 'negotiable' && parsedPrice === null) {
         errors.price = 'empty';
       }
-      if (validateAzPhone(contactPhone, true)) {
-        errors.phone = 'empty';
+      const phoneErr = validateAzPhone(contactPhone, true);
+      if (phoneErr) {
+        errors.phone = phoneErr;
       }
     }
 
@@ -346,6 +408,9 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     const errors = collectFieldErrors();
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
+      if (errors.phone && contactPhone.trim()) {
+        setContactPhone('');
+      }
       return;
     }
 
@@ -452,11 +517,26 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
             setFieldErrors({
               submit: `Elan yaradıldı, amma marşrut yerləri yazılmadı: ${getErrorMessage(poisError)}`,
             });
+            if (listingType === 'tour') {
+              void notifyOrganizerNewTour({
+                organizerId: user.id,
+                listingId,
+                title: resolvedTitle,
+              });
+            }
             onCreated();
             onClose();
             return;
           }
         }
+      }
+
+      if (listingType === 'tour') {
+        void notifyOrganizerNewTour({
+          organizerId: user.id,
+          listingId,
+          title: resolvedTitle,
+        });
       }
 
       onCreated();
@@ -486,12 +566,17 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
         style={styles.overlay}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, step === 1 ? { paddingBottom: bottomSafe } : null]}>
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>
-              {step === 1 ? 'Elan tipi seç' : 'Elan məlumatları'}
-            </Text>
-            <Pressable onPress={onClose} hitSlop={12}>
+            <View style={styles.headerTextWrap}>
+              <Text style={styles.headerTitle}>
+                {step === 1 ? 'elan tipi' : 'elan məlumatları'}
+              </Text>
+              <Text style={styles.headerSubtitle}>
+                {step === 1 ? 'Hansı elanı yaratmaq istəyirsiniz?' : 'Məlumatları doldurun'}
+              </Text>
+            </View>
+            <Pressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
               <Text style={styles.closeText}>Bağla</Text>
             </Pressable>
           </View>
@@ -513,7 +598,11 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                     style={styles.typeCard}
                     onPress={() => selectType(card.type)}
                   >
-                    <Text style={styles.typeEmoji}>{card.emoji}</Text>
+                    <View style={[styles.typeBadge, { backgroundColor: card.soft }]}>
+                      <Text style={[styles.typeBadgeText, { color: card.tint }]}>
+                        {card.title.charAt(0)}
+                      </Text>
+                    </View>
                     <View style={styles.typeTextWrap}>
                       <Text style={styles.typeTitle}>{card.title}</Text>
                       <Text style={styles.typeSubtitle}>{card.subtitle}</Text>
@@ -529,25 +618,29 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                 <TextInput
                   style={inputStyle(!!fieldErrors.origin)}
                   value={originText}
-                  onChangeText={(text) => {
-                    clearFieldError('origin');
-                    setOriginText(sanitizeLettersOnlyInput(text));
-                  }}
+                  onChangeText={(text) => handleLettersChange('origin', text, setOriginText)}
+                  onBlur={() => handleLettersBlur('origin', originText, 'Haradan')}
                   placeholder={ph(!!fieldErrors.origin, 'Bakı')}
                   placeholderTextColor={phColor(!!fieldErrors.origin)}
                 />
+                {fieldErrors.origin ? (
+                  <Text style={styles.fieldHintError}>{fieldErrors.origin}</Text>
+                ) : null}
 
                 <FieldLabel text="Haraya" required />
                 <TextInput
                   style={inputStyle(!!fieldErrors.destination)}
                   value={destinationText}
-                  onChangeText={(text) => {
-                    clearFieldError('destination');
-                    setDestinationText(sanitizeLettersOnlyInput(text));
-                  }}
+                  onChangeText={(text) =>
+                    handleLettersChange('destination', text, setDestinationText)
+                  }
+                  onBlur={() => handleLettersBlur('destination', destinationText, 'Haraya')}
                   placeholder={ph(!!fieldErrors.destination, 'Quba')}
                   placeholderTextColor={phColor(!!fieldErrors.destination)}
                 />
+                {fieldErrors.destination ? (
+                  <Text style={styles.fieldHintError}>{fieldErrors.destination}</Text>
+                ) : null}
 
                 <FieldLabel text="Başlıq" required />
                 <TextInput
@@ -638,7 +731,8 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                     clearFieldError('phone');
                     setContactPhone(sanitizeAzPhoneLocalInput(local));
                   }}
-                  error={fieldErrors.phone ? FIELD_EMPTY_PLACEHOLDER : null}
+                  onValidationError={(err) => setFieldError('phone', err)}
+                  error={fieldErrors.phone ?? null}
                 />
 
                 <CollapseToggle
@@ -743,7 +837,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                 <TextInput
                   style={[styles.input, description.trim().length > 0 && styles.textAreaGrowing]}
                   value={description}
-                  onChangeText={setDescription}
+                  onChangeText={(text) => setDescription(sanitizeFreeTextWordPatterns(text))}
                   placeholder="Qısa qeyd (istəyə bağlı)"
                   placeholderTextColor={colors.textMuted}
                   multiline
@@ -758,13 +852,14 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                 <TextInput
                   style={inputStyle(!!fieldErrors.title)}
                   value={title}
-                  onChangeText={(text) => {
-                    clearFieldError('title');
-                    setTitle(sanitizeLettersOnlyInput(text));
-                  }}
+                  onChangeText={(text) => handleLettersChange('title', text, setTitle)}
+                  onBlur={() => handleLettersBlur('title', title, 'Başlıq')}
                   placeholder={ph(!!fieldErrors.title, 'Quba weekend turu')}
                   placeholderTextColor={phColor(!!fieldErrors.title)}
                 />
+                {fieldErrors.title ? (
+                  <Text style={styles.fieldHintError}>{fieldErrors.title}</Text>
+                ) : null}
 
                 <CollapseToggle
                   open={regionOpen}
@@ -856,7 +951,8 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                     clearFieldError('phone');
                     setContactPhone(sanitizeAzPhoneLocalInput(local));
                   }}
-                  error={fieldErrors.phone ? FIELD_EMPTY_PLACEHOLDER : null}
+                  onValidationError={(err) => setFieldError('phone', err)}
+                  error={fieldErrors.phone ?? null}
                 />
 
                 <Pressable
@@ -930,7 +1026,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                 <TextInput
                   style={[styles.input, description.trim().length > 0 && styles.textAreaGrowing]}
                   value={description}
-                  onChangeText={setDescription}
+                  onChangeText={(text) => setDescription(sanitizeFreeTextWordPatterns(text))}
                   placeholder="Tur haqqında..."
                   placeholderTextColor={colors.textMuted}
                   multiline
@@ -945,13 +1041,14 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                 <TextInput
                   style={inputStyle(!!fieldErrors.title)}
                   value={title}
-                  onChangeText={(text) => {
-                    clearFieldError('title');
-                    setTitle(sanitizeLettersOnlyInput(text));
-                  }}
+                  onChangeText={(text) => handleLettersChange('title', text, setTitle)}
+                  onBlur={() => handleLettersBlur('title', title, 'Başlıq')}
                   placeholder={ph(!!fieldErrors.title, 'Offroad jeep turu')}
                   placeholderTextColor={phColor(!!fieldErrors.title)}
                 />
+                {fieldErrors.title ? (
+                  <Text style={styles.fieldHintError}>{fieldErrors.title}</Text>
+                ) : null}
 
                 <FieldLabel text="Xidmət kateqoriyası" required />
                 <View style={styles.chipRowWrap}>
@@ -1060,14 +1157,15 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                     clearFieldError('phone');
                     setContactPhone(sanitizeAzPhoneLocalInput(local));
                   }}
-                  error={fieldErrors.phone ? FIELD_EMPTY_PLACEHOLDER : null}
+                  onValidationError={(err) => setFieldError('phone', err)}
+                  error={fieldErrors.phone ?? null}
                 />
 
                 <FieldLabel text="Ətraflı təsvir" />
                 <TextInput
                   style={[styles.input, description.trim().length > 0 && styles.textAreaGrowing]}
                   value={description}
-                  onChangeText={setDescription}
+                  onChangeText={(text) => setDescription(sanitizeFreeTextWordPatterns(text))}
                   placeholder="Xidmət haqqında..."
                   placeholderTextColor={colors.textMuted}
                   multiline
@@ -1082,7 +1180,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
           </ScrollView>
 
           {step === 2 ? (
-            <View style={styles.footerBar}>
+            <View style={[styles.footerBar, { paddingBottom: bottomSafe }]}>
               <Pressable
                 style={styles.backButton}
                 onPress={() => {
@@ -1174,10 +1272,10 @@ const styles = StyleSheet.create({
   },
   sheet: {
     maxHeight: '92%',
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 12,
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingTop: 10,
     overflow: 'hidden',
   },
   scroll: {
@@ -1186,79 +1284,106 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
     paddingBottom: 8,
+    gap: 10,
+  },
+  headerTextWrap: {
+    flex: 1,
+    minWidth: 0,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: '700',
     color: colors.text,
+    letterSpacing: -0.4,
+    textTransform: 'lowercase',
+  },
+  headerSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.textMuted,
+  },
+  closeBtn: {
+    paddingTop: 4,
   },
   closeText: {
     color: colors.accent,
     fontWeight: '600',
+    fontSize: 13,
   },
   content: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
+    paddingHorizontal: 12,
+    paddingBottom: 20,
     flexGrow: 1,
   },
   contentWithFooter: {
-    paddingBottom: 12,
+    paddingBottom: 10,
   },
   typeList: {
-    gap: 12,
-    marginTop: 8,
+    gap: 6,
+    marginTop: 4,
   },
   typeCard: {
-    borderRadius: 24,
-    padding: 16,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     backgroundColor: colors.surface,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
   },
-  typeEmoji: {
-    fontSize: 28,
+  typeBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  typeBadgeText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   typeTextWrap: {
     flex: 1,
+    minWidth: 0,
   },
   typeTitle: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
     color: colors.text,
   },
   typeSubtitle: {
     marginTop: 2,
-    fontSize: 13,
-    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '500',
+    color: colors.textMuted,
+    lineHeight: 15,
   },
   label: {
-    marginTop: 14,
-    marginBottom: 6,
-    fontSize: 13,
-    fontWeight: '700',
+    marginTop: 10,
+    marginBottom: 4,
+    fontSize: 12,
+    fontWeight: '600',
     color: colors.chipText,
   },
   required: {
     color: colors.danger,
   },
   input: {
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
     borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 11,
-    fontSize: 15,
+    paddingVertical: 10,
+    fontSize: 14,
     color: colors.text,
+    backgroundColor: colors.surface,
   },
   inputError: {
     borderColor: colors.danger,
@@ -1268,35 +1393,40 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   textArea: {
-    minHeight: 90,
+    minHeight: 80,
   },
   textAreaGrowing: {
-    minHeight: 96,
-    paddingTop: 11,
+    minHeight: 88,
+    paddingTop: 10,
   },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
   },
   chipRowWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
+    marginBottom: 4,
   },
   chip: {
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: colors.chip,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
   },
   chipSelected: {
     backgroundColor: colors.chipSelected,
+    borderColor: colors.chipSelected,
   },
   chipText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: colors.chipText,
+    lineHeight: 16,
   },
   chipTextSelected: {
     color: colors.textOnAccent,
@@ -1305,34 +1435,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 10,
+    marginTop: 8,
   },
   checkbox: {
     width: 18,
     height: 18,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: colors.textMuted,
+    borderRadius: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    backgroundColor: colors.surface,
   },
   checkboxChecked: {
     backgroundColor: colors.accent,
     borderColor: colors.accent,
   },
   checkboxLabel: {
-    fontSize: 14,
+    fontSize: 13,
     color: colors.chipText,
     fontWeight: '600',
   },
   poiRow: {
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
     borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginBottom: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    marginBottom: 4,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    backgroundColor: colors.surface,
   },
   poiRowSelected: {
     borderColor: colors.accent,
@@ -1340,41 +1472,44 @@ const styles = StyleSheet.create({
   },
   poiName: {
     flex: 1,
-    fontSize: 14,
+    minWidth: 0,
+    fontSize: 13,
     color: colors.text,
     fontWeight: '600',
   },
   poiCheck: {
-    fontSize: 16,
+    fontSize: 14,
     color: colors.accent,
     fontWeight: '700',
+    marginLeft: 8,
   },
   muted: {
     color: colors.textMuted,
-    fontSize: 13,
+    fontSize: 12,
   },
   poiToggle: {
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-    backgroundColor: colors.accentSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    backgroundColor: colors.surface,
     borderRadius: 10,
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 12,
     marginTop: 4,
   },
   poiToggleText: {
     color: colors.accentPressed,
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 13,
   },
   collapseToggle: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 12,
-    paddingVertical: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    paddingVertical: 10,
     paddingHorizontal: 12,
-    marginBottom: 10,
+    marginBottom: 6,
+    marginTop: 8,
   },
   collapseToggleError: {
     borderColor: colors.danger,
@@ -1382,13 +1517,13 @@ const styles = StyleSheet.create({
   collapseToggleText: {
     color: colors.text,
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: 13,
   },
   collapseToggleTextError: {
     color: colors.dangerText,
   },
   poiPickerBox: {
-    marginTop: 8,
+    marginTop: 6,
     marginBottom: 4,
   },
   poiPager: {
@@ -1396,13 +1531,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: 4,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   pagerBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
     borderRadius: 8,
-    backgroundColor: colors.chip,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
   },
   pagerBtnDisabled: {
     opacity: 0.4,
@@ -1410,70 +1547,78 @@ const styles = StyleSheet.create({
   pagerBtnText: {
     color: colors.chipText,
     fontWeight: '700',
-    fontSize: 13,
+    fontSize: 12,
   },
   pagerMeta: {
-    color: colors.textSecondary,
+    color: colors.textMuted,
     fontWeight: '600',
-    fontSize: 13,
+    fontSize: 12,
   },
   footerBar: {
     flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: 20,
+    gap: 8,
+    paddingHorizontal: 12,
     paddingTop: 10,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 14,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderSoft,
+    backgroundColor: colors.bg,
   },
   footerActions: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 20,
-    marginBottom: 20,
+    gap: 8,
+    marginTop: 16,
+    marginBottom: 16,
   },
   backButton: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 16,
-    paddingVertical: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    borderRadius: 10,
+    paddingVertical: 11,
     alignItems: 'center',
+    backgroundColor: colors.surface,
   },
   backButtonText: {
     color: colors.chipText,
     fontWeight: '700',
+    fontSize: 13,
   },
   submitButton: {
     flex: 2,
     backgroundColor: colors.accent,
-    borderRadius: 16,
-    paddingVertical: 14,
+    borderRadius: 10,
+    paddingVertical: 11,
     alignItems: 'center',
   },
   submitDisabled: {
-    opacity: 0.6,
+    opacity: 0.55,
   },
   submitButtonText: {
     color: colors.textOnAccent,
     fontWeight: '700',
-    fontSize: 15,
+    fontSize: 13,
   },
   errorText: {
     backgroundColor: colors.dangerSoft,
     color: colors.dangerText,
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 8,
-    fontSize: 13,
+    borderRadius: 10,
+    padding: 8,
+    marginBottom: 6,
+    fontSize: 12,
   },
   submitError: {
-    marginTop: 12,
+    marginTop: 10,
     backgroundColor: colors.dangerSoft,
     color: colors.dangerText,
-    borderRadius: 8,
-    padding: 10,
-    fontSize: 13,
+    borderRadius: 10,
+    padding: 8,
+    fontSize: 12,
+  },
+  fieldHintError: {
+    marginTop: 2,
+    marginBottom: 6,
+    fontSize: 12,
+    color: colors.danger,
+    lineHeight: 16,
   },
 });

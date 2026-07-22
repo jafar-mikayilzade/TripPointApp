@@ -3,7 +3,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   Image,
   KeyboardAvoidingView,
@@ -18,12 +17,13 @@ import {
 } from 'react-native';
 
 import { REGIONS } from '../constants/regions';
+import { CategoryIcon } from './CategoryIcon';
 import { FavoriteButton } from './FavoriteButton';
+import { TransientHint } from './TransientHint';
 import { notifyAdminsViaWhatsApp } from '../lib/adminNotify';
 import { getErrorMessage } from '../lib/errors';
 import {
   getCategoryColor,
-  getCategoryEmoji,
   getCategoryLabel,
 } from '../lib/poi';
 import { supabase } from '../lib/supabase';
@@ -53,7 +53,13 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [infoToast, setInfoToast] = useState<string | null>(null);
+  const [infoToastKey, setInfoToastKey] = useState(0);
+
+  function showInfoToast(message: string) {
+    setInfoToast(message);
+    setInfoToastKey((key) => key + 1);
+  }
 
   useEffect(() => {
     if (!visible || !poi) {
@@ -66,7 +72,7 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
       setLoadingPhotos(true);
       setLoadingRating(true);
       setErrorMessage(null);
-      setSuccessMessage(null);
+      setInfoToast(null);
       setPhotos([]);
       setAverageRating(null);
       setRatingCount(0);
@@ -207,22 +213,11 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
         return;
       }
 
-      Alert.alert(
-        'Təsdiq gözlənilir',
-        'Şəkilləriniz admin təsdiqinə göndərildi. Təsdiqdən sonra burada görünəcək.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              void notifyAdminsViaWhatsApp(
-                'photo_pending',
-                `"${poi.name}" üçün ${rows.length} şəkil`
-              );
-            },
-          },
-        ]
+      showInfoToast('Şəkillər təsdiqə göndərildi');
+      void notifyAdminsViaWhatsApp(
+        'photo_pending',
+        `"${poi.name}" üçün ${rows.length} şəkil`
       );
-      setSuccessMessage('Şəkillər təsdiq gözləyir.');
     } catch (err) {
       setErrorMessage(getErrorMessage(err));
     } finally {
@@ -237,7 +232,7 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
 
     setSubmittingScore(true);
     setErrorMessage(null);
-    setSuccessMessage(null);
+    setInfoToast(null);
 
     try {
       const {
@@ -266,7 +261,7 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
       }
 
       setUserScore(score);
-      setSuccessMessage('Reytinqiniz saxlanıldı.');
+      showInfoToast('Reytinqiniz saxlanıldı');
 
       const { data: refreshed, error: refreshError } = await supabase
         .from('ratings')
@@ -330,7 +325,7 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
               </ScrollView>
             ) : (
               <View style={[styles.galleryPlaceholder, { backgroundColor: `${color}22` }]}>
-                <Text style={styles.placeholderEmoji}>{getCategoryEmoji(poi.category)}</Text>
+                <CategoryIcon category={poi.category} size={36} color={color} />
               </View>
             )}
 
@@ -379,7 +374,6 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
             </Text>
 
             {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-            {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
 
             <View style={styles.actions}>
               {poi.phone ? (
@@ -432,6 +426,15 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
               {submittingScore ? <ActivityIndicator color={colors.accent} /> : null}
             </View>
           </ScrollView>
+
+          <View style={styles.toastHost} pointerEvents="none">
+            <TransientHint
+              key={infoToastKey}
+              message={infoToast ?? ''}
+              active={!!infoToast}
+              onHidden={() => setInfoToast(null)}
+            />
+          </View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -451,6 +454,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     paddingTop: 12,
     paddingBottom: 28,
+    position: 'relative',
   },
   closeButton: {
     width: 36,
@@ -615,10 +619,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 10,
   },
-  successText: {
-    color: colors.success,
-    fontSize: 13,
-    marginBottom: 10,
-    fontWeight: '600',
+  toastHost: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 24,
+    alignItems: 'center',
   },
 });

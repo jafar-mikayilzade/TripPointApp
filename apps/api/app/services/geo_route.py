@@ -77,10 +77,10 @@ def tour_length_km(pois: Sequence[dict[str, Any]]) -> float:
 
 
 def two_opt(pois: Sequence[dict[str, Any]], *, max_passes: int = 40) -> list[dict[str, Any]]:
-    """Improve an open path with 2-opt (no return to start)."""
+    """Improve an open path with 2-opt (no return to start). Works for n >= 3."""
     route = list(pois)
     n = len(route)
-    if n < 4:
+    if n < 3:
         return route
 
     improved = True
@@ -102,6 +102,188 @@ def two_opt(pois: Sequence[dict[str, Any]], *, max_passes: int = 40) -> list[dic
             if improved:
                 break
     return route
+
+
+def insert_poi_at(path: Sequence[dict[str, Any]], poi: dict[str, Any], index: int) -> list[dict[str, Any]]:
+    route = list(path)
+    idx = max(0, min(index, len(route)))
+    route.insert(idx, poi)
+    return route
+
+
+def best_insertion_index(
+    path: Sequence[dict[str, Any]],
+    poi: dict[str, Any],
+    *,
+    index_min: int = 0,
+    index_max: int | None = None,
+) -> tuple[int, float]:
+    """
+    Index in [0..len(path)] that yields the shortest open path after inserting poi.
+    Returns (index, tour_length_km).
+    """
+    if _coord(poi) is None:
+        return 0, tour_length_km(path)
+    hi = len(path) if index_max is None else min(index_max, len(path))
+    lo = max(0, index_min)
+    if lo > hi:
+        lo, hi = 0, len(path)
+
+    best_i = lo
+    best_len = float("inf")
+    for i in range(lo, hi + 1):
+        length = tour_length_km(insert_poi_at(path, poi, i))
+        if length < best_len:
+            best_len = length
+            best_i = i
+    return best_i, best_len
+
+
+def pick_poi_min_insert(
+    path: Sequence[dict[str, Any]],
+    candidates: Sequence[dict[str, Any]],
+    *,
+    exclude_ids: set[str] | None = None,
+    max_km_from_path: float = 10.0,
+    index_min: int = 0,
+    index_max: int | None = None,
+) -> tuple[dict[str, Any] | None, int]:
+    """
+    Pick candidate whose best insertion into path yields the shortest tour,
+    skipping points farther than max_km_from_path from every path stop (and centroid).
+    """
+    exclude = exclude_ids or set()
+    if not path:
+        # Fall back: nearest to nothing — first usable candidate
+        for poi in candidates:
+            pid = str(poi.get("id") or "")
+            if pid and pid in exclude:
+                continue
+            if _coord(poi) is not None:
+                return poi, 0
+        return None, 0
+
+    path_coords = [c for p in path if (c := _coord(p)) is not None]
+    if not path_coords:
+        return None, 0
+
+    best_poi: dict[str, Any] | None = None
+    best_idx = 0
+    best_len = float("inf")
+
+    for poi in candidates:
+        pid = str(poi.get("id") or "")
+        if pid and pid in exclude:
+            continue
+        coord = _coord(poi)
+        if coord is None:
+            continue
+        min_d = min(haversine_km(coord[0], coord[1], pc[0], pc[1]) for pc in path_coords)
+        if min_d > max_km_from_path:
+            continue
+        idx, length = best_insertion_index(
+            path, poi, index_min=index_min, index_max=index_max
+        )
+        if length < best_len:
+            best_len = length
+            best_poi = poi
+            best_idx = idx
+
+    return best_poi, best_idx
+
+
+def grow_compact_tour(
+    pool: Sequence[dict[str, Any]],
+    *,
+    origin_lat: float,
+    origin_lng: float,
+    used: set[str] | None = None,
+    limit: int = 4,
+    max_diameter_km: float = 8.0,
+    max_add_from_path_km: float = 3.5,
+    prefer_categories: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Build a short open-tour day set: seed near origin, then repeatedly add the POI
+    that least increases tour_length_km while staying close to the existing path.
+    Geography first — rating only breaks ties.
+    """
+    exclude = set(used or set())
+    candidates = [
+        p
+        for p in pool
+        if _coord(p) is not None and str(p.get("id") or "") not in exclude
+    ]
+    if not candidates or limit <= 0:
+        return []
+
+    preferred = [
+        p
+        for p in candidates
+        if not prefer_categories
+        or str(p.get("category") or "") in prefer_categories
+    ]
+    seed_pool = preferred or candidates
+
+    def seed_key(p: dict[str, Any]) -> tuple[float, float]:
+        c = _coord(p)
+        assert c is not None
+        d = haversine_km(origin_lat, origin_lng, c[0], c[1])
+        rating = float(p.get("rating") or 0)
+        return (d, -rating)
+
+    seed = min(seed_pool, key=seed_key)
+    chosen: list[dict[str, Any]] = [seed]
+    chosen_ids = {str(seed.get("id") or "")}
+
+    while len(chosen) < limit:
+        best: dict[str, Any] | None = None
+        best_score: tuple[float, float, float] | None = None
+        base_len = tour_length_km(order_stops_geo(chosen)) if len(chosen) > 1 else 0.0
+        chosen_coords = [_coord(p) for p in chosen if _coord(p)]
+
+        for poi in candidates:
+            pid = str(poi.get("id") or "")
+            if not pid or pid in chosen_ids:
+                continue
+            coord = _coord(poi)
+            if coord is None:
+                continue
+            # Must hug the existing corridor — blocks opposite-side "stop 2"
+            min_d = min(
+                haversine_km(coord[0], coord[1], c[0], c[1]) for c in chosen_coords if c
+            )
+            if min_d > max_add_from_path_km:
+                continue
+            trial = chosen + [poi]
+            if cluster_diameter_km(trial) > max_diameter_km:
+                continue
+            ordered = order_stops_geo(trial)
+            length = tour_length_km(ordered)
+            growth = length - base_len
+            rating = float(poi.get("rating") or 0)
+            score = (growth, min_d, -rating)
+            if best_score is None or score < best_score:
+                best_score = score
+                best = poi
+
+        if best is None:
+            break
+        chosen.append(best)
+        chosen_ids.add(str(best.get("id") or ""))
+
+    return order_stops_geo(chosen)
+
+
+def insertion_detour_km(
+    path: Sequence[dict[str, Any]],
+    poi: dict[str, Any],
+    index: int,
+) -> float:
+    """How many km the open path grows when poi is inserted at index."""
+    before = tour_length_km(path)
+    after = tour_length_km(insert_poi_at(path, poi, index))
+    return max(0.0, after - before)
 
 
 def poi_coord(poi: dict[str, Any]) -> tuple[float, float] | None:

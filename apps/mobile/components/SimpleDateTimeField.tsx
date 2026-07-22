@@ -6,8 +6,9 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, radii, space } from '../constants/theme';
+import { colors, space } from '../constants/theme';
 import { nextSelectableHour } from '../lib/listingSchedule';
 
 interface SimpleDateTimeFieldProps {
@@ -87,6 +88,8 @@ export function SimpleDateTimeField({
   maximumDate,
   hasError = false,
 }: SimpleDateTimeFieldProps) {
+  const insets = useSafeAreaInsets();
+  const bottomSafe = Math.max(insets.bottom, 12);
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>('date');
   const [floor, setFloor] = useState(() => resolveFloor(minimumDate));
@@ -198,7 +201,10 @@ export function SimpleDateTimeField({
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.overlay} onPress={() => setOpen(false)}>
-          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+          <Pressable
+            style={[styles.sheet, { paddingBottom: bottomSafe + 12 }]}
+            onPress={(e) => e.stopPropagation()}
+          >
             {step === 'date' ? (
               <>
                 <Text style={styles.title}>Tarix</Text>
@@ -329,11 +335,11 @@ export function SimpleDateTimeField({
 
 const styles = StyleSheet.create({
   trigger: {
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
     borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingVertical: 10,
     backgroundColor: colors.surface,
   },
   triggerError: {
@@ -341,7 +347,7 @@ const styles = StyleSheet.create({
   },
   triggerText: {
     color: colors.text,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
   },
   triggerTextError: {
@@ -353,49 +359,51 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radii.lg,
-    borderTopRightRadius: radii.lg,
-    paddingHorizontal: space.xl,
-    paddingTop: space.lg,
-    paddingBottom: 28,
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 12,
+    paddingTop: 12,
   },
   title: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
     color: colors.text,
     textAlign: 'center',
+    letterSpacing: -0.2,
   },
   monthBar: {
-    marginTop: space.lg,
+    marginTop: space.md,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   monthNav: {
-    width: 36,
-    height: 36,
+    width: 34,
+    height: 34,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: radii.pill,
-    backgroundColor: colors.surfaceMuted,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
   },
   monthNavDisabled: {
     opacity: 0.35,
   },
   monthNavText: {
-    fontSize: 22,
+    fontSize: 20,
     color: colors.text,
     fontWeight: '500',
-    lineHeight: 26,
+    lineHeight: 24,
   },
   monthLabel: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
     color: colors.text,
   },
   weekRow: {
-    marginTop: space.md,
+    marginTop: space.sm,
     flexDirection: 'row',
   },
   weekday: {
@@ -418,9 +426,9 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   dayInner: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -431,7 +439,7 @@ const styles = StyleSheet.create({
     opacity: 0.35,
   },
   dayText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: colors.text,
   },
@@ -445,7 +453,7 @@ const styles = StyleSheet.create({
     marginTop: space.md,
     textAlign: 'center',
     fontSize: 12,
-    color: colors.textSecondary,
+    color: colors.textMuted,
   },
   timeHeader: {
     flexDirection: 'row',
@@ -453,7 +461,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   backLink: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: colors.accent,
     width: 64,
@@ -465,26 +473,28 @@ const styles = StyleSheet.create({
     marginTop: space.md,
     marginBottom: space.sm,
     textAlign: 'center',
-    fontSize: 13,
-    color: colors.textSecondary,
+    fontSize: 12,
+    color: colors.textMuted,
   },
   hourGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
     justifyContent: 'center',
     marginTop: 8,
   },
   hourChip: {
-    minWidth: 72,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: radii.md,
-    backgroundColor: colors.surfaceMuted,
+    minWidth: 68,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
     alignItems: 'center',
   },
   hourText: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '700',
     color: colors.text,
   },
@@ -492,16 +502,16 @@ const styles = StyleSheet.create({
     marginTop: space.lg,
     textAlign: 'center',
     color: colors.textMuted,
-    fontSize: 13,
+    fontSize: 12,
   },
   cancelBtn: {
-    marginTop: space.xl,
+    marginTop: space.lg,
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   cancelText: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: colors.textMuted,
   },
 });

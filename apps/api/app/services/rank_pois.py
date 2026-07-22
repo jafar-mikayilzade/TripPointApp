@@ -103,8 +103,11 @@ def bucket_route_candidates(
 
 
 def public_poi_fields(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": row.get("id"),
+    place_id = row.get("place_id")
+    row_id = row.get("id") or place_id
+    out: dict[str, Any] = {
+        "id": row_id,
+        "place_id": place_id or row_id,
         "name": row.get("name"),
         "category": row.get("category"),
         "description": row.get("description"),
@@ -114,3 +117,6 @@ def public_poi_fields(row: dict[str, Any]) -> dict[str, Any]:
         "rating": row.get("rating"),
         "rating_count": row.get("rating_count"),
     }
+    if row.get("address"):
+        out["address"] = row.get("address")
+    return out

@@ -1,26 +1,50 @@
-import { useMemo, useState } from 'react';
+import Constants from 'expo-constants';
+import * as Location from 'expo-location';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Linking,
+  Alert,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
+import MapView, {
+  Marker,
+  Polyline,
+  PROVIDER_GOOGLE,
+  type Region as MapRegion,
+} from '../../components/AppMap';
+import { CategoryIcon } from '../../components/CategoryIcon';
 import { ProfileCornerButton } from '../../components/ProfileCornerButton';
+import { ResizableSplit } from '../../components/ResizableSplit';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
-import { getCategoryEmoji } from '../../lib/categoryUtils';
+import { colors } from '../../constants/theme';
 import { getErrorMessage } from '../../lib/errors';
+import { collectRouteStops, openRouteInGoogleMaps } from '../../lib/openNavigation';
 import { planRoute as requestPlanRoute } from '../../lib/planRoute';
 import { fetchRouteCandidates } from '../../lib/routeCandidates';
-
-import { colors } from '../../constants/theme';
+import { saveRoute } from '../../lib/savedRoutes';
+import { shareRouteText } from '../../lib/shareRoute';
+import { supabase } from '../../lib/supabase';
+import { useInfoToast } from '../../components/InfoToastProvider';
+import {
+  applyWeatherPoiFilter,
+  fetchRegionWeather,
+  type WeatherAdvice,
+} from '../../lib/weather';
+import {
+  optimizeRouteAndTimeline,
+  parseDurationHours,
+  type POI,
+} from '../../utils/routeOptimizer';
 
 type DayOption = 1 | 2 | 3 | 4;
 type BudgetOption = 'budget' | 'mid' | 'premium';
@@ -36,6 +60,9 @@ type PlanStop = {
   lat: number;
   lng: number;
   tip: string;
+  sequence_order?: number;
+  arrival_time?: string;
+  visiting_time?: string;
 };
 
 type PlanDay = {
@@ -56,7 +83,58 @@ type GeneratedPlan = {
   budgetLabel: string;
   interestLabels: string[];
   groupLabel: string | null;
+  source?: string;
+  travel?: {
+    from_origin?: boolean;
+    outbound_minutes?: number;
+    return_minutes?: number;
+    distance_km?: number;
+    depart_origin_at?: string;
+    arrive_region_at?: string;
+  } | null;
 };
+
+type LatLng = { latitude: number; longitude: number };
+
+type RouteSegment = {
+  coordinates: LatLng[];
+  color: string;
+};
+
+type StopDuration = {
+  duration: string;
+  distance: string;
+};
+
+type MapRef = {
+  animateToRegion: (region: MapRegion, duration?: number) => void;
+  fitToCoordinates: (
+    coordinates: LatLng[],
+    options?: {
+      edgePadding?: { top: number; right: number; bottom: number; left: number };
+      animated?: boolean;
+    }
+  ) => void;
+};
+
+const DAY_COLORS = [
+  colors.accent,
+  colors.success,
+  colors.warning,
+  colors.accentPressed,
+  colors.danger,
+];
+
+const SEGMENT_COLORS = [
+  '#E85D04',
+  '#9B5DE5',
+  '#00A8E8',
+  '#F15BB5',
+  '#2EC4B6',
+  '#EF233C',
+  '#4361EE',
+  '#F77F00',
+];
 
 const DAY_OPTIONS: { value: DayOption; label: string }[] = [
   { value: 1, label: '1 gün' },
@@ -87,8 +165,62 @@ const GROUP_OPTIONS: { value: GroupOption; label: string }[] = [
   { value: 'group', label: 'Qrup' },
 ];
 
+function decodePolyline(encoded: string): LatLng[] {
+  const poly: LatLng[] = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < encoded.length) {
+    let b: number;
+    let shift = 0;
+    let result = 0;
+
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+
+    const dlat = result & 1 ? ~(result >> 1) : result >> 1;
+    lat += dlat;
+
+    shift = 0;
+    result = 0;
+
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+
+    const dlng = result & 1 ? ~(result >> 1) : result >> 1;
+    lng += dlng;
+
+    poly.push({
+      latitude: lat / 1e5,
+      longitude: lng / 1e5,
+    });
+  }
+
+  return poly;
+}
+
+function legKey(dayIdx: number, stopIdx: number): string {
+  return `${dayIdx}-${stopIdx}`;
+}
+
+/** Forma açılanda xəritə gizlidir; plan hazır olanda yarı-yarı */
+const MARSRUT_FORM_SPLIT = 0;
+const MARSRUT_PLAN_SPLIT = 0.5;
+
 export default function MarsrutScreen() {
-  const insets = useSafeAreaInsets();
+  const mapRef = useRef<MapRef | null>(null);
+  const { showInfo } = useInfoToast();
+  const GOOGLE_MAPS_KEY =
+    Constants.expoConfig?.extra?.googleMapsKey ||
+    process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY ||
+    '';
 
   const [regionId, setRegionId] = useState(DEFAULT_REGION_ID);
   const [days, setDays] = useState<DayOption>(2);
@@ -99,10 +231,27 @@ export default function MarsrutScreen() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [plan, setPlan] = useState<GeneratedPlan | null>(null);
+  const [weatherAdvice, setWeatherAdvice] = useState<WeatherAdvice | null>(null);
+  const [routeSegments, setRouteSegments] = useState<RouteSegment[]>([]);
+  const [stopDurations, setStopDurations] = useState<Record<string, StopDuration>>({});
+  const [fromOrigin, setFromOrigin] = useState(false);
+  const [userLocation, setUserLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const [mapSize, setMapSize] = useState<{ width: number; height: number } | null>(null);
+  /** Forma: xəritə gizli; plan: ~yarı yarı — istifadəçi yenə sürükləyə bilər */
+  const [splitRatio, setSplitRatio] = useState(MARSRUT_FORM_SPLIT);
+  const [savingRoute, setSavingRoute] = useState(false);
 
   const canSubmit = useMemo(
     () => Boolean(regionId && days && budget && interests.length > 0),
     [regionId, days, budget, interests]
+  );
+
+  const regionMeta = useMemo(
+    () => REGIONS.find((r) => r.id === regionId) ?? REGIONS[0],
+    [regionId]
   );
 
   function toggleInterest(id: InterestId) {
@@ -110,6 +259,205 @@ export default function MarsrutScreen() {
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
     );
   }
+
+  async function enableFromOrigin(next: boolean) {
+    if (!next) {
+      setFromOrigin(false);
+      return;
+    }
+    // Switch dərhal açılsın — GPS arxa planda
+    setFromOrigin(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'İcazə lazımdır',
+          'Cari məkandan başlamaq üçün məkan icazəsi verin.'
+        );
+        setFromOrigin(false);
+        return;
+      }
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      setUserLocation({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+    } catch (err) {
+      Alert.alert('Məkan', getErrorMessage(err));
+      setFromOrigin(false);
+    }
+  }
+
+  function handleReset() {
+    setPlan(null);
+    setWeatherAdvice(null);
+    setRouteSegments([]);
+    setStopDurations({});
+    setErrorMessage(null);
+    setSplitRatio(MARSRUT_FORM_SPLIT);
+  }
+
+  async function handleSavePlan() {
+    if (!plan) {
+      return;
+    }
+    setSavingRoute(true);
+    try {
+      const stops = plan.days.flatMap((day) =>
+        (day.stops ?? []).map((stop, index) => ({
+          day: day.day,
+          sort_order: index + 1,
+          poi_id: stop.poi_id || null,
+          name: stop.name,
+          lat: stop.lat,
+          lng: stop.lng,
+          category: stop.category,
+          time: stop.time,
+          duration: stop.duration,
+          tip: stop.tip,
+        }))
+      );
+      const result = await saveRoute({
+        source: 'ai',
+        title: `${plan.regionLabel} · ${plan.daysCount} gün`,
+        summary: plan.summary,
+        region: regionId,
+        daysCount: plan.daysCount,
+        budget,
+        interests,
+        groupType: group,
+        fromOrigin: Boolean(plan.travel?.from_origin || fromOrigin),
+        originLat: fromOrigin ? userLocation?.latitude ?? null : null,
+        originLng: fromOrigin ? userLocation?.longitude ?? null : null,
+        totalCost: plan.total_cost ?? null,
+        bestTime: plan.best_time ?? null,
+        travel: plan.travel ? { ...plan.travel } : null,
+        stops,
+      });
+      if (result.error) {
+        Alert.alert('Yadda saxla', result.error);
+        return;
+      }
+      showInfo('Yadda saxlandı · Sevimlilər → Marşrutlar');
+    } catch (err) {
+      Alert.alert('Yadda saxla', getErrorMessage(err));
+    } finally {
+      setSavingRoute(false);
+    }
+  }
+
+  const fetchRouteFromGoogle = async (planData: GeneratedPlan) => {
+    try {
+      const dayStopLists: Array<Array<{ lat: number; lng: number; name: string }>> = [];
+      (planData.days ?? []).forEach((day) => {
+        const stops: Array<{ lat: number; lng: number; name: string }> = [];
+        (day.stops ?? []).forEach((stop) => {
+          if (stop.lat && stop.lng) {
+            stops.push({
+              lat: Number(stop.lat),
+              lng: Number(stop.lng),
+              name: String(stop.name ?? ''),
+            });
+          }
+        });
+        if (stops.length > 0) {
+          dayStopLists.push(stops);
+        }
+      });
+
+      const fitCoords: LatLng[] = dayStopLists.flatMap((stops) =>
+        stops.map((s) => ({ latitude: s.lat, longitude: s.lng }))
+      );
+
+      if (!GOOGLE_MAPS_KEY) {
+        const segments: RouteSegment[] = [];
+        let colorIdx = 0;
+        dayStopLists.forEach((stops) => {
+          for (let i = 0; i < stops.length - 1; i++) {
+            segments.push({
+              coordinates: [
+                { latitude: stops[i].lat, longitude: stops[i].lng },
+                { latitude: stops[i + 1].lat, longitude: stops[i + 1].lng },
+              ],
+              color: SEGMENT_COLORS[colorIdx % SEGMENT_COLORS.length],
+            });
+            colorIdx += 1;
+          }
+        });
+        setRouteSegments(segments);
+        if (fitCoords.length > 0 && mapRef.current) {
+          mapRef.current.fitToCoordinates(fitCoords, {
+            edgePadding: { top: 60, right: 40, bottom: 40, left: 40 },
+            animated: true,
+          });
+        }
+        return;
+      }
+
+      const segments: RouteSegment[] = [];
+      const durations: Record<string, StopDuration> = {};
+      const allCoords: LatLng[] = [];
+      let colorIdx = 0;
+
+      for (let dayIdx = 0; dayIdx < dayStopLists.length; dayIdx++) {
+        const stops = dayStopLists[dayIdx];
+        for (let i = 0; i < stops.length - 1; i++) {
+          const origin = stops[i];
+          const dest = stops[i + 1];
+          const url =
+            'https://maps.googleapis.com/maps/api/directions/json?' +
+            `origin=${origin.lat},${origin.lng}` +
+            `&destination=${dest.lat},${dest.lng}` +
+            '&mode=driving&language=az&key=' +
+            GOOGLE_MAPS_KEY;
+
+          const response = await fetch(url);
+          const data = await response.json();
+          const color = SEGMENT_COLORS[colorIdx % SEGMENT_COLORS.length];
+          colorIdx += 1;
+
+          if (data.status === 'OK' && data.routes?.[0]) {
+            const route = data.routes[0];
+            const leg = route.legs?.[0];
+            const points = decodePolyline(route.overview_polyline.points);
+            const segmentCoords: LatLng[] = [
+              { latitude: origin.lat, longitude: origin.lng },
+              ...points,
+              { latitude: dest.lat, longitude: dest.lng },
+            ];
+            segments.push({ coordinates: segmentCoords, color });
+            allCoords.push(...segmentCoords);
+            durations[legKey(dayIdx, i)] = {
+              duration: leg?.duration?.text || '',
+              distance: leg?.distance?.text || '',
+            };
+          } else {
+            const fallback: LatLng[] = [
+              { latitude: origin.lat, longitude: origin.lng },
+              { latitude: dest.lat, longitude: dest.lng },
+            ];
+            segments.push({ coordinates: fallback, color });
+            allCoords.push(...fallback);
+          }
+        }
+      }
+
+      setRouteSegments(segments);
+      setStopDurations(durations);
+
+      const toFit = allCoords.length > 0 ? allCoords : fitCoords;
+      if (toFit.length > 0 && mapRef.current) {
+        mapRef.current.fitToCoordinates(toFit, {
+          edgePadding: { top: 60, right: 40, bottom: 40, left: 40 },
+          animated: true,
+        });
+      }
+    } catch (err) {
+      console.log('Route fetch xətası:', err);
+    }
+  };
 
   const planRoute = async () => {
     try {
@@ -132,22 +480,92 @@ export default function MarsrutScreen() {
         setErrorMessage('Ən azı bir maraq seçin.');
         return;
       }
+      if (fromOrigin && !userLocation) {
+        setErrorMessage('Cari məkan tapılmadı. Switch-i yenidən yandırın.');
+        return;
+      }
 
-      // Prefer FastAPI ranked candidates; API can also load from DB if omitted
+      const weather = await fetchRegionWeather(regionId, days);
+      setWeatherAdvice(weather);
+
       let restaurants: any[] = [];
       let accommodations: any[] = [];
       let attractions: any[] = [];
 
-      const ranked = await fetchRouteCandidates(regionId, 12);
+      const ranked = await fetchRouteCandidates(regionId, 12, {
+        interests,
+      });
       if (
         ranked &&
         (ranked.restaurants.length > 0 ||
           ranked.accommodations.length > 0 ||
           ranked.attractions.length > 0)
       ) {
-        restaurants = ranked.restaurants;
-        accommodations = ranked.accommodations;
-        attractions = ranked.attractions;
+        const flat = applyWeatherPoiFilter(
+          [...ranked.restaurants, ...ranked.accommodations, ...ranked.attractions],
+          weather
+        );
+        const keep = new Set(flat.map((p) => p.id));
+        restaurants = ranked.restaurants.filter((p) => keep.has(p.id));
+        accommodations = ranked.accommodations.filter((p) => keep.has(p.id));
+        attractions = ranked.attractions.filter((p) => keep.has(p.id));
+      } else {
+        const { data: poisRaw, error: poisError } = await supabase
+          .from('pois')
+          .select('id, name, category, description, lat, lng, region, rating, rating_count')
+          .eq('status', 'approved')
+          .eq('region', regionId.toLowerCase())
+          .order('rating', { ascending: false, nullsFirst: false })
+          .limit(80);
+
+        if (poisError) {
+          throw poisError;
+        }
+
+        if (!poisRaw || poisRaw.length === 0) {
+          setErrorMessage('Bu bölgədə hələ yer əlavə edilməyib. Başqa rayon seçin.');
+          return;
+        }
+
+        const pois = applyWeatherPoiFilter(poisRaw, weather);
+        const byRating = (a: any, b: any) => {
+          const ra = typeof a.rating === 'number' ? a.rating : -1;
+          const rb = typeof b.rating === 'number' ? b.rating : -1;
+          if (rb !== ra) {
+            return rb - ra;
+          }
+          const ca = typeof a.rating_count === 'number' ? a.rating_count : 0;
+          const cb = typeof b.rating_count === 'number' ? b.rating_count : 0;
+          return cb - ca;
+        };
+
+        restaurants = pois
+          .filter((p) => ['restaurant', 'home_restaurant', 'cafe'].includes(p.category))
+          .sort(byRating)
+          .slice(0, 12);
+        accommodations = pois
+          .filter((p) => ['hotel', 'hostel', 'guesthouse'].includes(p.category))
+          .sort(byRating)
+          .slice(0, 12);
+        attractions = pois
+          .filter((p) =>
+            [
+              'nature',
+              'waterfall',
+              'mountain',
+              'lake',
+              'historical',
+              'monument',
+              'other',
+            ].includes(p.category)
+          )
+          .sort(byRating)
+          .slice(0, 12);
+      }
+
+      if (restaurants.length + accommodations.length + attractions.length === 0) {
+        setErrorMessage('Bu bölgədə hələ yer əlavə edilməyib. Başqa rayon seçin.');
+        return;
       }
 
       const data = await requestPlanRoute({
@@ -156,10 +574,18 @@ export default function MarsrutScreen() {
         budget,
         interests,
         groupType: group ?? 'solo',
-        pois:
-          restaurants.length + accommodations.length + attractions.length > 0
-            ? { restaurants, accommodations, attractions }
-            : undefined,
+        weather: weather
+          ? {
+              prefer_indoor: weather.prefer_indoor,
+              summary_az: weather.summary_az,
+              exclude_categories: weather.exclude_categories,
+              prefer_categories: weather.prefer_categories,
+            }
+          : null,
+        pois: { restaurants, accommodations, attractions },
+        fromOrigin,
+        originLat: fromOrigin && userLocation ? userLocation.latitude : null,
+        originLng: fromOrigin && userLocation ? userLocation.longitude : null,
       });
 
       const regionLabel = REGIONS.find((r) => r.id === regionId)?.label ?? regionId;
@@ -171,24 +597,80 @@ export default function MarsrutScreen() {
         ? (GROUP_OPTIONS.find((g) => g.value === group)?.label ?? null)
         : null;
 
-      setPlan({
-        summary: data.summary ?? `${regionLabel} üçün marşrut hazırlandı.`,
-        days: data.days.map((day) => ({
+      const trustServerOrder = data.source === 'fastapi_geo';
+      const startLat =
+        fromOrigin && userLocation ? userLocation.latitude : regionMeta.latitude;
+      const startLng =
+        fromOrigin && userLocation ? userLocation.longitude : regionMeta.longitude;
+
+      const mappedDays: PlanDay[] = data.days.map((day) => {
+        const rawStops = Array.isArray(day.stops) ? day.stops : [];
+
+        if (trustServerOrder) {
+          return {
+            day: day.day,
+            title: day.title,
+            estimated_cost: day.estimated_cost,
+            notes: day.notes,
+            stops: rawStops
+              .map((stop, index) => ({
+                time: String(stop.time ?? ''),
+                poi_id: String(stop.poi_id ?? stop.id ?? ''),
+                name: String(stop.name ?? 'Yer'),
+                category: String(stop.category ?? 'other'),
+                duration: String(stop.duration ?? ''),
+                lat: Number(stop.lat),
+                lng: Number(stop.lng),
+                tip: String(stop.tip ?? ''),
+                sequence_order: index + 1,
+                arrival_time: String(stop.time ?? ''),
+                visiting_time: String(stop.time ?? ''),
+              }))
+              .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng)),
+          };
+        }
+
+        const pois: POI[] = rawStops
+          .map((stop) => ({
+            id: String(stop.poi_id ?? stop.id ?? ''),
+            name: String(stop.name ?? 'Yer'),
+            lat: Number(stop.lat),
+            lng: Number(stop.lng),
+            category: String(stop.category ?? 'other'),
+            duration_hours: parseDurationHours(stop.duration),
+          }))
+          .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+
+        const optimized = optimizeRouteAndTimeline(pois, startLat, startLng, '09:00');
+
+        return {
           day: day.day,
           title: day.title,
           estimated_cost: day.estimated_cost,
           notes: day.notes,
-          stops: (day.stops ?? []).map((stop) => ({
-            time: String(stop.time ?? ''),
-            poi_id: String(stop.poi_id ?? stop.id ?? ''),
-            name: String(stop.name ?? 'Yer'),
-            category: String(stop.category ?? 'other'),
-            duration: String(stop.duration ?? ''),
-            lat: Number(stop.lat),
-            lng: Number(stop.lng),
-            tip: String(stop.tip ?? ''),
-          })),
-        })),
+          stops: optimized.map((step) => {
+            const original =
+              rawStops.find((s) => String(s.poi_id ?? s.id ?? '') === step.id) ?? {};
+            return {
+              time: step.arrival_time,
+              poi_id: step.id,
+              name: step.name,
+              category: step.category,
+              duration: String((original as { duration?: string }).duration ?? ''),
+              lat: step.lat,
+              lng: step.lng,
+              tip: String((original as { tip?: string }).tip ?? ''),
+              sequence_order: step.sequence_order,
+              arrival_time: step.arrival_time,
+              visiting_time: step.arrival_time,
+            };
+          }),
+        };
+      });
+
+      const planData: GeneratedPlan = {
+        summary: data.summary ?? `${regionLabel} üçün marşrut hazırlandı.`,
+        days: mappedDays,
         total_cost: data.total_cost,
         best_time: data.best_time,
         regionLabel,
@@ -196,7 +678,26 @@ export default function MarsrutScreen() {
         budgetLabel,
         interestLabels,
         groupLabel,
-      });
+        source: data.source,
+        travel: data.travel ?? null,
+      };
+
+      setPlan(planData);
+      setSplitRatio(MARSRUT_PLAN_SPLIT);
+
+      if (mapRef.current) {
+        mapRef.current.animateToRegion(
+          {
+            latitude: regionMeta.latitude,
+            longitude: regionMeta.longitude,
+            latitudeDelta: 0.3,
+            longitudeDelta: 0.3,
+          },
+          800
+        );
+      }
+
+      await fetchRouteFromGoogle(planData);
     } catch (err) {
       setErrorMessage(getErrorMessage(err));
     } finally {
@@ -204,259 +705,519 @@ export default function MarsrutScreen() {
     }
   };
 
-  function handleReset() {
-    setPlan(null);
-    setErrorMessage(null);
-  }
-
-  if (plan) {
-    return (
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
-      >
-        <View style={[styles.container, { paddingTop: insets.top }]}>
-          <View style={styles.topBar}>
-            <View style={styles.topBarSpacer} />
-            <ProfileCornerButton />
-          </View>
-          <ScrollView
-            style={styles.flex}
-            contentContainerStyle={styles.resultContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
+  return (
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <ResizableSplit
+        initialTopRatio={MARSRUT_FORM_SPLIT}
+        topRatio={splitRatio}
+        onTopRatioChange={setSplitRatio}
+        minTopRatio={0}
+        maxTopRatio={0.85}
+        top={
+          <View
+            style={styles.mapSection}
+            onLayout={(e) => {
+              const { width, height } = e.nativeEvent.layout;
+              if (width > 0 && height > 0) {
+                setMapSize((prev) =>
+                  prev && prev.width === width && prev.height === height
+                    ? prev
+                    : { width, height }
+                );
+              }
+            }}
           >
-            <Text style={styles.title}>Marşrutunuz hazırdır</Text>
-            <Text style={styles.subtitle}>{plan.summary}</Text>
-
-            <View style={styles.summaryCard}>
-              <SummaryRow label="Region" value={plan.regionLabel} />
-              <SummaryRow label="Müddət" value={`${plan.daysCount} gün`} />
-              <SummaryRow label="Büdcə" value={plan.budgetLabel} />
-              {plan.groupLabel ? <SummaryRow label="Qrup" value={plan.groupLabel} /> : null}
-              <SummaryRow label="Maraqlar" value={plan.interestLabels.join(' · ')} />
-              {plan.total_cost ? (
-                <SummaryRow label="Ümumi xərc" value={plan.total_cost} />
-              ) : null}
-              {plan.best_time ? (
-                <SummaryRow label="Ən yaxşı vaxt" value={plan.best_time} />
-              ) : null}
-            </View>
-
-            {plan.days.map((day) => (
-              <View key={day.day} style={styles.dayCard}>
-                <Text style={styles.dayTitle}>{day.title}</Text>
-                {day.estimated_cost ? (
-                  <Text style={styles.dayMeta}>💰 {day.estimated_cost}</Text>
-                ) : null}
-                {day.notes ? <Text style={styles.dayNotes}>{day.notes}</Text> : null}
-
-                {day.stops.map((stop, index) => (
-                  <View
-                    key={`${stop.poi_id}-${index}`}
-                    style={styles.stopRow}
-                  >
-                    <View style={styles.stopTimeCol}>
-                      <Text style={styles.stopTime}>{stop.time}</Text>
-                      <View style={styles.stopTimeline} />
-                    </View>
-
-                    <View style={styles.stopBody}>
-                      <View style={styles.stopTitleRow}>
-                        <Text style={styles.stopEmoji}>
-                          {getCategoryEmoji(stop.category)}
-                        </Text>
-                        <Text style={styles.stopName}>{stop.name}</Text>
+            {mapSize ? (
+              <MapView
+                key={`marsrut-map-${mapSize.width}x${mapSize.height}`}
+                ref={mapRef as never}
+                style={{ width: mapSize.width, height: mapSize.height }}
+                provider={Platform.OS === 'web' ? undefined : PROVIDER_GOOGLE}
+                initialRegion={{
+                  latitude: regionMeta.latitude,
+                  longitude: regionMeta.longitude,
+                  latitudeDelta: regionMeta.latitudeDelta,
+                  longitudeDelta: regionMeta.longitudeDelta,
+                }}
+                showsUserLocation={false}
+                showsMyLocationButton={false}
+              >
+                  {fromOrigin && userLocation ? (
+                    <Marker
+                      coordinate={userLocation}
+                      title="Mənim yerim"
+                      tracksViewChanges={false}
+                    >
+                      <View style={styles.meMarker}>
+                        <View style={styles.meMarkerDot} />
                       </View>
-                      <Text style={styles.stopDuration}>⏱ {stop.duration}</Text>
-                      {stop.tip ? (
-                        <Text style={styles.stopTip}>💡 {stop.tip}</Text>
+                    </Marker>
+                  ) : null}
+
+                  {plan?.days?.map((day, dayIdx) =>
+                    (day.stops || []).map((stop, stopIdx) => {
+                      const lat = Number(stop.lat);
+                      const lng = Number(stop.lng);
+                      if (!lat || !lng || Number.isNaN(lat) || Number.isNaN(lng)) {
+                        return null;
+                      }
+
+                      const totalDays = plan.days?.length ?? 1;
+                      const isSingleDay = totalDays <= 1;
+                      const isFirstStop = dayIdx === 0 && stopIdx === 0;
+                      const lastDayIdx = totalDays - 1;
+                      const lastDayStops = plan.days?.[lastDayIdx]?.stops || [];
+                      const isLastStop =
+                        dayIdx === lastDayIdx && stopIdx === lastDayStops.length - 1;
+
+                      const sequenceNumber = stop.sequence_order ?? stopIdx + 1;
+                      const label = isSingleDay
+                        ? String(sequenceNumber)
+                        : `${dayIdx + 1}.${sequenceNumber}`;
+
+                      return (
+                        <Marker
+                          key={`${dayIdx}-${stopIdx}-${stop.poi_id || stopIdx}`}
+                          coordinate={{ latitude: lat, longitude: lng }}
+                          title={stop.name || 'Yer'}
+                          description={`${stop.arrival_time || stop.visiting_time || stop.time || ''} — ${stop.duration || ''}`}
+                          tracksViewChanges={false}
+                        >
+                          <View
+                            style={[
+                              styles.markerBubble,
+                              isFirstStop && styles.markerBubbleStart,
+                              isLastStop && !isFirstStop && styles.markerBubbleFinish,
+                              !isFirstStop &&
+                                !isLastStop && {
+                                  backgroundColor: DAY_COLORS[dayIdx % DAY_COLORS.length],
+                                },
+                            ]}
+                          >
+                            {isFirstStop || isLastStop ? (
+                              <View style={styles.markerInner}>
+                                <FontAwesome
+                                  name={isFirstStop ? 'flag' : 'flag-checkered'}
+                                  size={10}
+                                  color="#fff"
+                                />
+                                <Text style={styles.markerText}>{label}</Text>
+                              </View>
+                            ) : (
+                              <Text style={styles.markerText}>{label}</Text>
+                            )}
+                          </View>
+                        </Marker>
+                      );
+                    })
+                  )}
+
+                  {routeSegments.map((segment, idx) =>
+                    segment.coordinates.length > 1 ? (
+                      <Polyline
+                        key={`seg-${idx}`}
+                        coordinates={segment.coordinates}
+                        strokeColor={segment.color}
+                        strokeWidth={4}
+                        lineDashPattern={[12, 8]}
+                      />
+                    ) : null
+                  )}
+                </MapView>
+              ) : (
+                <View style={styles.mapPlaceholder}>
+                  <Text style={styles.mapPlaceholderText}>Xəritə yüklənir…</Text>
+                </View>
+              )}
+
+              {plan ? (
+                <TouchableOpacity onPress={handleReset} style={styles.resetBadge}>
+                  <Text style={styles.resetBadgeText} numberOfLines={1}>
+                    Yenidən planla
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              <ProfileCornerButton style={styles.profileCorner} />
+            </View>
+          }
+          bottom={
+            <View style={styles.panel}>
+              {!plan ? (
+                <ScrollView
+                  style={styles.flex}
+                  contentContainerStyle={styles.formContent}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                >
+                  <Text style={styles.title}>AI Marşrut Planlayıcı</Text>
+                  <Text style={styles.subtitle}>
+                    Sizin üçün ən optimal marşrutu hazırlayırıq
+                  </Text>
+
+                  {errorMessage ? (
+                    <Text style={styles.errorText}>{errorMessage}</Text>
+                  ) : null}
+
+                  <View style={styles.fromOriginRow}>
+                    <View style={styles.fromOriginTextWrap}>
+                      <Text style={styles.fromOriginLabel}>Cari məkandan gedirəm</Text>
+                      <Text style={styles.fromOriginHint}>
+                        Marşrut olduğun yerdən regiona başlayır (gediş+qayıdış)
+                      </Text>
+                    </View>
+                    <Switch
+                      value={fromOrigin}
+                      onValueChange={(v) => void enableFromOrigin(v)}
+                      trackColor={{ false: colors.chip, true: colors.accentSoft }}
+                      thumbColor={fromOrigin ? colors.accent : colors.textMuted}
+                    />
+                  </View>
+
+                  <Text style={styles.label}>
+                    Region <Text style={styles.required}>*</Text>
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.chipRow}
+                  >
+                    {REGIONS.map((region) => {
+                      const selected = region.id === regionId;
+                      return (
+                        <Pressable
+                          key={region.id}
+                          onPress={() => {
+                            setRegionId(region.id);
+                            mapRef.current?.animateToRegion(
+                              {
+                                latitude: region.latitude,
+                                longitude: region.longitude,
+                                latitudeDelta: region.latitudeDelta,
+                                longitudeDelta: region.longitudeDelta,
+                              },
+                              600
+                            );
+                          }}
+                          style={[styles.chip, selected && styles.chipSelected]}
+                        >
+                          <Text
+                            style={[styles.chipText, selected && styles.chipTextSelected]}
+                          >
+                            {region.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+
+                  <Text style={styles.label}>
+                    Gün sayı <Text style={styles.required}>*</Text>
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.chipRow}
+                  >
+                    {DAY_OPTIONS.map((option) => {
+                      const selected = option.value === days;
+                      return (
+                        <Pressable
+                          key={option.value}
+                          onPress={() => setDays(option.value)}
+                          style={[styles.chip, selected && styles.chipSelected]}
+                        >
+                          <Text
+                            style={[styles.chipText, selected && styles.chipTextSelected]}
+                          >
+                            {option.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+
+                  <Text style={styles.label}>
+                    Büdcə <Text style={styles.required}>*</Text>
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.chipRow}
+                  >
+                    {BUDGET_OPTIONS.map((option) => {
+                      const selected = option.value === budget;
+                      return (
+                        <Pressable
+                          key={option.value}
+                          onPress={() => setBudget(option.value)}
+                          style={[styles.chip, selected && styles.chipSelected]}
+                        >
+                          <Text
+                            style={[styles.chipText, selected && styles.chipTextSelected]}
+                          >
+                            {option.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+
+                  <Text style={styles.label}>
+                    Maraqlar <Text style={styles.required}>*</Text>
+                  </Text>
+                  <View style={styles.interestGrid}>
+                    {INTEREST_OPTIONS.map((option) => {
+                      const selected = interests.includes(option.id);
+                      return (
+                        <Pressable
+                          key={option.id}
+                          onPress={() => toggleInterest(option.id)}
+                          style={[
+                            styles.interestChip,
+                            selected && styles.interestChipSelected,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.interestText,
+                              selected && styles.interestTextSelected,
+                            ]}
+                          >
+                            {option.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <Text style={styles.label}>Neçə nəfər (istəyə bağlı)</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.chipRow}
+                  >
+                    {GROUP_OPTIONS.map((option) => {
+                      const selected = option.value === group;
+                      return (
+                        <Pressable
+                          key={option.value}
+                          onPress={() => setGroup(selected ? null : option.value)}
+                          style={[styles.chip, selected && styles.chipSelected]}
+                        >
+                          <Text
+                            style={[styles.chipText, selected && styles.chipTextSelected]}
+                          >
+                            {option.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+
+                  <Pressable
+                    style={[
+                      styles.primaryButton,
+                      (!canSubmit || loading) && styles.primaryButtonDisabled,
+                    ]}
+                    onPress={planRoute}
+                    disabled={!canSubmit || loading}
+                  >
+                    {loading ? (
+                      <View style={styles.loadingRow}>
+                        <ActivityIndicator color="#fff" />
+                        <Text style={styles.primaryButtonText}>
+                          AI marşrutunuzu hazırlayır...
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.primaryButtonText}>Marşrut Hazırla</Text>
+                    )}
+                  </Pressable>
+                </ScrollView>
+              ) : (
+                <ScrollView
+                  style={styles.flex}
+                  contentContainerStyle={styles.planContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  <View style={styles.summaryCard}>
+                    <Text style={styles.summaryText}>{plan.summary}</Text>
+                    {weatherAdvice?.summary_az ? (
+                      <Text style={styles.weatherNote}>{weatherAdvice.summary_az}</Text>
+                    ) : null}
+                    <View style={styles.summaryMetaRow}>
+                      {plan.total_cost ? (
+                        <Text style={styles.summaryMeta} numberOfLines={1}>
+                          💰 {plan.total_cost}
+                        </Text>
                       ) : null}
+                      {plan.best_time ? (
+                        <Text style={styles.summaryMeta} numberOfLines={1}>
+                          ⏱ {plan.best_time}
+                        </Text>
+                      ) : null}
+                    </View>
+                    {plan.travel?.from_origin ? (
+                      <Text style={styles.travelNote}>
+                        Cari məkandan ~{Math.round(plan.travel.outbound_minutes ?? 0)} dəq
+                        {plan.travel.distance_km
+                          ? ` · ${plan.travel.distance_km.toFixed(0)} km`
+                          : ''}
+                        {plan.travel.depart_origin_at
+                          ? ` · çıxış ${plan.travel.depart_origin_at}`
+                          : ''}
+                      </Text>
+                    ) : null}
+                    <View style={styles.shareRow}>
                       <TouchableOpacity
+                        style={styles.saveButton}
+                        onPress={() => void handleSavePlan()}
+                        disabled={savingRoute}
+                      >
+                        <Text style={styles.saveButtonText}>
+                          {savingRoute ? 'Saxlanır…' : 'Yadda saxla'}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.shareButton}
                         onPress={() =>
-                          Linking.openURL(
-                            `https://maps.google.com/?q=${stop.lat},${stop.lng}`
+                          void shareRouteText(
+                            plan,
+                            plan.regionLabel,
+                            weatherAdvice?.summary_az
+                          ).catch((err) =>
+                            Alert.alert('Paylaşım', getErrorMessage(err))
                           )
                         }
-                        style={styles.mapsLink}
                       >
-                        <Text style={styles.mapsLinkText}>🗺️ Xəritədə aç</Text>
+                        <Text style={styles.shareButtonText}>Paylaş</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.shareRow}>
+                      <TouchableOpacity
+                        style={styles.navButton}
+                        onPress={() => {
+                          if (fromOrigin && !userLocation) {
+                            Alert.alert(
+                              'Məkan',
+                              'Cari məkan tapılmadı. Switch-i yenidən yandırın.'
+                            );
+                            return;
+                          }
+                          const stops = collectRouteStops(plan);
+                          const withOrigin =
+                            fromOrigin && userLocation
+                              ? [
+                                  {
+                                    lat: userLocation.latitude,
+                                    lng: userLocation.longitude,
+                                    name: 'Mənim yerim',
+                                  },
+                                  ...stops,
+                                ]
+                              : stops;
+                          void openRouteInGoogleMaps(withOrigin).catch((err) =>
+                            Alert.alert('Naviqasiya', getErrorMessage(err))
+                          );
+                        }}
+                      >
+                        <Text style={styles.navButtonText}>Naviqasiyanı başlat</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
-                ))}
-              </View>
-            ))}
 
-            <Pressable style={styles.secondaryButton} onPress={handleReset}>
-              <Text style={styles.secondaryButtonText}>Yeni marşrut hazırla</Text>
-            </Pressable>
-          </ScrollView>
-        </View>
-      </KeyboardAvoidingView>
-    );
-  }
+                  {plan.days.map((day, dayIdx) => (
+                    <View key={day.day} style={styles.dayBlock}>
+                      <View style={styles.dayHeader}>
+                        <View
+                          style={[
+                            styles.dayBadge,
+                            { backgroundColor: DAY_COLORS[dayIdx % DAY_COLORS.length] },
+                          ]}
+                        >
+                          <Text style={styles.dayBadgeText}>{day.day}</Text>
+                        </View>
+                        <Text style={styles.dayTitle} numberOfLines={2}>
+                          {day.title}
+                        </Text>
+                        {day.estimated_cost ? (
+                          <Text style={styles.dayCost} numberOfLines={1}>
+                            {day.estimated_cost}
+                          </Text>
+                        ) : null}
+                      </View>
 
-  return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
-    >
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.topBar}>
-          <View style={styles.topBarSpacer} />
-          <ProfileCornerButton />
-        </View>
-        <ScrollView
-          style={styles.flex}
-          contentContainerStyle={styles.formContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <Text style={styles.title}>AI Marşrut Planlayıcı</Text>
-          <Text style={styles.subtitle}>Sizin üçün ən optimal marşrutu hazırlayırıq</Text>
+                      {day.stops.map((stop, stopIdx) => {
+                        const leg = stopDurations[legKey(dayIdx, stopIdx)];
+                        return (
+                          <View
+                            key={`${stop.poi_id}-${stopIdx}`}
+                            style={styles.stopRow}
+                          >
+                            <View style={styles.stopTimeCol}>
+                              <Text style={styles.stopTime}>
+                                {stop.arrival_time || stop.visiting_time || stop.time}
+                              </Text>
+                              {stopIdx < day.stops.length - 1 ? (
+                                <View
+                                  style={[
+                                    styles.stopTimeline,
+                                    {
+                                      backgroundColor:
+                                        DAY_COLORS[dayIdx % DAY_COLORS.length] + '40',
+                                    },
+                                  ]}
+                                />
+                              ) : null}
+                            </View>
 
-          {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+                            <View style={styles.stopCard}>
+                              <View style={styles.stopTitleRow}>
+                                <CategoryIcon
+                                  category={stop.category}
+                                  size={14}
+                                  color={colors.text}
+                                />
+                                <Text style={styles.stopName} numberOfLines={2}>
+                                  {stop.name}
+                                </Text>
+                              </View>
+                              {stop.duration ? (
+                                <Text style={styles.stopDuration}>{stop.duration}</Text>
+                              ) : null}
+                              {stop.tip ? (
+                                <Text style={styles.stopTip}>{stop.tip}</Text>
+                              ) : null}
+                              {leg ? (
+                                <View style={styles.stopLegBox}>
+                                  <Text style={styles.stopLegPrimary}>
+                                    🚗 {leg.duration}
+                                  </Text>
+                                  <Text style={styles.stopLegSecondary}>
+                                    📍 {leg.distance}
+                                  </Text>
+                                </View>
+                              ) : null}
+                            </View>
+                          </View>
+                        );
+                      })}
 
-          <Text style={styles.label}>
-            Region <Text style={styles.required}>*</Text>
-          </Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipRow}
-          >
-            {REGIONS.map((region) => {
-              const selected = region.id === regionId;
-              return (
-                <Pressable
-                  key={region.id}
-                  onPress={() => setRegionId(region.id)}
-                  style={[styles.chip, selected && styles.chipSelected]}
-                >
-                  <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                    {region.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+                      {day.notes ? (
+                        <Text style={styles.dayNotes}>{day.notes}</Text>
+                      ) : null}
+                    </View>
+                  ))}
 
-          <Text style={styles.label}>
-            Gün sayı <Text style={styles.required}>*</Text>
-          </Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipRow}
-          >
-            {DAY_OPTIONS.map((option) => {
-              const selected = option.value === days;
-              return (
-                <Pressable
-                  key={option.value}
-                  onPress={() => setDays(option.value)}
-                  style={[styles.chip, selected && styles.chipSelected]}
-                >
-                  <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          <Text style={styles.label}>
-            Büdcə <Text style={styles.required}>*</Text>
-          </Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipRow}
-          >
-            {BUDGET_OPTIONS.map((option) => {
-              const selected = option.value === budget;
-              return (
-                <Pressable
-                  key={option.value}
-                  onPress={() => setBudget(option.value)}
-                  style={[styles.chip, selected && styles.chipSelected]}
-                >
-                  <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          <Text style={styles.label}>
-            Maraqlar <Text style={styles.required}>*</Text>
-          </Text>
-          <View style={styles.interestGrid}>
-            {INTEREST_OPTIONS.map((option) => {
-              const selected = interests.includes(option.id);
-              return (
-                <Pressable
-                  key={option.id}
-                  onPress={() => toggleInterest(option.id)}
-                  style={[styles.interestChip, selected && styles.interestChipSelected]}
-                >
-                  <Text style={[styles.interestText, selected && styles.interestTextSelected]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <Text style={styles.label}>Neçə nəfər (istəyə bağlı)</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipRow}
-          >
-            {GROUP_OPTIONS.map((option) => {
-              const selected = option.value === group;
-              return (
-                <Pressable
-                  key={option.value}
-                  onPress={() => setGroup(selected ? null : option.value)}
-                  style={[styles.chip, selected && styles.chipSelected]}
-                >
-                  <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          <Pressable
-            style={[styles.primaryButton, (!canSubmit || loading) && styles.primaryButtonDisabled]}
-            onPress={planRoute}
-            disabled={!canSubmit || loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Marşrut Hazırla</Text>
-            )}
-          </Pressable>
-        </ScrollView>
-      </View>
-    </KeyboardAvoidingView>
-  );
-}
-
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.summaryRow}>
-      <Text style={styles.summaryLabel}>{label}</Text>
-      <Text style={styles.summaryValue}>{value}</Text>
-    </View>
+                  <Pressable style={styles.secondaryButton} onPress={handleReset}>
+                    <Text style={styles.secondaryButtonText}>Yeni marşrut hazırla</Text>
+                  </Pressable>
+                </ScrollView>
+              )}
+            </View>
+          }
+        />
+    </SafeAreaView>
   );
 }
 
@@ -464,71 +1225,203 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
-  container: {
+  safeArea: {
     flex: 1,
+    backgroundColor: colors.bg,
+  },
+  mapSection: {
+    flex: 1,
+    position: 'relative',
+    overflow: 'hidden',
+    backgroundColor: colors.chip,
+    width: '100%',
+    height: '100%',
+  },
+  map: {
+    width: '100%',
+    height: '100%',
+  },
+  mapPlaceholder: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.chip,
+  },
+  mapPlaceholderText: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  meMarker: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(37, 99, 235, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  meMarkerDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#2563EB',
+  },
+  markerBubble: {
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderWidth: 2,
+    borderColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    elevation: 5,
+    minWidth: 32,
+    minHeight: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markerBubbleStart: {
+    backgroundColor: '#2F9E44',
+    borderRadius: 16,
+    minWidth: 34,
+    minHeight: 34,
+  },
+  markerBubbleFinish: {
+    backgroundColor: '#C92A2A',
+    borderRadius: 16,
+    minWidth: 34,
+    minHeight: 34,
+  },
+  markerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  markerText: {
+    color: 'white',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  profileCorner: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    zIndex: 12,
+  },
+  resetBadge: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    zIndex: 12,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexShrink: 1,
+    maxWidth: '70%',
+  },
+  resetBadgeText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    flexShrink: 1,
+  },
+  fromOriginRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  fromOriginTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  fromOriginLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  fromOriginHint: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  travelNote: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.accentPressed,
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  panel: {
+    flex: 1,
+    minHeight: 0,
     backgroundColor: colors.bg,
     overflow: 'hidden',
   },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 16,
-    paddingBottom: 4,
-  },
-  topBarSpacer: {
-    flex: 1,
-  },
   formContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 32,
+    paddingHorizontal: 12,
+    paddingBottom: 24,
     flexGrow: 1,
   },
-  resultContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 32,
+  planContent: {
+    paddingHorizontal: 12,
+    paddingBottom: 40,
     flexGrow: 1,
   },
   title: {
-    fontSize: 24,
-    fontWeight: '800',
+    fontSize: 22,
+    fontWeight: '700',
     color: colors.text,
-    marginTop: 8,
+    letterSpacing: -0.4,
+    marginTop: 4,
   },
   subtitle: {
-    marginTop: 6,
-    marginBottom: 18,
-    fontSize: 14,
-    color: colors.textSecondary,
-    lineHeight: 20,
+    marginTop: 4,
+    marginBottom: 12,
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.textMuted,
+    lineHeight: 17,
   },
   label: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
     color: colors.chipText,
-    marginBottom: 8,
-    marginTop: 8,
+    marginBottom: 6,
+    marginTop: 6,
   },
   required: {
     color: colors.danger,
   },
   chipRow: {
-    paddingBottom: 8,
-    gap: 8,
+    paddingBottom: 6,
+    gap: 6,
   },
   chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 20,
-    backgroundColor: colors.chip,
-    marginRight: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    marginRight: 4,
     overflow: 'hidden',
   },
   chipSelected: {
     backgroundColor: colors.chipSelected,
+    borderColor: colors.chipSelected,
   },
   chipText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: colors.chipText,
   },
@@ -538,17 +1431,17 @@ const styles = StyleSheet.create({
   interestGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 8,
+    gap: 6,
+    marginBottom: 6,
   },
   interestChip: {
     width: '48%',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
     backgroundColor: colors.surface,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
     overflow: 'hidden',
   },
   interestChipSelected: {
@@ -556,7 +1449,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentSoft,
   },
   interestText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: colors.chipText,
     textAlign: 'center',
@@ -566,11 +1459,11 @@ const styles = StyleSheet.create({
     color: colors.accentPressed,
   },
   primaryButton: {
-    marginTop: 24,
-    marginBottom: 20,
+    marginTop: 16,
+    marginBottom: 16,
     backgroundColor: colors.accent,
-    borderRadius: 12,
-    paddingVertical: 16,
+    borderRadius: 10,
+    paddingVertical: 12,
     alignItems: 'center',
     overflow: 'hidden',
   },
@@ -579,146 +1472,216 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: colors.textOnAccent,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
   },
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   secondaryButton: {
-    marginTop: 16,
-    marginBottom: 20,
-    borderWidth: 1,
+    marginTop: 12,
+    marginBottom: 16,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.accent,
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: 10,
+    paddingVertical: 10,
     alignItems: 'center',
     overflow: 'hidden',
   },
   secondaryButtonText: {
     color: colors.accent,
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '600',
   },
   errorText: {
     backgroundColor: colors.dangerSoft,
     color: colors.dangerText,
-    borderRadius: 16,
-    padding: 10,
-    marginBottom: 8,
-    fontSize: 13,
+    borderRadius: 10,
+    padding: 8,
+    marginBottom: 6,
+    fontSize: 12,
     overflow: 'hidden',
   },
   summaryCard: {
-    borderRadius: 24,
-    padding: 14,
-    marginBottom: 16,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
     backgroundColor: colors.surface,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
     gap: 8,
-    overflow: 'hidden',
   },
-  summaryRow: {
-    gap: 2,
+  summaryText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    lineHeight: 20,
   },
-  summaryLabel: {
+  weatherNote: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 17,
+  },
+  summaryMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  summaryMeta: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  shareRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  saveButton: {
+    flex: 1,
+    borderRadius: 10,
+    backgroundColor: colors.successSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.success,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  saveButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.success,
+  },
+  shareButton: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    backgroundColor: colors.bg,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  shareButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  navButton: {
+    flex: 1,
+    borderRadius: 10,
+    backgroundColor: colors.accent,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  navButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textOnAccent,
+  },
+  dayBlock: {
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 8,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  dayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  dayBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  dayTitle: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  dayCost: {
     fontSize: 11,
     color: colors.textMuted,
     fontWeight: '600',
-    textTransform: 'uppercase',
-  },
-  summaryValue: {
-    fontSize: 14,
-    color: colors.text,
-    fontWeight: '600',
-    flexShrink: 1,
-  },
-  dayCard: {
-    borderRadius: 24,
-    padding: 14,
-    marginBottom: 12,
-    overflow: 'hidden',
-  },
-  dayTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 8,
-    flexShrink: 1,
-  },
-  dayMeta: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginBottom: 4,
   },
   dayNotes: {
-    fontSize: 13,
+    fontSize: 12,
     color: colors.textSecondary,
-    marginBottom: 10,
+    marginTop: 6,
     fontStyle: 'italic',
-    flexShrink: 1,
   },
   stopRow: {
     flexDirection: 'row',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.chip,
+    paddingVertical: 6,
   },
   stopTimeCol: {
-    width: 50,
+    width: 42,
     alignItems: 'center',
   },
   stopTime: {
-    fontSize: 12,
-    color: colors.textSecondary,
+    fontSize: 11,
+    color: colors.textMuted,
     fontWeight: '600',
   },
   stopTimeline: {
     width: 2,
     flex: 1,
-    backgroundColor: colors.border,
-    marginTop: 4,
+    marginTop: 3,
+    borderRadius: 1,
   },
-  stopBody: {
+  stopCard: {
     flex: 1,
     minWidth: 0,
-    flexShrink: 1,
-    paddingLeft: 12,
+    paddingLeft: 8,
+    paddingBottom: 6,
   },
   stopTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-  },
-  stopEmoji: {
-    fontSize: 16,
+    gap: 4,
   },
   stopName: {
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.text,
     flex: 1,
     minWidth: 0,
-    flexShrink: 1,
   },
   stopDuration: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginTop: 2,
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 1,
   },
   stopTip: {
-    fontSize: 13,
+    fontSize: 11,
     color: colors.chipText,
-    marginTop: 4,
+    marginTop: 3,
     fontStyle: 'italic',
-    flexShrink: 1,
   },
-  mapsLink: {
-    marginTop: 6,
+  stopLegBox: {
+    marginTop: 4,
+    flexDirection: 'row',
+    gap: 10,
   },
-  mapsLinkText: {
-    fontSize: 12,
+  stopLegPrimary: {
+    fontSize: 11,
+    fontWeight: '600',
     color: colors.accent,
+  },
+  stopLegSecondary: {
+    fontSize: 11,
+    color: colors.textMuted,
   },
 });

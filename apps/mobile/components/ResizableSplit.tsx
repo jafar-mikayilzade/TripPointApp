@@ -28,7 +28,13 @@ type ResizableSplitProps = {
   initialTopRatio?: number;
   minTopRatio?: number;
   maxTopRatio?: number;
-  /** Persist ratio across launches */
+  /**
+   * Controlled ratio. When set, parent drives the split (still draggable —
+   * drag calls onTopRatioChange).
+   */
+  topRatio?: number;
+  onTopRatioChange?: (ratio: number) => void;
+  /** Persist ratio across launches (ignored while topRatio is controlled) */
   storageKey?: string;
   style?: StyleProp<ViewStyle>;
 };
@@ -43,17 +49,25 @@ export function ResizableSplit({
   initialTopRatio = 0.5,
   minTopRatio = 0.22,
   maxTopRatio = 0.78,
+  topRatio: controlledRatio,
+  onTopRatioChange,
   storageKey,
   style,
 }: ResizableSplitProps) {
+  const isControlled = controlledRatio != null;
   const [containerHeight, setContainerHeight] = useState(0);
-  const [topRatio, setTopRatio] = useState(initialTopRatio);
+  const [internalRatio, setInternalRatio] = useState(initialTopRatio);
+
+  const topRatio = isControlled
+    ? clamp(controlledRatio, minTopRatio, maxTopRatio)
+    : internalRatio;
 
   const topRatioRef = useRef(topRatio);
   const startRatioRef = useRef(topRatio);
   const containerHeightRef = useRef(0);
   const minRef = useRef(minTopRatio);
   const maxRef = useRef(maxTopRatio);
+  const onChangeRef = useRef(onTopRatioChange);
 
   useEffect(() => {
     topRatioRef.current = topRatio;
@@ -65,7 +79,11 @@ export function ResizableSplit({
   }, [minTopRatio, maxTopRatio]);
 
   useEffect(() => {
-    if (!storageKey) {
+    onChangeRef.current = onTopRatioChange;
+  }, [onTopRatioChange]);
+
+  useEffect(() => {
+    if (isControlled || !storageKey) {
       return;
     }
     let cancelled = false;
@@ -79,12 +97,22 @@ export function ResizableSplit({
       }
       const next = clamp(parsed, minRef.current, maxRef.current);
       topRatioRef.current = next;
-      setTopRatio(next);
+      setInternalRatio(next);
     });
     return () => {
       cancelled = true;
     };
-  }, [storageKey]);
+  }, [storageKey, isControlled]);
+
+  function applyRatio(next: number) {
+    const clamped = clamp(next, minRef.current, maxRef.current);
+    topRatioRef.current = clamped;
+    if (isControlled) {
+      onChangeRef.current?.(clamped);
+    } else {
+      setInternalRatio(clamped);
+    }
+  }
 
   const panResponder = useMemo(
     () =>
@@ -101,28 +129,24 @@ export function ResizableSplit({
           if (height <= 0) {
             return;
           }
-          const next = clamp(
-            startRatioRef.current + gesture.dy / height,
-            minRef.current,
-            maxRef.current
-          );
-          topRatioRef.current = next;
-          setTopRatio(next);
+          applyRatio(startRatioRef.current + gesture.dy / height);
         },
         onPanResponderRelease: () => {
-          if (!storageKey) {
+          if (isControlled || !storageKey) {
             return;
           }
           void AsyncStorage.setItem(storageKey, String(topRatioRef.current));
         },
         onPanResponderTerminate: () => {
-          if (!storageKey) {
+          if (isControlled || !storageKey) {
             return;
           }
           void AsyncStorage.setItem(storageKey, String(topRatioRef.current));
         },
       }),
-    [storageKey]
+    // applyRatio uses refs; recreate when control/storage mode changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [storageKey, isControlled]
   );
 
   function handleLayout(event: LayoutChangeEvent) {
@@ -151,7 +175,6 @@ export function ResizableSplit({
         {bottom}
       </View>
 
-      {/* Floating handle — transparent hit area, blue line only */}
       <View
         style={[styles.handle, handleTop != null ? { top: handleTop } : styles.handleFallback]}
         {...panResponder.panHandlers}

@@ -1,11 +1,119 @@
-/** Ad / şəhər / başlıq: rəqəmləri silir (yazarkən). */
+/** Ad / şəhər / başlıq: yalnız hərf və boşluq (rəqəm, nöqtə və digər simvollar silinir). */
 export function sanitizeFullNameInput(value: string): string {
-  return value.replace(/[0-9۰-۹٠-٩]/g, '');
+  return applyWordLetterInputRules(value.replace(/[^\p{L}\s]/gu, ''));
 }
 
-/** Yalnız hərf (və boşluq, tire, apostrof) — rəqəm qadağandır. */
+/** Yalnız hərf və boşluq — rəqəm/simvol qadağandır. */
 export function sanitizeLettersOnlyInput(value: string): string {
   return sanitizeFullNameInput(value);
+}
+
+export const TEXT_FORMAT_ERROR = 'Səhv format';
+
+/** Sözün ilk iki hərfi eyni ola bilməz. */
+export const TEXT_DOUBLE_START_ERROR =
+  'Hər sözün ilk iki hərfi eyni ola bilməz.';
+
+/** Sözdə yanası 3 eyni hərf ola bilməz. */
+export const TEXT_TRIPLE_LETTER_ERROR =
+  'Sözdə yanası 3 eyni hərf ola bilməz.';
+
+/** Mətndə hərf/boşluqdan başqa simvol varmı (sanitize-dən əvvəl). */
+export function hasDisallowedTextSymbols(value: string): boolean {
+  return /[^\p{L}\s]/u.test(value);
+}
+
+function normalizeLetter(ch: string): string {
+  return ch.toLocaleLowerCase('az-AZ');
+}
+
+/** Yazarkən: ilk iki eyni hərf və yanası 3 eyni hərf qəbul olunmur. */
+function applyWordLetterInputRules(value: string): string {
+  const parts = value.split(/(\s+)/);
+  return parts
+    .map((part) => {
+      if (!part || /^\s+$/.test(part)) {
+        return part;
+      }
+      return sanitizeWordLetters(part);
+    })
+    .join('');
+}
+
+function sanitizeWordLetters(word: string): string {
+  const chars = [...word];
+  const out: string[] = [];
+
+  for (const ch of chars) {
+    const n = normalizeLetter(ch);
+
+    // İlk iki hərf eyni ola bilməz
+    if (out.length === 1 && normalizeLetter(out[0]) === n) {
+      continue;
+    }
+
+    // Yanası 3 eyni hərf ola bilməz
+    if (
+      out.length >= 2 &&
+      normalizeLetter(out[out.length - 1]) === n &&
+      normalizeLetter(out[out.length - 2]) === n
+    ) {
+      continue;
+    }
+
+    out.push(ch);
+  }
+
+  return out.join('');
+}
+
+/**
+ * Sərbəst mətn (təsvir və s.): digər simvollar qalır,
+ * yalnız hərf ardıcıllıqlarına söz qaydaları tətbiq olunur.
+ */
+export function sanitizeFreeTextWordPatterns(value: string): string {
+  return value.replace(/\p{L}+/gu, (run) => sanitizeWordLetters(run));
+}
+
+/**
+ * Müstəqil sözlər üzrə qaydalar:
+ * 1) hər sözün ilk iki hərfi eyni ola bilməz
+ * 2) söz daxilində yanası 3 eyni hərf ola bilməz
+ */
+export function validateTextWordPatterns(value: string): string | null {
+  const words = value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  for (const word of words) {
+    // Yalnız hərf hissəsini yoxla (təsvirdə rəqəm/simvol qarışıq olsa belə)
+    const letterRuns = word.match(/\p{L}+/gu) ?? [];
+    for (const run of letterRuns) {
+      const letters = [...run];
+
+      if (
+        letters.length >= 2 &&
+        normalizeLetter(letters[0]) === normalizeLetter(letters[1])
+      ) {
+        return TEXT_DOUBLE_START_ERROR;
+      }
+
+      let streak = 1;
+      for (let i = 1; i < letters.length; i += 1) {
+        if (normalizeLetter(letters[i]) === normalizeLetter(letters[i - 1])) {
+          streak += 1;
+          if (streak >= 3) {
+            return TEXT_TRIPLE_LETTER_ERROR;
+          }
+        } else {
+          streak = 1;
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 export function validateLettersOnlyField(
@@ -24,16 +132,21 @@ export function validateLettersOnlyField(
     return `${fieldLabel} boş ola bilməz. Yalnız hərflərlə yazın.`;
   }
 
-  if (/[0-9۰-۹٠-٩]/.test(value)) {
-    return `${fieldLabel} xanasına rəqəm yazmaq olmaz. Yalnız hərflərdən istifadə edin.`;
+  if (hasDisallowedTextSymbols(value) || /[0-9۰-۹٠-٩]/.test(value)) {
+    return TEXT_FORMAT_ERROR;
   }
 
   if (trimmed.length < minLength) {
     return `${fieldLabel} ən azı ${minLength} hərf olmalıdır.`;
   }
 
-  if (!/^[\p{L}\s'.-]+$/u.test(trimmed)) {
-    return `${fieldLabel} yalnız hərflərdən ibarət olmalıdır. Rəqəm qəbul olunmur.`;
+  if (!/^[\p{L}\s]+$/u.test(trimmed)) {
+    return TEXT_FORMAT_ERROR;
+  }
+
+  const patternError = validateTextWordPatterns(trimmed);
+  if (patternError) {
+    return patternError;
   }
 
   return null;
@@ -184,6 +297,23 @@ export const AZ_PHONE_MAX_WITH_LEADING_ZERO = 10;
 export const AZ_PHONE_LOCAL_LENGTH = 9;
 
 /**
+ * İcazəli operator prefiksləri (0 ilə və ya 0-sız):
+ * 010, 050, 051, 055, 060, 070, 077, 099
+ */
+export const AZ_MOBILE_OPERATOR_PREFIXES = [
+  '10',
+  '50',
+  '51',
+  '55',
+  '60',
+  '70',
+  '77',
+  '99',
+] as const;
+
+export const AZ_PHONE_FORMAT_ERROR = 'prefix:10, 50, 51, 55,60,70, 77, 99';
+
+/**
  * Yazarkən: yalnız rəqəm, 994 silinir, başdakı 0 saxlanılır (max 10).
  */
 export function sanitizeAzPhoneLocalInput(raw: string): string {
@@ -223,6 +353,14 @@ export function parseAzPhoneLocal(stored: string | null | undefined): string {
   return normalizeAzPhoneLocal(stored);
 }
 
+function hasValidAzMobileOperator(localDigits: string): boolean {
+  if (localDigits.length < 2) {
+    return false;
+  }
+  const prefix = localDigits.slice(0, 2);
+  return (AZ_MOBILE_OPERATOR_PREFIXES as readonly string[]).includes(prefix);
+}
+
 /**
  * @param localOrFull — ya yerli rəqəmlər, ya +994...
  * @param required — məcburi sahədirsə boş qəbul olunmur
@@ -232,7 +370,7 @@ export function validateAzPhone(
   required = false
 ): string | null {
   if (/[a-zA-ZəöğçşıüƏÖĞÇŞIİÜ]/.test(localOrFull)) {
-    return 'Telefon nömrəsinə hərf yazmaq olmaz. Yalnız rəqəm daxil edin.';
+    return AZ_PHONE_FORMAT_ERROR;
   }
 
   const local = normalizeAzPhoneLocal(localOrFull);
@@ -244,12 +382,12 @@ export function validateAzPhone(
     return null;
   }
 
-  if (local.length < AZ_PHONE_LOCAL_LENGTH) {
-    return `Nömrə natamamdır. +994-dən sonra ${AZ_PHONE_LOCAL_LENGTH} rəqəm olmalıdır.`;
+  if (local.length !== AZ_PHONE_LOCAL_LENGTH) {
+    return AZ_PHONE_FORMAT_ERROR;
   }
 
-  if (local.length > AZ_PHONE_LOCAL_LENGTH) {
-    return `Nömrə çox uzundur. +994-dən sonra ən çox ${AZ_PHONE_LOCAL_LENGTH} rəqəm ola bilər.`;
+  if (!hasValidAzMobileOperator(local)) {
+    return AZ_PHONE_FORMAT_ERROR;
   }
 
   return null;
