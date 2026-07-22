@@ -48,6 +48,9 @@ import {
   fetchLivePlaces,
   isDatabasePoiId,
   livePlaceToPoi,
+  mergeLivePlacesById,
+  radiusMetersFromLongitudeDelta,
+  viewportTileKey,
 } from '../../lib/livePlaces';
 import { supabase } from '../../lib/supabase';
 import { useIsAdmin } from '../../lib/useIsAdmin';
@@ -124,6 +127,9 @@ export default function HomeScreen() {
     null
   );
   const listRef = useRef<FlatList<PoiListItem>>(null);
+  const viewportFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadedViewportTiles = useRef<Set<string>>(new Set());
+  const viewportFetchGen = useRef(0);
   const { isAdmin } = useIsAdmin();
   const { showToast, ToastHost } = useToast();
 
@@ -272,6 +278,26 @@ export default function HomeScreen() {
     return mapped;
   }, [selectedRegionId, categoryFilter]);
 
+  const mapLiveToListItems = useCallback(
+    (places: Parameters<typeof livePlaceToPoi>[0][], regionId: string): PoiListItem[] =>
+      places.map((place) => {
+        const poi = livePlaceToPoi(place, regionId);
+        return {
+          ...poi,
+          photoUrl: null,
+          averageRating:
+            typeof poi.rating === 'number' && Number.isFinite(poi.rating)
+              ? poi.rating
+              : null,
+          ratingCount:
+            typeof poi.rating_count === 'number' && Number.isFinite(poi.rating_count)
+              ? poi.rating_count
+              : 0,
+        };
+      }),
+    []
+  );
+
   const fetchPois = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent === true;
     try {
@@ -280,30 +306,18 @@ export default function HomeScreen() {
         setErrorMessage(null);
       }
 
-      // Region seçilibsə — live Google (API); uğursuz olsa DB fallback
+      // Region overview — hub-driven live; uğursuz olsa DB fallback
       if (selectedRegionId) {
+        loadedViewportTiles.current = new Set();
+        viewportFetchGen.current += 1;
         const live = await fetchLivePlaces(selectedRegionId, {
           category: categoryFilter === 'all' ? null : categoryFilter,
           limit: 60,
         });
 
         if (live && live.places.length > 0) {
-          const mapped: PoiListItem[] = live.places.map((place) => {
-            const poi = livePlaceToPoi(place, selectedRegionId);
-            return {
-              ...poi,
-              photoUrl: null,
-              averageRating:
-                typeof poi.rating === 'number' && Number.isFinite(poi.rating)
-                  ? poi.rating
-                  : null,
-              ratingCount:
-                typeof poi.rating_count === 'number' && Number.isFinite(poi.rating_count)
-                  ? poi.rating_count
-                  : 0,
-            };
-          });
-          console.log('Live places:', mapped.length, live.source);
+          const mapped = mapLiveToListItems(live.places, selectedRegionId);
+          console.log('Live places:', mapped.length, live.source, live.hubs_used);
           setPois(mapped);
           return;
         }
@@ -323,7 +337,62 @@ export default function HomeScreen() {
         setLoading(false);
       }
     }
-  }, [selectedRegionId, categoryFilter, fetchPoisFromDb]);
+  }, [selectedRegionId, categoryFilter, fetchPoisFromDb, mapLiveToListItems]);
+
+  const fetchViewportPlaces = useCallback(
+    (region: MapRegion) => {
+      if (!selectedRegionId) return;
+
+      if (viewportFetchTimer.current) {
+        clearTimeout(viewportFetchTimer.current);
+      }
+
+      viewportFetchTimer.current = setTimeout(() => {
+        void (async () => {
+          const tile = viewportTileKey(
+            region.latitude,
+            region.longitude,
+            region.longitudeDelta
+          );
+          if (loadedViewportTiles.current.has(tile)) {
+            return;
+          }
+          loadedViewportTiles.current.add(tile);
+          const gen = viewportFetchGen.current;
+          const radius = radiusMetersFromLongitudeDelta(region.longitudeDelta);
+
+          const live = await fetchLivePlaces(selectedRegionId, {
+            category: categoryFilter === 'all' ? null : categoryFilter,
+            limit: 50,
+            lat: region.latitude,
+            lng: region.longitude,
+            radius,
+          });
+
+          if (!live || live.places.length === 0) {
+            loadedViewportTiles.current.delete(tile);
+            return;
+          }
+          if (gen !== viewportFetchGen.current) {
+            return;
+          }
+
+          const incoming = mapLiveToListItems(live.places, selectedRegionId);
+          setPois((prev) => mergeLivePlacesById(prev, incoming));
+          console.log('Viewport merge:', incoming.length, tile);
+        })();
+      }, 450);
+    },
+    [selectedRegionId, categoryFilter, mapLiveToListItems]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (viewportFetchTimer.current) {
+        clearTimeout(viewportFetchTimer.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -774,6 +843,13 @@ export default function HomeScreen() {
                 radius={48}
                 minPoints={3}
                 animationEnabled={false}
+                onRegionChangeComplete={
+                  selectedRegionId
+                    ? (region) => {
+                        fetchViewportPlaces(region);
+                      }
+                    : undefined
+                }
                 onPoiClick={isAdmin ? handleGooglePoiClick : undefined}
                 onPress={isAdmin && Platform.OS === 'web' ? handleAdminMapPress : undefined}
               >

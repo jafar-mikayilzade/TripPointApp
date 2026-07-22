@@ -131,6 +131,7 @@ def plan_route_endpoint(body: PlanRouteIn) -> JSONResponse:
     )
 
     travel = plan.pop("travel", None) or skeleton.get("travel")
+    lodging = plan.pop("lodging", None) or skeleton.get("lodging")
     plan.pop("meta", None)
 
     return JSONResponse(
@@ -143,6 +144,7 @@ def plan_route_endpoint(body: PlanRouteIn) -> JSONResponse:
             "region": db_region,
             "regionLabel": region_label,
             "travel": travel,
+            "lodging": lodging,
             "source": "fastapi_geo",
             "candidatesSource": candidate_source,
         }

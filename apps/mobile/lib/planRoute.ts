@@ -13,6 +13,7 @@ export type PlanRouteStop = {
   duration?: string;
   duration_minutes?: number;
   tip?: string;
+  daypart?: string;
 };
 
 export type PlanRouteDay = {
@@ -40,6 +41,14 @@ export type PlanRouteResult = {
     leave_region_by?: string;
     return_origin_by?: string;
     distance_km?: number;
+  } | null;
+  lodging?: {
+    id?: string;
+    name?: string;
+    category?: string;
+    lat?: number;
+    lng?: number;
+    note?: string;
   } | null;
 };
 
@@ -149,6 +158,7 @@ async function planRouteViaFastApi(
       region: data.region,
       regionLabel: data.regionLabel,
       travel: (data as PlanRouteResult).travel ?? null,
+      lodging: (data as PlanRouteResult).lodging ?? null,
       source: data.source ?? 'fastapi_geo',
     };
   } catch (err) {

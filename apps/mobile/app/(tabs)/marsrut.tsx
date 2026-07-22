@@ -60,7 +60,8 @@ type PlanStop = {
   lat: number;
   lng: number;
   tip: string;
-  sequence_order?: number;
+  daypart?: string;
+  sequence_order?: number | null;
   arrival_time?: string;
   visiting_time?: string;
 };
@@ -92,6 +93,11 @@ type GeneratedPlan = {
     depart_origin_at?: string;
     arrive_region_at?: string;
   } | null;
+  lodging?: {
+    name?: string;
+    category?: string;
+    note?: string;
+  } | null;
 };
 
 type LatLng = { latitude: number; longitude: number };
@@ -116,6 +122,15 @@ type MapRef = {
     }
   ) => void;
 };
+
+function isTravelStop(stop: {
+  category?: string | null;
+  daypart?: string | null;
+}): boolean {
+  const cat = String(stop.category || '').toLowerCase();
+  const daypart = String(stop.daypart || '').toLowerCase();
+  return cat === 'travel' || daypart.startsWith('travel');
+}
 
 const DAY_COLORS = [
   colors.accent,
@@ -607,25 +622,33 @@ export default function MarsrutScreen() {
         const rawStops = Array.isArray(day.stops) ? day.stops : [];
 
         if (trustServerOrder) {
+          let visitSeq = 0;
           return {
             day: day.day,
             title: day.title,
             estimated_cost: day.estimated_cost,
             notes: day.notes,
             stops: rawStops
-              .map((stop, index) => ({
-                time: String(stop.time ?? ''),
-                poi_id: String(stop.poi_id ?? stop.id ?? ''),
-                name: String(stop.name ?? 'Yer'),
-                category: String(stop.category ?? 'other'),
-                duration: String(stop.duration ?? ''),
-                lat: Number(stop.lat),
-                lng: Number(stop.lng),
-                tip: String(stop.tip ?? ''),
-                sequence_order: index + 1,
-                arrival_time: String(stop.time ?? ''),
-                visiting_time: String(stop.time ?? ''),
-              }))
+              .map((stop) => {
+                const category = String(stop.category ?? 'other');
+                const daypart = String(stop.daypart ?? '');
+                const travel = isTravelStop({ category, daypart });
+                if (!travel) visitSeq += 1;
+                return {
+                  time: String(stop.time ?? ''),
+                  poi_id: String(stop.poi_id ?? stop.id ?? ''),
+                  name: String(stop.name ?? 'Yer'),
+                  category,
+                  duration: String(stop.duration ?? ''),
+                  lat: Number(stop.lat),
+                  lng: Number(stop.lng),
+                  tip: travel ? '' : String(stop.tip ?? ''),
+                  daypart,
+                  sequence_order: travel ? null : visitSeq,
+                  arrival_time: String(stop.time ?? ''),
+                  visiting_time: String(stop.time ?? ''),
+                };
+              })
               .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng)),
           };
         }
@@ -651,6 +674,8 @@ export default function MarsrutScreen() {
           stops: optimized.map((step) => {
             const original =
               rawStops.find((s) => String(s.poi_id ?? s.id ?? '') === step.id) ?? {};
+            const daypart = String((original as { daypart?: string }).daypart ?? '');
+            const travel = isTravelStop({ category: step.category, daypart });
             return {
               time: step.arrival_time,
               poi_id: step.id,
@@ -659,8 +684,9 @@ export default function MarsrutScreen() {
               duration: String((original as { duration?: string }).duration ?? ''),
               lat: step.lat,
               lng: step.lng,
-              tip: String((original as { tip?: string }).tip ?? ''),
-              sequence_order: step.sequence_order,
+              tip: travel ? '' : String((original as { tip?: string }).tip ?? ''),
+              daypart,
+              sequence_order: travel ? null : step.sequence_order,
               arrival_time: step.arrival_time,
               visiting_time: step.arrival_time,
             };
@@ -680,6 +706,7 @@ export default function MarsrutScreen() {
         groupLabel,
         source: data.source,
         travel: data.travel ?? null,
+        lodging: data.lodging ?? null,
       };
 
       setPlan(planData);
@@ -754,23 +781,46 @@ export default function MarsrutScreen() {
                     </Marker>
                   ) : null}
 
-                  {plan?.days?.map((day, dayIdx) =>
-                    (day.stops || []).map((stop, stopIdx) => {
+                  {plan?.days?.map((day, dayIdx) => {
+                    const totalDays = plan.days?.length ?? 1;
+                    const isSingleDay = totalDays <= 1;
+                    const lastDayIdx = totalDays - 1;
+                    const lastDayVisitIdx = (plan.days?.[lastDayIdx]?.stops || [])
+                      .map((s, i) => (isTravelStop(s) ? -1 : i))
+                      .filter((i) => i >= 0)
+                      .pop();
+
+                    return (day.stops || []).map((stop, stopIdx) => {
                       const lat = Number(stop.lat);
                       const lng = Number(stop.lng);
                       if (!lat || !lng || Number.isNaN(lat) || Number.isNaN(lng)) {
                         return null;
                       }
 
-                      const totalDays = plan.days?.length ?? 1;
-                      const isSingleDay = totalDays <= 1;
-                      const isFirstStop = dayIdx === 0 && stopIdx === 0;
-                      const lastDayIdx = totalDays - 1;
-                      const lastDayStops = plan.days?.[lastDayIdx]?.stops || [];
-                      const isLastStop =
-                        dayIdx === lastDayIdx && stopIdx === lastDayStops.length - 1;
+                      const travel = isTravelStop(stop);
+                      if (travel) {
+                        return (
+                          <Marker
+                            key={`${dayIdx}-${stopIdx}-travel-${stop.name || stopIdx}`}
+                            coordinate={{ latitude: lat, longitude: lng }}
+                            title={stop.name || 'Yol'}
+                            description={stop.duration || 'Transfer'}
+                            tracksViewChanges={false}
+                          >
+                            <View style={styles.travelMarker}>
+                              <FontAwesome name="car" size={11} color="#fff" />
+                            </View>
+                          </Marker>
+                        );
+                      }
 
-                      const sequenceNumber = stop.sequence_order ?? stopIdx + 1;
+                      const sequenceNumber = stop.sequence_order;
+                      if (sequenceNumber == null) return null;
+
+                      const isFirstVisit = dayIdx === 0 && sequenceNumber === 1;
+                      const isLastVisit =
+                        dayIdx === lastDayIdx && stopIdx === lastDayVisitIdx;
+
                       const label = isSingleDay
                         ? String(sequenceNumber)
                         : `${dayIdx + 1}.${sequenceNumber}`;
@@ -786,18 +836,18 @@ export default function MarsrutScreen() {
                           <View
                             style={[
                               styles.markerBubble,
-                              isFirstStop && styles.markerBubbleStart,
-                              isLastStop && !isFirstStop && styles.markerBubbleFinish,
-                              !isFirstStop &&
-                                !isLastStop && {
+                              isFirstVisit && styles.markerBubbleStart,
+                              isLastVisit && !isFirstVisit && styles.markerBubbleFinish,
+                              !isFirstVisit &&
+                                !isLastVisit && {
                                   backgroundColor: DAY_COLORS[dayIdx % DAY_COLORS.length],
                                 },
                             ]}
                           >
-                            {isFirstStop || isLastStop ? (
+                            {isFirstVisit || isLastVisit ? (
                               <View style={styles.markerInner}>
                                 <FontAwesome
-                                  name={isFirstStop ? 'flag' : 'flag-checkered'}
+                                  name={isFirstVisit ? 'flag' : 'flag-checkered'}
                                   size={10}
                                   color="#fff"
                                 />
@@ -809,8 +859,8 @@ export default function MarsrutScreen() {
                           </View>
                         </Marker>
                       );
-                    })
-                  )}
+                    });
+                  })}
 
                   {routeSegments.map((segment, idx) =>
                     segment.coordinates.length > 1 ? (
@@ -1068,6 +1118,12 @@ export default function MarsrutScreen() {
                           : ''}
                       </Text>
                     ) : null}
+                    {plan.lodging?.name ? (
+                      <Text style={styles.lodgingNote}>
+                        Gecələmə bazası: {plan.lodging.name}
+                        {plan.daysCount > 1 ? ' · bütün gecələr eyni otel' : ''}
+                      </Text>
+                    ) : null}
                     <View style={styles.shareRow}>
                       <TouchableOpacity
                         style={styles.saveButton}
@@ -1149,13 +1205,19 @@ export default function MarsrutScreen() {
 
                       {day.stops.map((stop, stopIdx) => {
                         const leg = stopDurations[legKey(dayIdx, stopIdx)];
+                        const travel = isTravelStop(stop);
                         return (
                           <View
                             key={`${stop.poi_id}-${stopIdx}`}
                             style={styles.stopRow}
                           >
                             <View style={styles.stopTimeCol}>
-                              <Text style={styles.stopTime}>
+                              <Text
+                                style={[
+                                  styles.stopTime,
+                                  travel && styles.stopTimeTravel,
+                                ]}
+                              >
                                 {stop.arrival_time || stop.visiting_time || stop.time}
                               </Text>
                               {stopIdx < day.stops.length - 1 ? (
@@ -1163,41 +1225,83 @@ export default function MarsrutScreen() {
                                   style={[
                                     styles.stopTimeline,
                                     {
-                                      backgroundColor:
-                                        DAY_COLORS[dayIdx % DAY_COLORS.length] + '40',
+                                      backgroundColor: travel
+                                        ? colors.textMuted + '55'
+                                        : DAY_COLORS[dayIdx % DAY_COLORS.length] + '40',
                                     },
                                   ]}
                                 />
                               ) : null}
                             </View>
 
-                            <View style={styles.stopCard}>
-                              <View style={styles.stopTitleRow}>
-                                <CategoryIcon
-                                  category={stop.category}
-                                  size={14}
-                                  color={colors.text}
-                                />
-                                <Text style={styles.stopName} numberOfLines={2}>
-                                  {stop.name}
-                                </Text>
-                              </View>
-                              {stop.duration ? (
-                                <Text style={styles.stopDuration}>{stop.duration}</Text>
-                              ) : null}
-                              {stop.tip ? (
-                                <Text style={styles.stopTip}>{stop.tip}</Text>
-                              ) : null}
-                              {leg ? (
-                                <View style={styles.stopLegBox}>
-                                  <Text style={styles.stopLegPrimary}>
-                                    🚗 {leg.duration}
+                            <View
+                              style={[
+                                styles.stopCard,
+                                travel && styles.stopCardTravel,
+                              ]}
+                            >
+                              {travel ? (
+                                <>
+                                  <View style={styles.stopTitleRow}>
+                                    <FontAwesome
+                                      name="car"
+                                      size={12}
+                                      color={colors.textMuted}
+                                    />
+                                    <Text style={styles.travelBadge}>Yol / transfer</Text>
+                                  </View>
+                                  <Text style={styles.stopNameTravel} numberOfLines={2}>
+                                    {stop.name}
                                   </Text>
-                                  <Text style={styles.stopLegSecondary}>
-                                    📍 {leg.distance}
-                                  </Text>
-                                </View>
-                              ) : null}
+                                  {stop.duration ? (
+                                    <Text style={styles.stopDuration}>{stop.duration}</Text>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <>
+                                  <View style={styles.stopTitleRow}>
+                                    {stop.sequence_order != null ? (
+                                      <View
+                                        style={[
+                                          styles.stopSeqBadge,
+                                          {
+                                            backgroundColor:
+                                              DAY_COLORS[dayIdx % DAY_COLORS.length],
+                                          },
+                                        ]}
+                                      >
+                                        <Text style={styles.stopSeqBadgeText}>
+                                          {stop.sequence_order}
+                                        </Text>
+                                      </View>
+                                    ) : null}
+                                    <CategoryIcon
+                                      category={stop.category}
+                                      size={14}
+                                      color={colors.text}
+                                    />
+                                    <Text style={styles.stopName} numberOfLines={2}>
+                                      {stop.name}
+                                    </Text>
+                                  </View>
+                                  {stop.duration ? (
+                                    <Text style={styles.stopDuration}>{stop.duration}</Text>
+                                  ) : null}
+                                  {stop.tip ? (
+                                    <Text style={styles.stopTip}>{stop.tip}</Text>
+                                  ) : null}
+                                  {leg ? (
+                                    <View style={styles.stopLegBox}>
+                                      <Text style={styles.stopLegPrimary}>
+                                        🚗 {leg.duration}
+                                      </Text>
+                                      <Text style={styles.stopLegSecondary}>
+                                        📍 {leg.distance}
+                                      </Text>
+                                    </View>
+                                  ) : null}
+                                </>
+                              )}
                             </View>
                           </View>
                         );
@@ -1268,6 +1372,16 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
     backgroundColor: '#2563EB',
+  },
+  travelMarker: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#64748B',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   markerBubble: {
     borderRadius: 20,
@@ -1360,6 +1474,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     borderRadius: 8,
+  },
+  lodgingNote: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text,
+    backgroundColor: colors.chip,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginTop: 6,
   },
   panel: {
     flex: 1,
@@ -1647,10 +1771,40 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
     paddingBottom: 6,
   },
+  stopCardTravel: {
+    opacity: 0.92,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    marginLeft: 2,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.textMuted,
+    backgroundColor: colors.chip,
+    borderRadius: 8,
+  },
   stopTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  stopSeqBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  stopSeqBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  travelBadge: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   stopName: {
     fontSize: 13,
@@ -1658,6 +1812,16 @@ const styles = StyleSheet.create({
     color: colors.text,
     flex: 1,
     minWidth: 0,
+  },
+  stopNameTravel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  stopTimeTravel: {
+    color: colors.textMuted,
+    fontWeight: '500',
   },
   stopDuration: {
     fontSize: 11,

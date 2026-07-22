@@ -1,4 +1,4 @@
-/** Home map: live Google Places via FastAPI (DB fallback on server). */
+/** Home / Qur map: live Google Places via FastAPI (DB fallback on server). */
 
 import type { Poi, PoiCategory } from '../types/database';
 
@@ -20,6 +20,17 @@ export type LivePlacesResult = {
   places: LivePlace[];
   source: string;
   warnings: string[];
+  viewport?: boolean;
+  hubs_used?: string[];
+};
+
+export type LivePlacesQuery = {
+  category?: string | null;
+  limit?: number;
+  /** Viewport progressive load */
+  lat?: number;
+  lng?: number;
+  radius?: number;
 };
 
 function getApiBaseUrl(): string | null {
@@ -60,9 +71,49 @@ export function livePlaceToPoi(place: LivePlace, regionId: string): Poi {
   };
 }
 
+/** Rough viewport radius (m) from longitudeDelta. */
+export function radiusMetersFromLongitudeDelta(longitudeDelta: number): number {
+  const deg = Math.max(0.01, Math.min(longitudeDelta, 1.5));
+  // ~111km per degree at equator; clamp tourism-useful range
+  const meters = deg * 111_000 * 0.45;
+  return Math.round(Math.max(2_500, Math.min(meters, 22_000)));
+}
+
+/** Cache key bucket so tiny pans do not refetch. */
+export function viewportTileKey(
+  lat: number,
+  lng: number,
+  longitudeDelta: number
+): string {
+  const radius = radiusMetersFromLongitudeDelta(longitudeDelta);
+  // Coarser grid when zoomed out
+  const step = longitudeDelta > 0.35 ? 0.08 : longitudeDelta > 0.12 ? 0.04 : 0.02;
+  const rLat = Math.round(lat / step) * step;
+  const rLng = Math.round(lng / step) * step;
+  const rBucket = Math.round(radius / 1500) * 1500;
+  return `${rLat.toFixed(3)}:${rLng.toFixed(3)}:${rBucket}`;
+}
+
+export function mergeLivePlacesById<T extends { id: string; place_id?: string | null }>(
+  existing: T[],
+  incoming: T[]
+): T[] {
+  const map = new Map<string, T>();
+  for (const row of existing) {
+    const key = String(row.place_id || row.id);
+    if (key) map.set(key, row);
+  }
+  for (const row of incoming) {
+    const key = String(row.place_id || row.id);
+    if (!key) continue;
+    map.set(key, row);
+  }
+  return Array.from(map.values());
+}
+
 export async function fetchLivePlaces(
   region: string,
-  options?: { category?: string | null; limit?: number }
+  options?: LivePlacesQuery
 ): Promise<LivePlacesResult | null> {
   const base = getApiBaseUrl();
   if (!base) {
@@ -76,6 +127,18 @@ export async function fetchLivePlaces(
     });
     if (options?.category && options.category !== 'all') {
       qs.set('category', options.category);
+    }
+    if (
+      typeof options?.lat === 'number' &&
+      Number.isFinite(options.lat) &&
+      typeof options?.lng === 'number' &&
+      Number.isFinite(options.lng)
+    ) {
+      qs.set('lat', String(options.lat));
+      qs.set('lng', String(options.lng));
+      if (typeof options.radius === 'number' && Number.isFinite(options.radius)) {
+        qs.set('radius', String(Math.round(options.radius)));
+      }
     }
 
     const controller = new AbortController();
@@ -96,6 +159,8 @@ export async function fetchLivePlaces(
       source?: string;
       warnings?: string[];
       places?: LivePlace[];
+      viewport?: boolean;
+      hubs_used?: string[];
     };
 
     if (!data?.success) {
@@ -106,6 +171,8 @@ export async function fetchLivePlaces(
       places: data.places ?? [],
       source: data.source ?? 'google',
       warnings: data.warnings ?? [],
+      viewport: Boolean(data.viewport),
+      hubs_used: data.hubs_used ?? [],
     };
   } catch {
     return null;

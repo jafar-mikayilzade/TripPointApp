@@ -1,0 +1,523 @@
+"""Curated tourism seed POIs per region (expand later).
+
+Seeds are merged into live results with a ranking boost so known tourism
+spots (e.g. Qəçrəş) appear even when Google Nearby is city-center biased.
+"""
+
+from __future__ import annotations
+
+from typing import Any, TypedDict
+
+
+class SeedPoi(TypedDict, total=False):
+    id: str
+    name: str
+    category: str
+    lat: float
+    lng: float
+    place_id: str
+    rating: float
+    rating_count: int
+    description: str
+
+
+# Minimum ~8–15 quality spots per region; expand later with real place_ids.
+TOURISM_SEEDS: dict[str, list[SeedPoi]] = {
+    "quba": [
+        {
+            "id": "seed-quba-qachresh",
+            "name": "Qəçrəş turizm zonası",
+            "category": "nature",
+            "lat": 41.421,
+            "lng": 48.428,
+            "description": "Quba əsas turizm / istirahət zonası",
+            "rating": 4.6,
+            "rating_count": 80,
+        },
+        {
+            "id": "seed-quba-tangaalti",
+            "name": "Təngəaltı kanyonu",
+            "category": "nature",
+            "lat": 41.305,
+            "lng": 48.405,
+            "description": "Təbiət gəzintisi",
+            "rating": 4.7,
+            "rating_count": 120,
+        },
+        {
+            "id": "seed-quba-afurja",
+            "name": "Afurca şəlaləsi",
+            "category": "waterfall",
+            "lat": 41.278,
+            "lng": 48.368,
+            "rating": 4.5,
+            "rating_count": 90,
+        },
+        {
+            "id": "seed-quba-khinalig-road",
+            "name": "Xınalıq yolu / mənzərə",
+            "category": "nature",
+            "lat": 41.178,
+            "lng": 48.126,
+            "rating": 4.8,
+            "rating_count": 200,
+        },
+        {
+            "id": "seed-quba-carpet",
+            "name": "Quba Xalça Muzeyi",
+            "category": "historical",
+            "lat": 41.361,
+            "lng": 48.508,
+            "rating": 4.4,
+            "rating_count": 60,
+        },
+        {
+            "id": "seed-quba-juma",
+            "name": "Quba Cümə Məscidi",
+            "category": "historical",
+            "lat": 41.3635,
+            "lng": 48.5135,
+            "rating": 4.5,
+            "rating_count": 70,
+        },
+        {
+            "id": "seed-quba-qachresh-hotel",
+            "name": "Qəçrəş istirahət / otel zonası",
+            "category": "hotel",
+            "lat": 41.418,
+            "lng": 48.432,
+            "description": "Gecələmə bazası (turizm)",
+            "rating": 4.3,
+            "rating_count": 50,
+        },
+        {
+            "id": "seed-quba-mountain-rest",
+            "name": "Dağ restoranı (Qəçrəş ətrafı)",
+            "category": "restaurant",
+            "lat": 41.416,
+            "lng": 48.430,
+            "rating": 4.4,
+            "rating_count": 40,
+        },
+        {
+            "id": "seed-quba-lake",
+            "name": "Quba göl / park zonası",
+            "category": "lake",
+            "lat": 41.355,
+            "lng": 48.495,
+            "rating": 4.2,
+            "rating_count": 35,
+        },
+        {
+            "id": "seed-quba-guesthouse",
+            "name": "Quba bağ evi / guesthouse zonası",
+            "category": "guesthouse",
+            "lat": 41.370,
+            "lng": 48.500,
+            "rating": 4.3,
+            "rating_count": 25,
+        },
+    ],
+    "qusar": [
+        {
+            "id": "seed-qusar-shahdag",
+            "name": "Şahdağ Turizm Kompleksi",
+            "category": "hotel",
+            "lat": 41.275,
+            "lng": 48.035,
+            "rating": 4.5,
+            "rating_count": 400,
+        },
+        {
+            "id": "seed-qusar-laza",
+            "name": "Laza kəndi",
+            "category": "nature",
+            "lat": 41.348,
+            "lng": 48.175,
+            "rating": 4.7,
+            "rating_count": 150,
+        },
+        {
+            "id": "seed-qusar-waterfall",
+            "name": "Laza şəlalələri",
+            "category": "waterfall",
+            "lat": 41.352,
+            "lng": 48.180,
+            "rating": 4.6,
+            "rating_count": 80,
+        },
+        {
+            "id": "seed-qusar-mountain",
+            "name": "Şahdağ dağ mənzərəsi",
+            "category": "mountain",
+            "lat": 41.280,
+            "lng": 48.040,
+            "rating": 4.8,
+            "rating_count": 100,
+        },
+        {
+            "id": "seed-qusar-rest",
+            "name": "Şahdağ restoran zonası",
+            "category": "restaurant",
+            "lat": 41.276,
+            "lng": 48.038,
+            "rating": 4.3,
+            "rating_count": 60,
+        },
+        {
+            "id": "seed-qusar-hotel2",
+            "name": "Qusar dağ oteli",
+            "category": "hotel",
+            "lat": 41.290,
+            "lng": 48.050,
+            "rating": 4.2,
+            "rating_count": 40,
+        },
+        {
+            "id": "seed-qusar-nature",
+            "name": "Qusar təbiət gəzintisi",
+            "category": "nature",
+            "lat": 41.320,
+            "lng": 48.120,
+            "rating": 4.4,
+            "rating_count": 30,
+        },
+        {
+            "id": "seed-qusar-hist",
+            "name": "Qusar tarixi məkan",
+            "category": "historical",
+            "lat": 41.595,
+            "lng": 48.425,
+            "rating": 4.1,
+            "rating_count": 20,
+        },
+    ],
+    "seki": [
+        {
+            "id": "seed-seki-palace",
+            "name": "Şəki Xan Sarayı",
+            "category": "historical",
+            "lat": 41.2048,
+            "lng": 47.1975,
+            "rating": 4.7,
+            "rating_count": 500,
+        },
+        {
+            "id": "seed-seki-caravanserai",
+            "name": "Yuxarı Karvansaray",
+            "category": "historical",
+            "lat": 41.2005,
+            "lng": 47.1702,
+            "rating": 4.5,
+            "rating_count": 200,
+        },
+        {
+            "id": "seed-seki-kish",
+            "name": "Kiş Alban məbədi",
+            "category": "historical",
+            "lat": 41.251,
+            "lng": 47.188,
+            "rating": 4.6,
+            "rating_count": 300,
+        },
+        {
+            "id": "seed-seki-nature",
+            "name": "Şəki dağ mənzərəsi",
+            "category": "nature",
+            "lat": 41.220,
+            "lng": 47.160,
+            "rating": 4.5,
+            "rating_count": 80,
+        },
+        {
+            "id": "seed-seki-hotel",
+            "name": "Şəki boutique otel zonası",
+            "category": "hotel",
+            "lat": 41.202,
+            "lng": 47.172,
+            "rating": 4.4,
+            "rating_count": 90,
+        },
+        {
+            "id": "seed-seki-food",
+            "name": "Şəki piti / turizm restoranı",
+            "category": "restaurant",
+            "lat": 41.201,
+            "lng": 47.171,
+            "rating": 4.5,
+            "rating_count": 150,
+        },
+        {
+            "id": "seed-seki-monument",
+            "name": "Şəki abidə / meydan",
+            "category": "monument",
+            "lat": 41.200,
+            "lng": 47.169,
+            "rating": 4.2,
+            "rating_count": 40,
+        },
+        {
+            "id": "seed-seki-guest",
+            "name": "Şəki guesthouse",
+            "category": "guesthouse",
+            "lat": 41.206,
+            "lng": 47.175,
+            "rating": 4.3,
+            "rating_count": 35,
+        },
+    ],
+    "qabala": [
+        {
+            "id": "seed-gab-tufandag",
+            "name": "Tufandağ",
+            "category": "mountain",
+            "lat": 40.965,
+            "lng": 47.872,
+            "rating": 4.6,
+            "rating_count": 300,
+        },
+        {
+            "id": "seed-gab-nohur",
+            "name": "Nohur gölü",
+            "category": "lake",
+            "lat": 40.938,
+            "lng": 47.785,
+            "rating": 4.7,
+            "rating_count": 400,
+        },
+        {
+            "id": "seed-gab-seven",
+            "name": "Yeddi gözəl şəlalə",
+            "category": "waterfall",
+            "lat": 40.920,
+            "lng": 47.910,
+            "rating": 4.5,
+            "rating_count": 120,
+        },
+        {
+            "id": "seed-gab-hotel",
+            "name": "Qəbələ resort / otel",
+            "category": "hotel",
+            "lat": 40.980,
+            "lng": 47.860,
+            "rating": 4.4,
+            "rating_count": 200,
+        },
+        {
+            "id": "seed-gab-food",
+            "name": "Qəbələ turizm restoranı",
+            "category": "restaurant",
+            "lat": 40.990,
+            "lng": 47.850,
+            "rating": 4.3,
+            "rating_count": 80,
+        },
+        {
+            "id": "seed-gab-nature",
+            "name": "Qəbələ təbiət parkı",
+            "category": "nature",
+            "lat": 40.970,
+            "lng": 47.880,
+            "rating": 4.4,
+            "rating_count": 60,
+        },
+        {
+            "id": "seed-gab-hist",
+            "name": "Qəbələ arxeoloji / tarixi",
+            "category": "historical",
+            "lat": 40.885,
+            "lng": 47.712,
+            "rating": 4.3,
+            "rating_count": 70,
+        },
+        {
+            "id": "seed-gab-guest",
+            "name": "Qəbələ guesthouse",
+            "category": "guesthouse",
+            "lat": 40.995,
+            "lng": 47.848,
+            "rating": 4.2,
+            "rating_count": 30,
+        },
+    ],
+    "lerik": [
+        {
+            "id": "seed-lerik-nature",
+            "name": "Lerik dağ təbiəti",
+            "category": "nature",
+            "lat": 38.790,
+            "lng": 48.390,
+            "rating": 4.5,
+            "rating_count": 40,
+        },
+        {
+            "id": "seed-lerik-mountain",
+            "name": "Lerik dağ mənzərəsi",
+            "category": "mountain",
+            "lat": 38.800,
+            "lng": 48.380,
+            "rating": 4.6,
+            "rating_count": 35,
+        },
+        {
+            "id": "seed-lerik-hist",
+            "name": "Lerik muzey / tarix",
+            "category": "historical",
+            "lat": 38.775,
+            "lng": 48.416,
+            "rating": 4.2,
+            "rating_count": 25,
+        },
+        {
+            "id": "seed-lerik-hotel",
+            "name": "Lerik otel / istirahət",
+            "category": "hotel",
+            "lat": 38.772,
+            "lng": 48.412,
+            "rating": 4.1,
+            "rating_count": 20,
+        },
+        {
+            "id": "seed-lerik-food",
+            "name": "Lerik ev yeməyi / restoran",
+            "category": "home_restaurant",
+            "lat": 38.774,
+            "lng": 48.414,
+            "rating": 4.3,
+            "rating_count": 30,
+        },
+        {
+            "id": "seed-lerik-waterfall",
+            "name": "Lerik şəlalə / bulaq",
+            "category": "waterfall",
+            "lat": 38.810,
+            "lng": 48.370,
+            "rating": 4.4,
+            "rating_count": 15,
+        },
+        {
+            "id": "seed-lerik-guest",
+            "name": "Lerik guesthouse",
+            "category": "guesthouse",
+            "lat": 38.776,
+            "lng": 48.418,
+            "rating": 4.0,
+            "rating_count": 12,
+        },
+        {
+            "id": "seed-lerik-lake",
+            "name": "Lerik göl / su hövzəsi",
+            "category": "lake",
+            "lat": 38.785,
+            "lng": 48.400,
+            "rating": 4.2,
+            "rating_count": 10,
+        },
+    ],
+    "baku": [
+        {
+            "id": "seed-baku-maiden",
+            "name": "Qız qalası",
+            "category": "historical",
+            "lat": 40.3663,
+            "lng": 49.8372,
+            "rating": 4.6,
+            "rating_count": 2000,
+        },
+        {
+            "id": "seed-baku-palace",
+            "name": "Şirvanşahlar sarayı",
+            "category": "historical",
+            "lat": 40.3669,
+            "lng": 49.8332,
+            "rating": 4.7,
+            "rating_count": 1500,
+        },
+        {
+            "id": "seed-baku-boulevard",
+            "name": "Dənizkənarı Milli Park",
+            "category": "nature",
+            "lat": 40.372,
+            "lng": 49.855,
+            "rating": 4.6,
+            "rating_count": 3000,
+        },
+        {
+            "id": "seed-baku-flame",
+            "name": "Flame Towers mənzərə",
+            "category": "monument",
+            "lat": 40.3594,
+            "lng": 49.8312,
+            "rating": 4.5,
+            "rating_count": 800,
+        },
+        {
+            "id": "seed-baku-heydar",
+            "name": "Heydər Əliyev Mərkəzi",
+            "category": "monument",
+            "lat": 40.3956,
+            "lng": 49.8678,
+            "rating": 4.7,
+            "rating_count": 2500,
+        },
+        {
+            "id": "seed-baku-hotel",
+            "name": "İçərişəhər boutique otel",
+            "category": "hotel",
+            "lat": 40.3655,
+            "lng": 49.8345,
+            "rating": 4.5,
+            "rating_count": 200,
+        },
+        {
+            "id": "seed-baku-food",
+            "name": "İçərişəhər turizm restoranı",
+            "category": "restaurant",
+            "lat": 40.3660,
+            "lng": 49.8355,
+            "rating": 4.4,
+            "rating_count": 300,
+        },
+        {
+            "id": "seed-baku-carpet",
+            "name": "Azərbaycan Xalça Muzeyi",
+            "category": "historical",
+            "lat": 40.3598,
+            "lng": 49.8348,
+            "rating": 4.6,
+            "rating_count": 900,
+        },
+    ],
+}
+
+
+def resolve_seed_region_key(region_key: str) -> str:
+    key = region_key.strip().lower()
+    if key == "sheki":
+        return "seki"
+    if key == "gabala":
+        return "qabala"
+    return key
+
+
+def seeds_for_region(region_key: str, *, db_region: str) -> list[dict[str, Any]]:
+    key = resolve_seed_region_key(region_key)
+    out: list[dict[str, Any]] = []
+    for seed in TOURISM_SEEDS.get(key) or []:
+        sid = str(seed.get("id") or seed.get("name") or "")
+        out.append(
+            {
+                "id": sid,
+                "place_id": seed.get("place_id") or sid,
+                "name": seed["name"],
+                "category": seed["category"],
+                "lat": float(seed["lat"]),
+                "lng": float(seed["lng"]),
+                "region": db_region,
+                "rating": seed.get("rating"),
+                "rating_count": seed.get("rating_count"),
+                "description": seed.get("description"),
+                "is_seed": True,
+            }
+        )
+    return out

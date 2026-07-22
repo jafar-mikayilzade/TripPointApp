@@ -60,6 +60,8 @@ DURATION_MINUTES: dict[str, int] = {
 
 FOOD_CATS = frozenset({"restaurant", "home_restaurant", "cafe"})
 HOTEL_CATS = frozenset({"hotel", "hostel", "guesthouse"})
+NATURE_CATS = frozenset({"nature", "waterfall", "mountain", "lake"})
+HISTORICAL_CATS = frozenset({"historical", "monument"})
 
 MAX_RESTAURANT_KM = 8.0
 ATTRACTIONS_PER_DAY = 3
@@ -618,6 +620,27 @@ def build_skeleton(
             f"evə {travel.get('return_origin_by')}."
         )
 
+    lodging = None
+    if base_hotel is not None:
+        lodging = {
+            **public_poi_fields(base_hotel),
+            "note": "Ümumi gecələmə bazası (bütün gecələr eyni otel).",
+        }
+        # First overnight day note — clarify single hotel once
+        for day in day_payloads:
+            has_hotel_stop = any(
+                str(s.get("daypart") or "") == "hotel"
+                or str(s.get("category") or "") in HOTEL_CATS
+                for s in (day.get("stops") or [])
+            )
+            if has_hotel_stop:
+                hotel_name = str(base_hotel.get("name") or "Otel")
+                prefix = f"Gecələmə: {hotel_name}."
+                existing = str(day.get("notes") or "").strip()
+                if prefix.lower() not in existing.lower():
+                    day["notes"] = f"{prefix} {existing}".strip()
+                break
+
     return {
         "summary": "",
         "days": day_payloads,
@@ -625,12 +648,14 @@ def build_skeleton(
         "best_time": best_time,
         "region": db_region,
         "travel": travel if travel.get("from_origin") else None,
+        "lodging": lodging,
         "meta": {
             "budget": budget,
             "interests": interests,
             "group_type": group_type,
             "ordered_by": "geo_first_compact_tour_travel_window",
             "allow_hotel": allow_hotel,
+            "single_base_hotel": bool(base_hotel),
         },
     }
 
@@ -655,23 +680,81 @@ def _budget_total(budget: str, days: int) -> str:
     return f"{low}-{high} AZN"
 
 
+def _is_travel_stop(stop: dict[str, Any]) -> bool:
+    cat = str(stop.get("category") or "").strip().lower()
+    daypart = str(stop.get("daypart") or "").strip().lower()
+    return cat == "travel" or daypart.startswith("travel")
+
+
 def _tip_for_stop(stop: dict[str, Any]) -> str:
+    """Category/daypart tip. Unknown/travel → empty (no generic 'must visit')."""
+    if _is_travel_stop(stop):
+        return ""
+
     name = (stop.get("name") or "Bu yer").strip()
-    daypart = str(stop.get("daypart") or "")
-    cat = str(stop.get("category") or "")
-    if daypart == "breakfast" or (
-        daypart == "" and cat in FOOD_CATS and str(stop.get("time") or "").startswith("09")
-    ):
-        return f"{name} — səhər yeməyi üçün rahat başlanğıc."
-    if daypart == "lunch" or (cat in FOOD_CATS and daypart != "hotel"):
-        return f"{name} — nahar üçün yaxşı seçim."
+    daypart = str(stop.get("daypart") or "").strip().lower()
+    cat = str(stop.get("category") or "").strip().lower()
+    time_s = str(stop.get("time") or "")
+
     if daypart == "hotel" or cat in HOTEL_CATS:
-        return f"{name} — axşam istirahət və gecələmə üçün."
-    return f"{name} — gəzib görməyə dəyər."
+        return f"{name} — axşam istirahət və gecələmə."
+
+    if cat in FOOD_CATS or daypart in {"breakfast", "lunch"}:
+        if daypart == "breakfast" or (
+            daypart != "lunch" and time_s.startswith("09")
+        ):
+            return f"{name} — səhər yeməyi üçün."
+        return f"{name} — nahar üçün uyğun seçim."
+
+    if cat in NATURE_CATS:
+        return f"{name} — təbiət mənzərəsi üçün qısa dayanacaq."
+
+    if cat in HISTORICAL_CATS:
+        return f"{name} — tarixi məkana nəzər yetirin."
+
+    # other / unknown — better empty than misleading template
+    return ""
+
+
+def _claude_tip_mismatch(stop: dict[str, Any], tip: str) -> bool:
+    """True if Claude tip clearly conflicts with stop role."""
+    if not tip.strip():
+        return True
+    if _is_travel_stop(stop):
+        return True
+
+    dp = str(stop.get("daypart") or "").strip().lower()
+    cat = str(stop.get("category") or "").strip().lower()
+    low = tip.lower()
+
+    if dp in {"breakfast", "attraction"} and (
+        "gecələ" in low or "axşam qal" in low or "otelə" in low
+    ):
+        return True
+    if (dp == "hotel" or cat in HOTEL_CATS) and (
+        "səhər yemə" in low or "nahar" in low
+    ):
+        return True
+    if dp == "lunch" and ("səhər yemə" in low or "gecələ" in low):
+        return True
+    if cat in FOOD_CATS and ("gecələ" in low or "gəzib gör" in low):
+        return True
+    if cat in NATURE_CATS and ("nahar" in low or "səhər yemə" in low or "gecələ" in low):
+        return True
+    if cat in HISTORICAL_CATS and ("nahar" in low or "gecələ" in low):
+        return True
+    # Never keep the old generic visit fluff
+    if "gəzib görməyə dəyər" in low:
+        return True
+    return False
 
 
 def template_enrich(plan: dict[str, Any], *, region_label: str, days: int) -> dict[str, Any]:
     plan = dict(plan)
+    lodging = plan.get("lodging")
+    lodging_name = (
+        str((lodging or {}).get("name") or "").strip() if isinstance(lodging, dict) else ""
+    )
     plan["summary"] = (
         plan.get("summary") or f"{region_label} üçün {days} günlük marşrut hazırdır."
     )
@@ -679,14 +762,20 @@ def template_enrich(plan: dict[str, Any], *, region_label: str, days: int) -> di
     new_days = []
     for day in plan.get("days") or []:
         day = dict(day)
-        day["notes"] = (
-            day.get("notes")
-            or "Səhər yeməyi → gəzinti → nahar → attraksiya; otel axşama saxlanılıb."
-        )
+        default_notes = "Səhər → gəzinti → nahar → attraksiya."
+        if lodging_name and any(
+            str(s.get("daypart") or "") == "hotel"
+            or str(s.get("category") or "") in HOTEL_CATS
+            for s in (day.get("stops") or [])
+        ):
+            default_notes = f"Gecələmə: {lodging_name}. {default_notes}"
+        day["notes"] = day.get("notes") or default_notes
         stops = []
         for stop in day.get("stops") or []:
             stop = dict(stop)
-            if not (stop.get("tip") or "").strip():
+            if _is_travel_stop(stop):
+                stop["tip"] = ""
+            elif not (stop.get("tip") or "").strip():
                 stop["tip"] = _tip_for_stop(stop)
             stops.append(stop)
         day["stops"] = stops
@@ -752,11 +841,15 @@ Maraqlar: {', '.join(interests) or 'ümumi'}
 
 MARŞRUT SABİTDİR — sıra/vaxt/daypart dəyişmə, stop əlavə/çıxarma.
 
-DAYPART QAYDALARI (tip yazarkən MÜTLƏQ riayət et):
-- breakfast / səhər (~09:00): yalnız səhər yeməyi / başlanğıc tip. Axşam/gecələmə demə.
-- lunch / nahar (~13:00): yalnız nahar tip.
-- attraction: gəzinti tip. Yemək/otel demə.
-- hotel: yalnız axşam istirahət / gecələmə tip. Səhər yeməyi demə.
+DAYPART / KATEQORİYA QAYDALARI (tip yazarkən MÜTLƏQ):
+- travel / travel_*: tip YAZMA (boş string). Yol/transfer üçün “gəz” dili yox.
+- breakfast / food (~09:00): yalnız səhər yeməyi tip.
+- lunch / food (~13:00): yalnız nahar tip.
+- hotel / hostel / guesthouse: yalnız gecələmə tip.
+- nature / waterfall / mountain / lake: təbiət tip.
+- historical / monument: tarixi tip.
+- attraction (digər): yalnız daypart uyğundursa qısa tip; əmin deyilsənsə tip boş burax.
+- Ümumi “gəzib görməyə dəyər” şablonu İSTİFADƏ ETMƏ.
 
 FIXED_ITINERARY:
 {json.dumps(skeleton, ensure_ascii=False)}
@@ -769,7 +862,7 @@ Cavab YALNIZ JSON:
     {{
       "day": 1,
       "notes": "qısa qeyd",
-      "stops": [{{"poi_id": "…", "tip": "1 cümlə (daypart-a uyğun)"}}]
+      "stops": [{{"poi_id": "…", "tip": "daypart/category-yə uyğun və ya boş"}}]
     }}
   ]
 }}"""
@@ -787,7 +880,8 @@ Cavab YALNIZ JSON:
                 "max_tokens": 900,
                 "system": (
                     "Azərbaycan turizm köməkçisisən. Yalnız JSON. "
-                    "Stop sırasını dəyişmə. Tip daypart+category-yə uyğun olsun."
+                    "Stop sırasını dəyişmə. Tip daypart+category-yə uyğun olsun; "
+                    "travel üçün tip boş; naməlum üçün tip boş."
                 ),
                 "messages": [{"role": "user", "content": user_prompt}],
             },
@@ -835,22 +929,17 @@ def _merge_tips(
         stops = []
         for stop in day.get("stops") or []:
             stop = dict(stop)
+            if _is_travel_stop(stop):
+                stop["tip"] = ""
+                stops.append(stop)
+                continue
             pid = str(stop.get("poi_id") or "")
-            if tip_map.get(pid):
-                # Keep Claude tip only if it doesn't obviously mismatch daypart
-                tip = tip_map[pid]
-                dp = str(stop.get("daypart") or "")
-                low = tip.lower()
-                bad = False
-                if dp in {"breakfast", "attraction"} and (
-                    "gecələ" in low or "axşam qal" in low or "otel" in low
-                ):
-                    bad = True
-                if dp == "hotel" and ("səhər yemə" in low or "nahar" in low):
-                    bad = True
-                if dp == "lunch" and ("səhər yemə" in low or "gecələ" in low):
-                    bad = True
-                stop["tip"] = _tip_for_stop(stop) if bad else tip
+            tip = tip_map.get(pid) or ""
+            if tip and not _claude_tip_mismatch(stop, tip):
+                stop["tip"] = tip
+            else:
+                # Mismatch / empty Claude → category tip or empty (never generic visit fluff)
+                stop["tip"] = _tip_for_stop(stop)
             stops.append(stop)
         day["stops"] = stops
         merged_days.append(day)
