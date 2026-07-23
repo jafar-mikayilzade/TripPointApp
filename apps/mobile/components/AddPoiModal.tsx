@@ -29,7 +29,7 @@ import {
   validateLettersOnlyField,
   validateTextWordPatterns,
 } from '../lib/formValidation';
-import { notifyAdminsViaWhatsApp } from '../lib/adminNotify';
+import { notifyAdmins } from '../lib/adminNotify';
 import { parseCoordsFromGoogleMapsUrl, POI_CATEGORY_OPTIONS } from '../lib/poi';
 import { supabase } from '../lib/supabase';
 import { uploadImage } from '../lib/uploadImage';
@@ -244,7 +244,7 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
             text: 'OK',
             onPress: () => {
               onClose();
-              void notifyAdminsViaWhatsApp(
+              void notifyAdmins(
                 'poi_pending',
                 `"${name.trim()}" — region: ${regionId}`
               );

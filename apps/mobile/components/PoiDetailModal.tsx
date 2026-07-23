@@ -20,7 +20,7 @@ import { REGIONS } from '../constants/regions';
 import { CategoryIcon } from './CategoryIcon';
 import { FavoriteButton } from './FavoriteButton';
 import { TransientHint } from './TransientHint';
-import { notifyAdminsViaWhatsApp } from '../lib/adminNotify';
+import { notifyAdmins } from '../lib/adminNotify';
 import { getErrorMessage } from '../lib/errors';
 import { isDatabasePoiId } from '../lib/livePlaces';
 import {
@@ -215,7 +215,7 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
       }
 
       showInfoToast('Şəkillər təsdiqə göndərildi');
-      void notifyAdminsViaWhatsApp(
+      void notifyAdmins(
         'photo_pending',
         `"${poi.name}" üçün ${rows.length} şəkil`
       );

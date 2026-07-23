@@ -22,7 +22,7 @@ import { REGIONS } from '../constants/regions';
 import { FavoriteButton } from './FavoriteButton';
 import { SubscribeMenuButton } from './SubscribeMenuButton';
 import { TransientHint } from './TransientHint';
-import { notifyAdminsViaWhatsApp } from '../lib/adminNotify';
+import { notifyAdmins } from '../lib/adminNotify';
 import { getErrorMessage } from '../lib/errors';
 import {
   buildListingWhatsAppUrl,
@@ -149,7 +149,9 @@ function InfoFact({
       </View>
       <View style={styles.infoFactBody}>
         <Text style={styles.infoFactLabel}>{label}</Text>
-        <Text style={styles.infoFactValue}>{value}</Text>
+        <Text style={styles.infoFactValue} numberOfLines={3}>
+          {value}
+        </Text>
       </View>
     </View>
   );
@@ -613,7 +615,7 @@ export function ListingDetailModal({
     showInfoToast('Şikayətiniz qəbul olundu');
     const reasonLabel =
       LISTING_REPORT_REASONS.find((item) => item.id === reportReason)?.label ?? reportReason;
-    void notifyAdminsViaWhatsApp(
+    void notifyAdmins(
       'listing_report',
       `"${listing.title}" — ${reasonLabel}`
     );
@@ -725,7 +727,7 @@ export function ListingDetailModal({
                   onPress={openWhatsApp}
                 >
                   <FontAwesome name="whatsapp" size={12} color={colors.textOnAccent} />
-                  <Text style={styles.sideActionText}>
+                  <Text style={styles.sideActionText} numberOfLines={1}>
                     {contactDisplayPhone ? 'Whatsappa yaz' : 'Nömrə yox'}
                   </Text>
                 </Pressable>
@@ -1290,6 +1292,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.text,
+    flexShrink: 1,
+    minWidth: 0,
   },
   routeListCard: {
     backgroundColor: colors.surface,
@@ -1375,12 +1379,15 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingVertical: 6,
     paddingHorizontal: 10,
-    minWidth: 128,
+    minWidth: 0,
+    maxWidth: '100%',
+    alignSelf: 'stretch',
   },
   sideActionText: {
     color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 12,
+    flexShrink: 1,
   },
   whatsappButton: {
     backgroundColor: colors.whatsapp,
