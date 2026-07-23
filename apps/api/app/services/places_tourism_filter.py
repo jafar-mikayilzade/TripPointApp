@@ -124,6 +124,15 @@ _NAME_BLACKLIST_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Prefer AZ/EN (Latin + Azerbaijani letters). Drop heavy Cyrillic / Arabic-Persian.
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
+_ARABIC_PERSIAN_RE = re.compile(r"[\u0600-\u06FF]")
+# Letters counted for ratio (Latin/AZ + forbidden scripts)
+_LETTER_RE = re.compile(
+    r"[A-Za-zÀ-ÖØ-öø-ÿƏəİıÖöÜüŞşÇçĞğ\u0400-\u04FF\u0600-\u06FF]"
+)
+FORBIDDEN_SCRIPT_RATIO = 0.35
+
 FOOD_CATS = RESTAURANT_CATS
 LODGING_CATS = ACCOMMODATION_CATS
 TOURISM_ATTRACTION_CATS = ATTRACTION_CATS
@@ -133,6 +142,40 @@ def name_is_blacklisted(name: str | None) -> bool:
     if not name or not str(name).strip():
         return False
     return bool(_NAME_BLACKLIST_RE.search(str(name)))
+
+
+def text_has_forbidden_script(
+    text: str | None,
+    *,
+    ratio: float = FORBIDDEN_SCRIPT_RATIO,
+) -> bool:
+    """True if Cyrillic or Arabic/Persian letters are a large share of the text."""
+    if not text or not str(text).strip():
+        return False
+    letters = _LETTER_RE.findall(str(text))
+    if not letters:
+        return False
+    forbidden = sum(
+        1
+        for ch in letters
+        if _CYRILLIC_RE.match(ch) or _ARABIC_PERSIAN_RE.match(ch)
+    )
+    return (forbidden / len(letters)) >= ratio
+
+
+def name_has_forbidden_script(name: str | None) -> bool:
+    """Reject place names that are primarily Russian or Persian/Arabic script."""
+    return text_has_forbidden_script(name)
+
+
+def sanitize_tip_text(tip: str | None) -> str:
+    """Drop tips that still contain forbidden scripts (Claude may copy place names)."""
+    if not tip or not str(tip).strip():
+        return ""
+    text = str(tip).strip()
+    if text_has_forbidden_script(text):
+        return ""
+    return text
 
 
 def google_types_of(row: dict[str, Any]) -> set[str]:
@@ -195,7 +238,10 @@ def passes_tourism_filter(
 ) -> bool:
     """Return False to drop row from live/plan candidate lists."""
     if keep_seeds and row.get("is_seed"):
-        return not name_is_blacklisted(str(row.get("name") or ""))
+        seed_name = str(row.get("name") or "")
+        return not (
+            name_is_blacklisted(seed_name) or name_has_forbidden_script(seed_name)
+        )
 
     cat = str(row.get("category") or "").strip().lower()
     name = str(row.get("name") or "")
@@ -203,6 +249,8 @@ def passes_tourism_filter(
     if cat == "cafe":
         return False
     if name_is_blacklisted(name):
+        return False
+    if name_has_forbidden_script(name):
         return False
 
     types = google_types_of(row)

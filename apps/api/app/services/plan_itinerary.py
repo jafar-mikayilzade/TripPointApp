@@ -37,6 +37,10 @@ from app.services.rank_pois import (
     public_poi_fields,
     rating_sort_key,
 )
+from app.services.places_tourism_filter import (
+    name_has_forbidden_script,
+    sanitize_tip_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -800,6 +804,8 @@ def _claude_tip_mismatch(stop: dict[str, Any], tip: str) -> bool:
         return True
     if _is_travel_stop(stop):
         return True
+    if not sanitize_tip_text(tip):
+        return True
 
     dp = str(stop.get("daypart") or "").strip().lower()
     cat = str(stop.get("category") or "").strip().lower()
@@ -854,7 +860,9 @@ def template_enrich(plan: dict[str, Any], *, region_label: str, days: int) -> di
             if _is_travel_stop(stop):
                 stop["tip"] = ""
             elif not (stop.get("tip") or "").strip():
-                stop["tip"] = _tip_for_stop(stop)
+                stop["tip"] = sanitize_tip_text(_tip_for_stop(stop))
+            else:
+                stop["tip"] = sanitize_tip_text(str(stop.get("tip") or ""))
             stops.append(stop)
         day["stops"] = stops
         new_days.append(day)
@@ -1014,10 +1022,13 @@ def _merge_tips(
             pid = str(stop.get("poi_id") or "")
             tip = tip_map.get(pid) or ""
             if tip and not _claude_tip_mismatch(stop, tip):
-                stop["tip"] = tip
+                stop["tip"] = sanitize_tip_text(tip)
             else:
                 # Mismatch / empty Claude → category tip or empty (never generic visit fluff)
-                stop["tip"] = _tip_for_stop(stop)
+                stop["tip"] = sanitize_tip_text(_tip_for_stop(stop))
+            # Defense: never show forbidden-script place names in the plan list
+            if name_has_forbidden_script(str(stop.get("name") or "")):
+                stop["tip"] = ""
             stops.append(stop)
         day["stops"] = stops
         merged_days.append(day)

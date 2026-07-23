@@ -27,6 +27,8 @@ def fetch_places_from_google(
         "location": f"{latitude},{longitude}",
         "radius": int(radius_meters or SEARCH_RADIUS_METERS),
         "type": google_type,
+        # Prefer Azerbaijani (Latin) names; EN is Google's implicit fallback.
+        "language": "az",
         "key": GOOGLE_PLACES_API_KEY,
     }
 
