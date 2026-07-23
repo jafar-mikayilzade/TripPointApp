@@ -53,6 +53,10 @@ class PlanRouteIn(BaseModel):
     originLng: float | None = None
     departTime: str | None = "08:00"
     returnByTime: str | None = "21:00"
+    # Replan variety — different seed → different near-tied choices
+    varietySeed: int | None = None
+    # Soft-exclude stops from the previous plan the user is replacing
+    excludePoiIds: list[str] = Field(default_factory=list)
 
 
 @router.post("/api/plan-route")
@@ -75,13 +79,15 @@ def plan_route_endpoint(body: PlanRouteIn) -> JSONResponse:
     if body.pois and (
         body.pois.restaurants or body.pois.accommodations or body.pois.attractions
     ):
+        from app.services.attraction_classify import classify_attraction_rows
+
         restaurants = list(body.pois.restaurants)
         accommodations = list(body.pois.accommodations)
-        attractions = list(body.pois.attractions)
+        attractions = classify_attraction_rows(list(body.pois.attractions))
     else:
         loaded = load_live_route_candidates(
             region_key,
-            per_bucket=12,
+            per_bucket=16,
             interests=interests or None,
             source="google",
         )
@@ -116,6 +122,8 @@ def plan_route_endpoint(body: PlanRouteIn) -> JSONResponse:
             from_origin=bool(body.fromOrigin),
             depart_time=body.departTime or "08:00",
             return_by_time=body.returnByTime or "21:00",
+            variety_seed=body.varietySeed,
+            exclude_poi_ids=list(body.excludePoiIds or []),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc

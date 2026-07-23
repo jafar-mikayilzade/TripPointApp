@@ -202,11 +202,14 @@ def grow_compact_tour(
     max_diameter_km: float = 8.0,
     max_add_from_path_km: float = 3.5,
     prefer_categories: set[str] | None = None,
+    rng: Any | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Build a short open-tour day set: seed near origin, then repeatedly add the POI
+    Build a short open-path day set: seed near origin, then repeatedly add the POI
     that least increases tour_length_km while staying close to the existing path.
-    Geography first — rating only breaks ties.
+
+    Interest categories win over pure geography when enough matches exist.
+    Optional rng: among near-tied candidates, pick randomly for replan variety.
     """
     exclude = set(used or set())
     candidates = [
@@ -223,7 +226,8 @@ def grow_compact_tour(
         if not prefer_categories
         or str(p.get("category") or "") in prefer_categories
     ]
-    seed_pool = preferred or candidates
+    # Prefer interest pool for seeding; only fall back if empty
+    seed_pool = preferred if preferred else candidates
 
     def seed_key(p: dict[str, Any]) -> tuple[float, float]:
         c = _coord(p)
@@ -232,43 +236,76 @@ def grow_compact_tour(
         rating = float(p.get("rating") or 0)
         return (d, -rating)
 
-    seed = min(seed_pool, key=seed_key)
+    ranked_seeds = sorted(seed_pool, key=seed_key)
+    if rng is not None and len(ranked_seeds) > 1:
+        top = ranked_seeds[: min(3, len(ranked_seeds))]
+        seed = rng.choice(top)
+    else:
+        seed = ranked_seeds[0]
     chosen: list[dict[str, Any]] = [seed]
     chosen_ids = {str(seed.get("id") or "")}
 
     while len(chosen) < limit:
-        best: dict[str, Any] | None = None
-        best_score: tuple[float, float, float] | None = None
+        scored: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
         base_len = tour_length_km(order_stops_geo(chosen)) if len(chosen) > 1 else 0.0
         chosen_coords = [_coord(p) for p in chosen if _coord(p)]
 
-        for poi in candidates:
-            pid = str(poi.get("id") or "")
-            if not pid or pid in chosen_ids:
-                continue
-            coord = _coord(poi)
-            if coord is None:
-                continue
-            # Must hug the existing corridor — blocks opposite-side "stop 2"
-            min_d = min(
-                haversine_km(coord[0], coord[1], c[0], c[1]) for c in chosen_coords if c
-            )
-            if min_d > max_add_from_path_km:
-                continue
-            trial = chosen + [poi]
-            if cluster_diameter_km(trial) > max_diameter_km:
-                continue
-            ordered = order_stops_geo(trial)
-            length = tour_length_km(ordered)
-            growth = length - base_len
-            rating = float(poi.get("rating") or 0)
-            score = (growth, min_d, -rating)
-            if best_score is None or score < best_score:
-                best_score = score
-                best = poi
+        # First pass: interest matches only (if any remain nearby)
+        search_pools = [preferred, candidates] if preferred else [candidates]
+        for pool_i, search in enumerate(search_pools):
+            for poi in search:
+                pid = str(poi.get("id") or "")
+                if not pid or pid in chosen_ids:
+                    continue
+                coord = _coord(poi)
+                if coord is None:
+                    continue
+                min_d = min(
+                    haversine_km(coord[0], coord[1], c[0], c[1])
+                    for c in chosen_coords
+                    if c
+                )
+                if min_d > max_add_from_path_km:
+                    continue
+                trial = chosen + [poi]
+                if cluster_diameter_km(trial) > max_diameter_km:
+                    continue
+                ordered = order_stops_geo(trial)
+                length = tour_length_km(ordered)
+                growth = length - base_len
+                rating = float(poi.get("rating") or 0)
+                interest_miss = (
+                    0
+                    if (
+                        not prefer_categories
+                        or str(poi.get("category") or "") in prefer_categories
+                    )
+                    else 1
+                )
+                # Interest match first, then compact geography
+                score = (interest_miss, growth, min_d, -rating)
+                scored.append((score, poi))
 
-        if best is None:
+            if scored and pool_i == 0:
+                # Found interest-matching neighbours — do not fall back yet
+                break
+
+        if not scored:
             break
+
+        scored.sort(key=lambda t: t[0])
+        if rng is not None and len(scored) > 1:
+            # Random among top-3 near-ties for variety
+            best_score = scored[0][0]
+            near = [
+                p
+                for s, p in scored[:5]
+                if s[0] == best_score[0] and abs(float(s[1]) - float(best_score[1])) < 1.5
+            ]
+            best = rng.choice(near) if near else scored[0][1]
+        else:
+            best = scored[0][1]
+
         chosen.append(best)
         chosen_ids.add(str(best.get("id") or ""))
 

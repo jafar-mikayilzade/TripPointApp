@@ -5,12 +5,19 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import re
+import time
 from typing import Any
 
 import requests
 
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
+from app.services.attraction_classify import (
+    INTEREST_ATTRACTION_CATS,
+    classify_attraction_rows,
+    interest_attraction_cats,
+)
 from app.services.geo_route import (
     build_day_clusters,
     cluster_centroid,
@@ -32,15 +39,6 @@ from app.services.rank_pois import (
 )
 
 logger = logging.getLogger(__name__)
-
-INTEREST_ATTRACTION_CATS: dict[str, set[str]] = {
-    "nature": {"nature", "waterfall", "mountain", "lake"},
-    "history": {"historical", "monument"},
-    "food": set(),
-    "family": {"historical", "nature", "lake", "other", "monument"},
-    "active": {"mountain", "nature", "waterfall"},
-    "photo": {"nature", "waterfall", "historical", "monument", "lake"},
-}
 
 DURATION_MINUTES: dict[str, int] = {
     "restaurant": 75,
@@ -112,11 +110,44 @@ def _poi_duration(poi: dict[str, Any]) -> int:
 
 
 def _interest_sets(interests: list[str]) -> set[str]:
-    cats: set[str] = set()
-    for raw in interests:
-        key = str(raw or "").strip().lower()
-        cats |= INTEREST_ATTRACTION_CATS.get(key, set())
-    return cats
+    return interest_attraction_cats(interests)
+
+
+def _prioritize_attractions_for_interests(
+    attractions: list[dict[str, Any]],
+    interest_cats: set[str],
+    *,
+    rng: random.Random,
+    exclude_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Interest-first pool with shuffle; soft-exclude previous plan stops."""
+    exclude = exclude_ids or set()
+    classified = classify_attraction_rows(attractions)
+
+    def pid(p: dict[str, Any]) -> str:
+        return str(p.get("id") or p.get("place_id") or "")
+
+    fresh = [p for p in classified if pid(p) and pid(p) not in exclude]
+    pool = fresh if len(fresh) >= 4 else classified
+
+    if not interest_cats:
+        rng.shuffle(pool)
+        return pool
+
+    preferred = [
+        p for p in pool if str(p.get("category") or "") in interest_cats
+    ]
+    others = [
+        p for p in pool if str(p.get("category") or "") not in interest_cats
+    ]
+    rng.shuffle(preferred)
+    rng.shuffle(others)
+
+    if len(preferred) >= 3:
+        # Keep a thin filler so geo corridors still work
+        filler = others[: max(2, len(preferred) // 4)]
+        return preferred + filler
+    return preferred + others
 
 
 def _pick_unique(
@@ -183,9 +214,10 @@ def pick_day_pieces(
     interest_cats: set[str],
     origin_lat: float,
     origin_lng: float,
+    rng: random.Random | None = None,
 ) -> dict[str, Any]:
     """
-    Geography-first day set: grow a compact open tour from the cluster.
+    Interest-aware compact open tour from the cluster.
     Food is NOT picked here — only added later if detour is tiny.
     """
     del restaurants  # lunch/breakfast deferred to assemble (detour-gated)
@@ -197,6 +229,7 @@ def pick_day_pieces(
     lat = anchor[0] if anchor else origin_lat
     lng = anchor[1] if anchor else origin_lng
 
+    # Strict interest pass first
     attractions = grow_compact_tour(
         cluster,
         origin_lat=lat,
@@ -206,7 +239,26 @@ def pick_day_pieces(
         max_diameter_km=MAX_DAY_DIAMETER_KM,
         max_add_from_path_km=MAX_ADD_FROM_PATH_KM,
         prefer_categories=interest_cats or None,
+        rng=rng,
     )
+
+    # If interest pool too thin in this cluster, fill remaining slots without prefer
+    if interest_cats and len(attractions) < min(2, ATTRACTIONS_PER_DAY):
+        already = {str(p.get("id") or "") for p in attractions}
+        fill_used = set(used) | already
+        extra = grow_compact_tour(
+            cluster,
+            origin_lat=lat,
+            origin_lng=lng,
+            used=fill_used,
+            limit=ATTRACTIONS_PER_DAY - len(attractions),
+            max_diameter_km=MAX_DAY_DIAMETER_KM,
+            max_add_from_path_km=MAX_ADD_FROM_PATH_KM,
+            prefer_categories=None,
+            rng=rng,
+        )
+        attractions = attractions + extra
+
     for poi in attractions:
         pid = str(poi.get("id") or "")
         if pid:
@@ -422,6 +474,8 @@ def build_skeleton(
     from_origin: bool = False,
     depart_time: str | None = "08:00",
     return_by_time: str | None = "21:00",
+    variety_seed: int | None = None,
+    exclude_poi_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     from app.services.travel_window import build_travel_context, parse_hhmm
 
@@ -434,15 +488,24 @@ def build_skeleton(
     start_lat = float(coords["latitude"])
     start_lng = float(coords["longitude"])
 
+    seed_val = int(variety_seed) if variety_seed is not None else int(time.time_ns() % (2**31))
+    rng = random.Random(seed_val)
+
     restaurants = apply_weather_filter(list(restaurants), weather)
     accommodations = apply_weather_filter(list(accommodations), weather)
     attractions = apply_weather_filter(list(attractions), weather)
 
     restaurants = sorted(restaurants, key=rating_sort_key, reverse=True)
     accommodations = sorted(accommodations, key=rating_sort_key, reverse=True)
-    attractions = sorted(attractions, key=rating_sort_key, reverse=True)
 
     interest_cats = _interest_sets(interests)
+    exclude = {str(x) for x in (exclude_poi_ids or []) if str(x).strip()}
+    attractions = _prioritize_attractions_for_interests(
+        attractions,
+        interest_cats,
+        rng=rng,
+        exclude_ids=exclude,
+    )
     days_n = max(1, int(days))
 
     travel = build_travel_context(
@@ -485,6 +548,18 @@ def build_skeleton(
         cluster = clusters[day_i - 1] if day_i - 1 < len(clusters) else []
         if not cluster:
             leftovers = [p for p in attractions if str(p.get("id") or "") not in used]
+            if interest_cats:
+                pref = [
+                    p
+                    for p in leftovers
+                    if str(p.get("category") or "") in interest_cats
+                ]
+                rest = [
+                    p
+                    for p in leftovers
+                    if str(p.get("category") or "") not in interest_cats
+                ]
+                leftovers = pref + rest
             if leftovers:
                 cluster = leftovers[:ATTRACTIONS_PER_DAY]
 
@@ -495,6 +570,7 @@ def build_skeleton(
             interest_cats=interest_cats,
             origin_lat=start_lat,
             origin_lng=start_lng,
+            rng=rng,
         )
 
         # Time windows
@@ -653,9 +729,11 @@ def build_skeleton(
             "budget": budget,
             "interests": interests,
             "group_type": group_type,
-            "ordered_by": "geo_first_compact_tour_travel_window",
+            "ordered_by": "interest_geo_compact_path",
             "allow_hotel": allow_hotel,
             "single_base_hotel": bool(base_hotel),
+            "variety_seed": seed_val,
+            "interest_cats": sorted(interest_cats),
         },
     }
 

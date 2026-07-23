@@ -224,6 +224,7 @@ def bucket_route_candidates(
     *,
     per_bucket: int = 12,
     hubs: list[dict[str, Any]] | None = None,
+    prefer_attraction_cats: set[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     restaurants = [r for r in rows if str(r.get("category") or "") in RESTAURANT_CATS]
     accommodations = [
@@ -231,12 +232,46 @@ def bucket_route_candidates(
     ]
     attractions = [r for r in rows if str(r.get("category") or "") in ATTRACTION_CATS]
 
+    if prefer_attraction_cats:
+        preferred = [
+            r
+            for r in attractions
+            if str(r.get("category") or "") in prefer_attraction_cats
+        ]
+        others = [
+            r
+            for r in attractions
+            if str(r.get("category") or "") not in prefer_attraction_cats
+        ]
+        # ~85% interest match, fill remainder so geo still has options
+        n_pref = max(1, int(per_bucket * 0.85))
+        n_other = max(0, per_bucket - n_pref)
+        picked = prefer_high_rated(preferred, limit=n_pref, hubs=hubs)
+        if len(picked) < n_pref:
+            n_other += n_pref - len(picked)
+        picked.extend(prefer_high_rated(others, limit=n_other, hubs=hubs))
+        # Dedupe preserve order
+        seen: set[str] = set()
+        attr_out: list[dict[str, Any]] = []
+        for row in picked:
+            pid = str(row.get("id") or row.get("place_id") or "")
+            if pid and pid in seen:
+                continue
+            if pid:
+                seen.add(pid)
+            attr_out.append(row)
+            if len(attr_out) >= per_bucket:
+                break
+        attractions_out = attr_out
+    else:
+        attractions_out = prefer_high_rated(attractions, limit=per_bucket, hubs=hubs)
+
     return {
         "restaurants": prefer_high_rated(restaurants, limit=per_bucket, hubs=hubs),
         "accommodations": prefer_high_rated(
             accommodations, limit=per_bucket, hubs=hubs
         ),
-        "attractions": prefer_high_rated(attractions, limit=per_bucket, hubs=hubs),
+        "attractions": attractions_out,
     }
 
 

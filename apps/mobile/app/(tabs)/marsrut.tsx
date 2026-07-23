@@ -173,6 +173,30 @@ const INTEREST_OPTIONS: { id: InterestId; label: string }[] = [
   { id: 'photo', label: '📸 Fotoqrafiya' },
 ];
 
+const INTEREST_ATTRACTION_CATS: Record<InterestId, string[]> = {
+  nature: ['nature', 'waterfall', 'mountain', 'lake'],
+  history: ['historical', 'monument'],
+  food: [],
+  family: ['historical', 'nature', 'lake', 'other', 'monument'],
+  active: ['mountain', 'nature', 'waterfall'],
+  photo: ['nature', 'waterfall', 'historical', 'monument', 'lake'],
+};
+
+function preferAttractionsForInterests<T extends { category: string }>(
+  attractions: T[],
+  selected: InterestId[]
+): T[] {
+  const prefer = new Set(
+    selected.flatMap((id) => INTEREST_ATTRACTION_CATS[id] ?? [])
+  );
+  if (prefer.size === 0) {
+    return attractions;
+  }
+  const matched = attractions.filter((a) => prefer.has(a.category));
+  const rest = attractions.filter((a) => !prefer.has(a.category));
+  return [...matched, ...rest];
+}
+
 const GROUP_OPTIONS: { value: GroupOption; label: string }[] = [
   { value: 'solo', label: 'Tək' },
   { value: 'couple', label: '2 nəfər' },
@@ -507,7 +531,7 @@ export default function MarsrutScreen() {
       let accommodations: any[] = [];
       let attractions: any[] = [];
 
-      const ranked = await fetchRouteCandidates(regionId, 12, {
+      const ranked = await fetchRouteCandidates(regionId, 16, {
         interests,
       });
       if (
@@ -523,7 +547,10 @@ export default function MarsrutScreen() {
         const keep = new Set(flat.map((p) => p.id));
         restaurants = ranked.restaurants.filter((p) => keep.has(p.id));
         accommodations = ranked.accommodations.filter((p) => keep.has(p.id));
-        attractions = ranked.attractions.filter((p) => keep.has(p.id));
+        attractions = preferAttractionsForInterests(
+          ranked.attractions.filter((p) => keep.has(p.id)),
+          interests
+        );
       } else {
         const { data: poisRaw, error: poisError } = await supabase
           .from('pois')
@@ -562,26 +589,36 @@ export default function MarsrutScreen() {
           .filter((p) => ['hotel', 'hostel', 'guesthouse'].includes(p.category))
           .sort(byRating)
           .slice(0, 12);
-        attractions = pois
-          .filter((p) =>
-            [
-              'nature',
-              'waterfall',
-              'mountain',
-              'lake',
-              'historical',
-              'monument',
-              'other',
-            ].includes(p.category)
-          )
-          .sort(byRating)
-          .slice(0, 12);
+        attractions = preferAttractionsForInterests(
+          pois
+            .filter((p) =>
+              [
+                'nature',
+                'waterfall',
+                'mountain',
+                'lake',
+                'historical',
+                'monument',
+                'other',
+              ].includes(p.category)
+            )
+            .sort(byRating),
+          interests
+        ).slice(0, 16);
       }
 
       if (restaurants.length + accommodations.length + attractions.length === 0) {
         setErrorMessage('Bu bölgədə hələ yer əlavə edilməyib. Başqa rayon seçin.');
         return;
       }
+
+      const excludePoiIds = plan
+        ? plan.days.flatMap((day) =>
+            (day.stops || [])
+              .filter((s) => s.category !== 'travel' && s.poi_id)
+              .map((s) => s.poi_id)
+          )
+        : [];
 
       const data = await requestPlanRoute({
         region: regionId,
@@ -601,6 +638,8 @@ export default function MarsrutScreen() {
         fromOrigin,
         originLat: fromOrigin && userLocation ? userLocation.latitude : null,
         originLng: fromOrigin && userLocation ? userLocation.longitude : null,
+        varietySeed: Date.now(),
+        excludePoiIds,
       });
 
       const regionLabel = REGIONS.find((r) => r.id === regionId)?.label ?? regionId;

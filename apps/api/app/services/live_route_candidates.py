@@ -13,6 +13,10 @@ from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
 from app.constants.tourism_hubs import hub_as_center, hubs_for_region
 from app.constants.tourism_seeds import seeds_for_region
 from app.db import supabase
+from app.services.attraction_classify import (
+    classify_attraction_rows,
+    interest_attraction_cats,
+)
 from app.services.places_clean import clean_place
 from app.services.places_google import fetch_places_from_google
 from app.services.places_tourism_filter import filter_tourism_rows
@@ -24,26 +28,13 @@ SourceKind = Literal["google", "db", "mixed"]
 LIVE_PLAN_RADIUS_METERS = 15_000
 GOOGLE_CALL_TIMEOUT_SECONDS = 12
 
-# Mobile InterestId → Google Nearby categories to fetch (app category keys)
-_BASE_GOOGLE_CATS = ("restaurant", "hotel")
+# Always one tourist_attraction fetch (via "nature" map); reclassify after.
+_BASE_GOOGLE_CATS = ("restaurant", "hotel", "nature")
 
 
 def _interest_google_categories(interests: list[str] | None) -> list[str]:
-    keys = {str(i).strip().lower() for i in (interests or []) if str(i).strip()}
-    cats: list[str] = list(_BASE_GOOGLE_CATS)
-
-    if "history" in keys and not keys.intersection({"nature", "active", "photo"}):
-        cats.append("historical")
-    else:
-        cats.append("nature")
-
-    seen: set[str] = set()
-    out: list[str] = []
-    for c in cats:
-        if c not in seen:
-            seen.add(c)
-            out.append(c)
-    return out
+    del interests  # applied at bucket/rank time after classify
+    return list(_BASE_GOOGLE_CATS)
 
 
 def _row_from_google_place(
@@ -134,6 +125,7 @@ def _load_buckets_from_db(
     *,
     per_bucket: int,
     hubs: list[dict[str, Any]],
+    prefer_attraction_cats: set[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     db_region = REGION_DB_ID.get(region_key, region_key)
     result = (
@@ -148,10 +140,15 @@ def _load_buckets_from_db(
         .limit(200)
         .execute()
     )
-    rows = list(result.data or [])
+    rows = classify_attraction_rows(list(result.data or []))
     seeds = seeds_for_region(region_key, db_region=db_region)
     merged = filter_tourism_rows(seeds + rows, hubs=hubs)
-    return bucket_route_candidates(merged, per_bucket=per_bucket, hubs=hubs)
+    return bucket_route_candidates(
+        merged,
+        per_bucket=per_bucket,
+        hubs=hubs,
+        prefer_attraction_cats=prefer_attraction_cats,
+    )
 
 
 def _bucket_counts(buckets: dict[str, list[dict[str, Any]]]) -> int:
@@ -198,9 +195,14 @@ def load_live_route_candidates(
     source_used: SourceKind = "db"
     centers = _centers_for_region(region_key)
 
+    prefer_attr = interest_attraction_cats(interests) or None
+
     if source == "db":
         buckets = _load_buckets_from_db(
-            region_key, per_bucket=per_bucket, hubs=centers
+            region_key,
+            per_bucket=per_bucket,
+            hubs=centers,
+            prefer_attraction_cats=prefer_attr,
         )
         return {
             "region": db_region,
@@ -212,7 +214,10 @@ def load_live_route_candidates(
     if not GOOGLE_PLACES_API_KEY:
         warnings.append("google: missing GOOGLE_PLACES_API_KEY")
         buckets = _load_buckets_from_db(
-            region_key, per_bucket=per_bucket, hubs=centers
+            region_key,
+            per_bucket=per_bucket,
+            hubs=centers,
+            prefer_attraction_cats=prefer_attr,
         )
         return {
             "region": db_region,
@@ -247,12 +252,13 @@ def load_live_route_candidates(
             merged_raw.extend(rows)
 
     seeds = seeds_for_region(region_key, db_region=db_region)
-    merged = filter_tourism_rows(
-        _dedupe_rows(seeds + merged_raw),
-        hubs=centers,
-    )
+    classified = classify_attraction_rows(_dedupe_rows(seeds + merged_raw))
+    merged = filter_tourism_rows(classified, hubs=centers)
     google_buckets = bucket_route_candidates(
-        merged, per_bucket=per_bucket, hubs=centers
+        merged,
+        per_bucket=per_bucket,
+        hubs=centers,
+        prefer_attraction_cats=prefer_attr,
     )
     if _bucket_counts(google_buckets) > 0:
         source_used = "google"
@@ -260,7 +266,10 @@ def load_live_route_candidates(
     else:
         warnings.append("google: empty results — falling back to db")
         buckets = _load_buckets_from_db(
-            region_key, per_bucket=per_bucket, hubs=centers
+            region_key,
+            per_bucket=per_bucket,
+            hubs=centers,
+            prefer_attraction_cats=prefer_attr,
         )
         source_used = "db"
 
@@ -271,6 +280,7 @@ def load_live_route_candidates(
         "warnings": warnings,
         "google_raw_count": len(merged_raw),
         "hubs_used": [c.get("id") for c in centers],
+        "interest_attraction_cats": sorted(prefer_attr or []),
     }
 
 

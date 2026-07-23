@@ -78,6 +78,10 @@ export type PlanRouteInput = {
   originLng?: number | null;
   departTime?: string;
   returnByTime?: string;
+  /** Changes on each "plan again" so near-tied stops vary */
+  varietySeed?: number;
+  /** Soft-exclude POIs from the previous plan */
+  excludePoiIds?: string[];
 };
 
 function getApiBaseUrl(): string | null {
@@ -118,6 +122,8 @@ async function planRouteViaFastApi(
         originLng: input.originLng ?? null,
         departTime: input.departTime ?? '08:00',
         returnByTime: input.returnByTime ?? '21:00',
+        varietySeed: input.varietySeed ?? Date.now(),
+        excludePoiIds: input.excludePoiIds ?? [],
       }),
       signal: controller.signal,
     });
