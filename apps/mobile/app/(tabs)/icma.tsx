@@ -18,6 +18,7 @@ import {
   ListingDetailModal,
   type ListingWithCreator,
 } from '../../components/ListingDetailModal';
+import { SubscribeMenuButton } from '../../components/SubscribeMenuButton';
 import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { REGIONS } from '../../constants/regions';
 import { getErrorMessage } from '../../lib/errors';
@@ -333,6 +334,14 @@ function ListingCard({
             ) : null}
           </View>
         </View>
+
+        {listing.type === 'tour' ? (
+          <SubscribeMenuButton
+            compact
+            listingId={listing.id}
+            organizerId={listing.created_by ?? listing.creator?.id}
+          />
+        ) : null}
       </View>
     </Pressable>
   );

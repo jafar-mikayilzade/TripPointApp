@@ -1,3 +1,4 @@
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useState } from 'react';
 import {
@@ -18,9 +19,12 @@ import {
 import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { SavedRouteDetailModal } from '../../components/SavedRouteDetailModal';
 import { ShareAsTourModal } from '../../components/ShareAsTourModal';
+import { SubscribeMenuButton } from '../../components/SubscribeMenuButton';
 import { useInfoToast } from '../../components/InfoToastProvider';
 import { REGIONS } from '../../constants/regions';
 import { colors } from '../../constants/theme';
+
+const FAVORITE_YELLOW = '#E8B84A';
 import { getCategoryLabel } from '../../lib/categoryUtils';
 import { getErrorMessage } from '../../lib/errors';
 import {
@@ -34,18 +38,22 @@ import {
 } from '../../lib/savedRoutes';
 import {
   listMyNotifications,
+  listMySubscriptions,
   markNotificationRead,
+  toggleSubscription,
   type AppNotification,
+  type MySubscriptionRow,
 } from '../../lib/subscriptions';
 import { supabase } from '../../lib/supabase';
 import type { Listing, ListingType, Poi, Profile } from '../../types/database';
 
-type TabId = 'listings' | 'pois' | 'routes' | 'notifications';
+type TabId = 'listings' | 'pois' | 'routes' | 'subscriptions' | 'notifications';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'listings', label: 'Elanlar' },
   { id: 'pois', label: 'Yerlər' },
   { id: 'routes', label: 'Marşrutlar' },
+  { id: 'subscriptions', label: 'Abunə' },
   { id: 'notifications', label: 'Bildiriş' },
 ];
 
@@ -88,6 +96,7 @@ export default function SevimlilerScreen() {
   const [listings, setListings] = useState<ListingWithCreator[]>([]);
   const [pois, setPois] = useState<Poi[]>([]);
   const [routes, setRoutes] = useState<SavedRoute[]>([]);
+  const [subscriptions, setSubscriptions] = useState<MySubscriptionRow[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -101,14 +110,16 @@ export default function SevimlilerScreen() {
     setErrorMessage(null);
 
     try {
-      const [listingIds, poiIds, savedRoutes, notifs] = await Promise.all([
+      const [listingIds, poiIds, savedRoutes, subs, notifs] = await Promise.all([
         listFavoriteListingIdsOrdered(),
         listFavoritePoiIdsOrdered(),
         listSavedRoutes(),
+        listMySubscriptions(),
         listMyNotifications(),
       ]);
 
       setRoutes(savedRoutes);
+      setSubscriptions(subs);
       setNotifications(notifs);
 
       if (listingIds.length === 0) {
@@ -172,6 +183,7 @@ export default function SevimlilerScreen() {
       setListings([]);
       setPois([]);
       setRoutes([]);
+      setSubscriptions([]);
       setNotifications([]);
     } finally {
       setLoading(false);
@@ -187,6 +199,7 @@ export default function SevimlilerScreen() {
   const listingCount = listings.length;
   const poiCount = pois.length;
   const routeCount = routes.length;
+  const subscriptionCount = subscriptions.length;
   const unreadCount = notifications.filter((n) => !n.read_at).length;
 
   function tabCount(id: TabId): number {
@@ -199,7 +212,52 @@ export default function SevimlilerScreen() {
     if (id === 'routes') {
       return routeCount;
     }
+    if (id === 'subscriptions') {
+      return subscriptionCount;
+    }
     return unreadCount;
+  }
+
+  async function openSubscription(item: MySubscriptionRow) {
+    if (item.target_type === 'organizer') {
+      router.push({
+        pathname: '/(tabs)/profil',
+        params: { userId: item.target_id },
+      } as never);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('listings')
+      .select('*')
+      .eq('id', item.target_id)
+      .maybeSingle();
+    if (error || !data) {
+      setErrorMessage('Elan tapılmadı');
+      return;
+    }
+    let creator: ListingWithCreator['creator'] = null;
+    if (data.created_by) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url, phone')
+        .eq('id', data.created_by)
+        .maybeSingle();
+      creator = profile ?? null;
+    }
+    setSelectedListing({ ...data, creator });
+    setDetailVisible(true);
+  }
+
+  async function handleUnsubscribe(item: MySubscriptionRow) {
+    const result = await toggleSubscription(item.target_type, item.target_id);
+    if (result.error) {
+      setErrorMessage(result.error);
+      return;
+    }
+    if (!result.subscribed) {
+      setSubscriptions((prev) => prev.filter((s) => s.id !== item.id));
+      showInfo('Abunəlikdən çıxdınız');
+    }
   }
 
   async function handleDeleteRoute(route: SavedRoute) {
@@ -218,7 +276,7 @@ export default function SevimlilerScreen() {
       <View style={styles.header}>
         <View style={styles.titleBlock}>
           <Text style={styles.title}>sevimlilər</Text>
-          <Text style={styles.subtitle}>Bookmark, marşrut və abunəliklər</Text>
+          <Text style={styles.subtitle}>Bookmark · marşrut · abunə</Text>
         </View>
         <ProfileCornerButton />
       </View>
@@ -313,7 +371,7 @@ export default function SevimlilerScreen() {
             <View style={styles.emptyState}>
               <Text style={styles.emptyTitle}>Saxlanmış marşrut yoxdur</Text>
               <Text style={styles.emptySubtitle}>
-                Qur və ya Marşrut ekranında «Yadda saxla» basın
+                Qur və ya Marşrut ekranında bookmark ilə saxlayın
               </Text>
             </View>
           }
@@ -327,6 +385,38 @@ export default function SevimlilerScreen() {
                   ? () => setShareTourRoute(item)
                   : undefined
               }
+            />
+          )}
+        />
+      ) : tab === 'subscriptions' ? (
+        <FlatList
+          data={subscriptions}
+          keyExtractor={(item) => item.id}
+          style={styles.flex}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshing={loading}
+          onRefresh={() => void load()}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>Abunəlik yoxdur</Text>
+              <Text style={styles.emptySubtitle}>
+                Tur və ya təşkilatçıya abunə olun — burada görünəcək
+              </Text>
+            </View>
+          }
+          ListHeaderComponent={
+            subscriptions.length > 0 ? (
+              <Text style={styles.sectionHint}>
+                Abunə olduğunuz turlar və təşkilatçılar
+              </Text>
+            ) : null
+          }
+          renderItem={({ item }) => (
+            <SubscriptionCard
+              item={item}
+              onPress={() => void openSubscription(item)}
+              onUnsubscribe={() => void handleUnsubscribe(item)}
             />
           )}
         />
@@ -468,6 +558,14 @@ function FavoriteListingCard({
             </Text>
           </View>
         </View>
+
+        {listing.type === 'tour' ? (
+          <SubscribeMenuButton
+            compact
+            listingId={listing.id}
+            organizerId={listing.created_by ?? listing.creator?.id}
+          />
+        ) : null}
       </View>
     </Pressable>
   );
@@ -533,9 +631,22 @@ function SavedRouteCard({
             <View style={[styles.badge, { backgroundColor: colors.accentSoft }]}>
               <Text style={[styles.badgeText, { color: colors.accent }]}>{sourceLabel}</Text>
             </View>
-            <Text style={styles.topRight} numberOfLines={1}>
-              {stopCount} nöqtə
-            </Text>
+            <View style={styles.topRightCluster}>
+              <Text style={styles.topRight} numberOfLines={1}>
+                {stopCount} nöqtə
+              </Text>
+              <Pressable
+                style={styles.bookmarkUnsaveBtn}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  onUnsave();
+                }}
+                hitSlop={8}
+                accessibilityLabel="Sevimlidən çıxar"
+              >
+                <FontAwesome name="bookmark" size={14} color={FAVORITE_YELLOW} />
+              </Pressable>
+            </View>
           </View>
           <Text style={styles.cardTitle} numberOfLines={1}>
             {route.title}
@@ -547,8 +658,8 @@ function SavedRouteCard({
               {shared ? ' · Tur' : ''}
             </Text>
           </View>
-          <View style={styles.routeActions}>
-            {onShareAsTour ? (
+          {onShareAsTour ? (
+            <View style={styles.routeActions}>
               <Pressable
                 style={styles.routeActionBtn}
                 onPress={(e) => {
@@ -558,18 +669,85 @@ function SavedRouteCard({
               >
                 <Text style={styles.routeActionTour}>Tur kimi paylaş</Text>
               </Pressable>
-            ) : null}
-            <Pressable
-              style={styles.routeActionBtn}
-              onPress={(e) => {
-                e.stopPropagation?.();
-                onUnsave();
-              }}
-            >
-              <Text style={styles.routeActionDelete}>Çıxar</Text>
-            </Pressable>
-          </View>
+            </View>
+          ) : null}
         </View>
+      </View>
+    </Pressable>
+  );
+}
+
+function SubscriptionCard({
+  item,
+  onPress,
+  onUnsubscribe,
+}: {
+  item: MySubscriptionRow;
+  onPress: () => void;
+  onUnsubscribe: () => void;
+}) {
+  const isTour = item.target_type === 'listing';
+  const initial = item.title.charAt(0).toUpperCase() || '?';
+
+  return (
+    <Pressable style={styles.card} onPress={onPress}>
+      <View style={styles.cardInner}>
+        {item.avatar_url ? (
+          <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
+        ) : (
+          <View
+            style={[
+              styles.avatarPlaceholder,
+              { backgroundColor: isTour ? colors.successSoft : colors.accentSoft },
+            ]}
+          >
+            {isTour ? (
+              <FontAwesome name="bell" size={14} color={colors.success} />
+            ) : (
+              <Text style={styles.avatarInitial}>{initial}</Text>
+            )}
+          </View>
+        )}
+        <View style={styles.cardBody}>
+          <View style={styles.cardTop}>
+            <View
+              style={[
+                styles.badge,
+                {
+                  backgroundColor: isTour ? colors.successSoft : colors.accentSoft,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.badgeText,
+                  { color: isTour ? colors.success : colors.accent },
+                ]}
+              >
+                {isTour ? 'Tur' : 'Təşkilatçı'}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {item.title}
+          </Text>
+          {item.subtitle ? (
+            <Text style={styles.pairLeft} numberOfLines={1}>
+              {item.subtitle}
+            </Text>
+          ) : null}
+        </View>
+        <Pressable
+          style={styles.subUnsubBtn}
+          onPress={(e) => {
+            e.stopPropagation?.();
+            onUnsubscribe();
+          }}
+          hitSlop={8}
+          accessibilityLabel="Abunəlikdən çıx"
+        >
+          <FontAwesome name="bell" size={14} color={colors.accent} />
+        </Pressable>
       </View>
     </Pressable>
   );
@@ -741,6 +919,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text,
   },
+  topRightCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
+  },
   cardTitle: {
     fontSize: 13,
     fontWeight: '600',
@@ -856,7 +1040,8 @@ const styles = StyleSheet.create({
   routeActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    alignItems: 'center',
+    gap: 10,
     marginTop: 8,
   },
   routeActionBtn: {
@@ -867,10 +1052,33 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.success,
   },
-  routeActionDelete: {
+  bookmarkUnsaveBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1.5,
+    borderColor: FAVORITE_YELLOW,
+    backgroundColor: '#FFF3D0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionHint: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.danger,
+    color: colors.textMuted,
+    marginBottom: 8,
+    marginTop: 2,
+    paddingHorizontal: 2,
+  },
+  subUnsubBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   notifUnread: {
     borderColor: colors.accent,

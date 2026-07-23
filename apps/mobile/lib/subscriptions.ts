@@ -207,3 +207,106 @@ export async function markNotificationRead(id: string): Promise<void> {
     .eq('id', id)
     .eq('user_id', user.id);
 }
+
+export type MySubscriptionRow = {
+  id: string;
+  target_type: SubscriptionTargetType;
+  target_id: string;
+  created_at: string;
+  /** listing title or organizer name */
+  title: string;
+  subtitle: string | null;
+  avatar_url?: string | null;
+  listing?: {
+    id: string;
+    title: string;
+    type: string;
+    region: string | null;
+    status: string;
+  } | null;
+  organizer?: {
+    id: string;
+    full_name: string | null;
+    avatar_url: string | null;
+  } | null;
+};
+
+/** User's active subscriptions — tours + organizers they follow. */
+export async function listMySubscriptions(): Promise<MySubscriptionRow[]> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return [];
+  }
+
+  const { data: rows, error } = await supabase
+    .from('subscriptions')
+    .select('id, target_type, target_id, created_at')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(80);
+
+  if (error || !rows?.length) {
+    return [];
+  }
+
+  const listingIds = rows
+    .filter((r) => r.target_type === 'listing')
+    .map((r) => r.target_id);
+  const organizerIds = rows
+    .filter((r) => r.target_type === 'organizer')
+    .map((r) => r.target_id);
+
+  const [listingsRes, organizersRes] = await Promise.all([
+    listingIds.length
+      ? supabase
+          .from('listings')
+          .select('id, title, type, region, status')
+          .in('id', listingIds)
+      : Promise.resolve({ data: [] as const, error: null }),
+    organizerIds.length
+      ? supabase
+          .from('profiles')
+          .select('id, full_name, avatar_url')
+          .in('id', organizerIds)
+      : Promise.resolve({ data: [] as const, error: null }),
+  ]);
+
+  const listingMap = new Map(
+    (listingsRes.data ?? []).map((l) => [l.id, l] as const)
+  );
+  const organizerMap = new Map(
+    (organizersRes.data ?? []).map((o) => [o.id, o] as const)
+  );
+
+  return rows.map((row) => {
+    if (row.target_type === 'listing') {
+      const listing = listingMap.get(row.target_id) ?? null;
+      return {
+        id: row.id,
+        target_type: 'listing' as const,
+        target_id: row.target_id,
+        created_at: row.created_at,
+        title: listing?.title || 'Tur',
+        subtitle: listing
+          ? `${listing.type === 'tour' ? 'Tur' : listing.type} abunəliyi`
+          : 'Tur abunəliyi',
+        listing,
+        organizer: null,
+      };
+    }
+    const organizer = organizerMap.get(row.target_id) ?? null;
+    return {
+      id: row.id,
+      target_type: 'organizer' as const,
+      target_id: row.target_id,
+      created_at: row.created_at,
+      title: organizer?.full_name?.trim() || 'Təşkilatçı',
+      subtitle: 'Təşkilatçı abunəliyi',
+      avatar_url: organizer?.avatar_url ?? null,
+      listing: null,
+      organizer,
+    };
+  });
+}

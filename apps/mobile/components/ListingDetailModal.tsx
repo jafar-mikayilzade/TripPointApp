@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { REGIONS } from '../constants/regions';
 import { FavoriteButton } from './FavoriteButton';
+import { SubscribeMenuButton } from './SubscribeMenuButton';
 import { TransientHint } from './TransientHint';
 import { notifyAdminsViaWhatsApp } from '../lib/adminNotify';
 import { getErrorMessage } from '../lib/errors';
@@ -33,11 +34,7 @@ import {
   reportListing,
   updateListingAsAdmin,
 } from '../lib/moderation';
-import {
-  isSubscribed,
-  notifyTourSubscribersUpdate,
-  toggleSubscription,
-} from '../lib/subscriptions';
+import { notifyTourSubscribersUpdate } from '../lib/subscriptions';
 import {
   openStopInMaps,
   resolveListingRouteStops,
@@ -112,11 +109,51 @@ const STATUS_META: Record<
   cancelled: { label: 'Ləğv edilib', background: colors.chip, color: colors.textSecondary },
 };
 
-const TYPE_META: Record<ListingType, { label: string; emoji: string; color: string }> = {
-  carpool: { label: 'Carpool', emoji: '🚗', color: colors.accent },
-  tour: { label: 'Tur', emoji: '🗺', color: colors.success },
-  local_service: { label: 'Yerli xidmət', emoji: '🏔', color: colors.warning },
+const TYPE_META: Record<
+  ListingType,
+  { label: string; icon: 'car' | 'map' | 'briefcase'; color: string; soft: string }
+> = {
+  carpool: {
+    label: 'Carpool',
+    icon: 'car',
+    color: colors.accent,
+    soft: colors.accentSoft,
+  },
+  tour: {
+    label: 'Tur',
+    icon: 'map',
+    color: colors.success,
+    soft: colors.successSoft,
+  },
+  local_service: {
+    label: 'Yerli xidmət',
+    icon: 'briefcase',
+    color: colors.warning,
+    soft: colors.warningSoft,
+  },
 };
+
+function InfoFact({
+  icon,
+  label,
+  value,
+}: {
+  icon: 'map-marker' | 'calendar' | 'users' | 'money' | 'road' | 'refresh' | 'map';
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.infoFact}>
+      <View style={styles.infoIconWrap}>
+        <FontAwesome name={icon} size={13} color={colors.accent} />
+      </View>
+      <View style={styles.infoFactBody}>
+        <Text style={styles.infoFactLabel}>{label}</Text>
+        <Text style={styles.infoFactValue}>{value}</Text>
+      </View>
+    </View>
+  );
+}
 
 function formatDate(value: string | null): string {
   if (!value) {
@@ -201,9 +238,6 @@ export function ListingDetailModal({
   const [updatingParticipantId, setUpdatingParticipantId] = useState<string | null>(null);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [subscribedTour, setSubscribedTour] = useState(false);
-  const [subscribedOrganizer, setSubscribedOrganizer] = useState(false);
-  const [subBusy, setSubBusy] = useState(false);
 
   const fetchParticipants = useCallback(async () => {
     if (!listing) {
@@ -320,8 +354,6 @@ export function ListingDetailModal({
       setRouteStops([]);
       setRouteListOpen(false);
       setCreatorRating(null);
-      setSubscribedTour(false);
-      setSubscribedOrganizer(false);
 
       const {
         data: { user },
@@ -333,17 +365,7 @@ export function ListingDetailModal({
 
       setCurrentUserId(user?.id ?? null);
 
-      const subChecks =
-        user && listing!.type === 'tour'
-          ? Promise.all([
-              isSubscribed('listing', listing!.id),
-              listing!.created_by && listing!.created_by !== user.id
-                ? isSubscribed('organizer', listing!.created_by)
-                : Promise.resolve(false),
-            ])
-          : Promise.resolve([false, false] as const);
-
-      const [listingRatingsResult, routePoisResult, subResult, routeStopsResult] =
+      const [listingRatingsResult, routePoisResult, routeStopsResult] =
         await Promise.all([
           supabase
             .from('ratings')
@@ -355,7 +377,6 @@ export function ListingDetailModal({
                 p_listing_id: listing!.id,
               })
             : Promise.resolve({ data: null, error: null }),
-          subChecks,
           listing!.type === 'tour' || listing!.type === 'carpool'
             ? supabase
                 .from('listings')
@@ -368,9 +389,6 @@ export function ListingDetailModal({
       if (!isActive) {
         return;
       }
-
-      setSubscribedTour(Boolean(subResult[0]));
-      setSubscribedOrganizer(Boolean(subResult[1]));
 
       const resolvedStops = resolveListingRouteStops({
         route_stops: routeStopsResult.error
@@ -628,42 +646,6 @@ export function ListingDetailModal({
     onDeleted?.();
   }
 
-  async function handleToggleTourSub() {
-    if (!listing || subBusy || currentUserId === listing.created_by) {
-      return;
-    }
-    setSubBusy(true);
-    const result = await toggleSubscription('listing', listing.id);
-    setSubBusy(false);
-    if (result.error) {
-      setErrorMessage(result.error);
-      return;
-    }
-    setSubscribedTour(result.subscribed);
-    showInfoToast(
-      result.subscribed ? 'Tura abunə oldunuz' : 'Tur abunəliyindən çıxdınız'
-    );
-  }
-
-  async function handleToggleOrganizerSub() {
-    if (!listing?.created_by || subBusy || currentUserId === listing.created_by) {
-      return;
-    }
-    setSubBusy(true);
-    const result = await toggleSubscription('organizer', listing.created_by);
-    setSubBusy(false);
-    if (result.error) {
-      setErrorMessage(result.error);
-      return;
-    }
-    setSubscribedOrganizer(result.subscribed);
-    showInfoToast(
-      result.subscribed
-        ? 'Təşkilatçıya abunə oldunuz'
-        : 'Təşkilatçı abunəliyindən çıxdınız'
-    );
-  }
-
   if (!listing) {
     return null;
   }
@@ -684,23 +666,29 @@ export function ListingDetailModal({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={[styles.sheet, { paddingBottom: bottomSafe }]}>
+          <View style={styles.handle} />
           <View style={styles.sheetHeader}>
-            <FavoriteButton targetType="listing" targetId={listing.id} />
+            <FavoriteButton targetType="listing" targetId={listing.id} size={18} />
             <Pressable onPress={onClose} style={styles.closeButton} hitSlop={12}>
-              <FontAwesome name="times" size={18} color={colors.text} />
+              <FontAwesome name="times" size={16} color={colors.text} />
             </Pressable>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-            <View style={[styles.badge, { backgroundColor: `${meta.color}22` }]}>
-              <Text style={[styles.badgeText, { color: meta.color }]}>
-                {meta.emoji} {meta.label}
-              </Text>
+            <View style={[styles.badge, { backgroundColor: meta.soft }]}>
+              <FontAwesome name={meta.icon} size={11} color={meta.color} />
+              <Text style={[styles.badgeText, { color: meta.color }]}>{meta.label}</Text>
             </View>
 
             <Text style={styles.title} numberOfLines={2} ellipsizeMode="tail">
               {listing.title}
             </Text>
+
+            {listing.description ? (
+              <View style={styles.descriptionCard}>
+                <Text style={styles.descriptionText}>{listing.description}</Text>
+              </View>
+            ) : null}
 
             <View style={styles.creatorActionsRow}>
               <Pressable
@@ -760,79 +748,74 @@ export function ListingDetailModal({
 
             <Text style={styles.sectionLabel}>Məlumat</Text>
 
-            {listing.type === 'carpool' ? (
-              <>
-                <Text style={styles.detailLine}>📍 Haradan: {listing.origin_text || '—'}</Text>
-                <Text style={styles.detailLine}>📍 Haraya: {listing.destination_text || '—'}</Text>
-                <Text style={styles.detailLine}>📅 Nə vaxt: {formatDate(listing.departure_at)}</Text>
-                <Text style={styles.detailLine}>
-                  💺 Qalan yer: {spotsLeft} / {capacity || '—'}
-                </Text>
-                <Text style={styles.detailLine}>💰 Qiymət: {formatPrice(listing)}</Text>
-                <Pressable
-                  style={styles.routeToggle}
-                  onPress={() => setRouteListOpen((open) => !open)}
-                >
-                  <Text style={styles.routeToggleText}>
-                    {routeListOpen ? '▾' : '▸'} Marşrut siyahısına bax
-                    {routeStops.length > 0
-                      ? ` (${routeStops.length})`
-                      : routePois.length > 0
-                        ? ` (${routePois.length})`
-                        : ''}
-                  </Text>
-                </Pressable>
-                {routeListOpen ? (
-                  loadingExtras ? (
-                    <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
-                  ) : routeStops.length > 0 ? (
-                    routeStops.map((stop, index) => (
-                      <Pressable
-                        key={`${stop.name}-${index}`}
-                        style={styles.poiItemRow}
-                        onPress={() =>
-                          void openStopInMaps(stop).catch((err) =>
-                            setErrorMessage(getErrorMessage(err))
-                          )
-                        }
-                      >
-                        <Text style={styles.poiItem}>
-                          {index + 1}. {stop.name}
-                        </Text>
-                        <Text style={styles.poiMapsLink}>
-                          {stop.poi_id ? 'App' : 'Maps'}
-                        </Text>
-                      </Pressable>
-                    ))
-                  ) : routePois.length === 0 ? null : (
-                    routePois.map((name, index) => (
-                      <Text key={`${name}-${index}`} style={styles.poiItem}>
-                        • {name}
-                      </Text>
-                    ))
-                  )
-                ) : null}
-              </>
-            ) : null}
+            <View style={styles.infoCard}>
+              {listing.type === 'carpool' ? (
+                <>
+                  <InfoFact icon="map-marker" label="Haradan" value={listing.origin_text || '—'} />
+                  <InfoFact
+                    icon="map-marker"
+                    label="Haraya"
+                    value={listing.destination_text || '—'}
+                  />
+                  <InfoFact
+                    icon="calendar"
+                    label="Nə vaxt"
+                    value={formatDate(listing.departure_at)}
+                  />
+                  <InfoFact
+                    icon="users"
+                    label="Qalan yer"
+                    value={`${spotsLeft} / ${capacity || '—'}`}
+                  />
+                  <InfoFact icon="money" label="Qiymət" value={formatPrice(listing)} />
+                </>
+              ) : null}
 
-            {listing.type === 'tour' ? (
+              {listing.type === 'tour' ? (
+                <>
+                  <InfoFact icon="map" label="Region" value={regionLabel} />
+                  <InfoFact
+                    icon="calendar"
+                    label="Nə vaxt"
+                    value={formatDate(listing.departure_at)}
+                  />
+                  <InfoFact
+                    icon="users"
+                    label="İştirakçı"
+                    value={`${joinedCount} / ${capacity || '—'}`}
+                  />
+                  <InfoFact icon="money" label="Qiymət" value={formatPrice(listing)} />
+                </>
+              ) : null}
+
+              {listing.type === 'local_service' ? (
+                <>
+                  <InfoFact icon="map" label="Region" value={regionLabel} />
+                  <InfoFact icon="money" label="Qiymət" value={formatPrice(listing)} />
+                  {listing.is_recurring ? (
+                    <InfoFact icon="refresh" label="Rejim" value="Daimi xidmət" />
+                  ) : null}
+                </>
+              ) : null}
+            </View>
+
+            {listing.type === 'tour' || listing.type === 'carpool' ? (
               <>
-                <Text style={styles.detailLine}>📍 Region: {regionLabel}</Text>
-                <Text style={styles.detailLine}>📅 Nə vaxt: {formatDate(listing.departure_at)}</Text>
-                <Text style={styles.detailLine}>
-                  👥 İştirakçı: {joinedCount} / {capacity || '—'}
-                </Text>
-                <Text style={styles.detailLine}>💰 Qiymət: {formatPrice(listing)}</Text>
                 <Pressable
                   style={styles.routeToggle}
                   onPress={() => setRouteListOpen((open) => !open)}
                 >
+                  <FontAwesome
+                    name={routeListOpen ? 'chevron-down' : 'chevron-right'}
+                    size={11}
+                    color={colors.accent}
+                  />
                   <Text style={styles.routeToggleText}>
-                    {routeListOpen ? '▾' : '▸'} Marşrut siyahısına bax
+                    Marşrut
                     {routeStops.length > 0
-                      ? ` (${routeStops.length})`
+                      ? ` · ${routeStops.length}`
                       : routePois.length > 0
-                        ? ` (${routePois.length})`
+                        ? ` · ${routePois.length}`
                         : ''}
                   </Text>
                 </Pressable>
@@ -840,86 +823,56 @@ export function ListingDetailModal({
                   loadingExtras ? (
                     <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
                   ) : routeStops.length > 0 ? (
-                    routeStops.map((stop, index) => (
-                      <Pressable
-                        key={`${stop.name}-${index}`}
-                        style={styles.poiItemRow}
-                        onPress={() =>
-                          void openStopInMaps(stop).catch((err) =>
-                            setErrorMessage(getErrorMessage(err))
-                          )
-                        }
-                      >
-                        <Text style={styles.poiItem}>
-                          {index + 1}. {stop.name}
-                        </Text>
-                        <Text style={styles.poiMapsLink}>
-                          {stop.poi_id ? 'App' : 'Maps'}
-                        </Text>
-                      </Pressable>
-                    ))
+                    <View style={styles.routeListCard}>
+                      {routeStops.map((stop, index) => (
+                        <Pressable
+                          key={`${stop.name}-${index}`}
+                          style={[
+                            styles.poiItemRow,
+                            index < routeStops.length - 1 && styles.poiItemBorder,
+                          ]}
+                          onPress={() =>
+                            void openStopInMaps(stop).catch((err) =>
+                              setErrorMessage(getErrorMessage(err))
+                            )
+                          }
+                        >
+                          <View style={styles.poiIndex}>
+                            <Text style={styles.poiIndexText}>{index + 1}</Text>
+                          </View>
+                          <Text style={styles.poiItem} numberOfLines={2}>
+                            {stop.name}
+                          </Text>
+                          <FontAwesome name="map-marker" size={13} color={colors.accent} />
+                        </Pressable>
+                      ))}
+                    </View>
                   ) : routePois.length === 0 ? null : (
-                    routePois.map((name, index) => (
-                      <Text key={`${name}-${index}`} style={styles.poiItem}>
-                        • {name}
-                      </Text>
-                    ))
+                    <View style={styles.routeListCard}>
+                      {routePois.map((name, index) => (
+                        <Text
+                          key={`${name}-${index}`}
+                          style={[styles.poiItem, styles.poiItemPad]}
+                        >
+                          {index + 1}. {name}
+                        </Text>
+                      ))}
+                    </View>
                   )
                 ) : null}
               </>
             ) : null}
 
             {listing.type === 'tour' && !isOwner && currentUserId ? (
-              <View style={styles.subscribeRow}>
-                <Pressable
-                  style={[
-                    styles.subscribeBtn,
-                    subscribedTour && styles.subscribeBtnActive,
-                    subBusy && styles.buttonDisabled,
-                  ]}
-                  onPress={() => void handleToggleTourSub()}
-                  disabled={subBusy}
-                >
-                  <Text
-                    style={[
-                      styles.subscribeBtnText,
-                      subscribedTour && styles.subscribeBtnTextActive,
-                    ]}
-                  >
-                    {subscribedTour ? 'Tur abunəliyi ✓' : 'Tura abunə ol'}
-                  </Text>
-                </Pressable>
-                {listing.created_by ? (
-                  <Pressable
-                    style={[
-                      styles.subscribeBtn,
-                      subscribedOrganizer && styles.subscribeBtnActive,
-                      subBusy && styles.buttonDisabled,
-                    ]}
-                    onPress={() => void handleToggleOrganizerSub()}
-                    disabled={subBusy}
-                  >
-                    <Text
-                      style={[
-                        styles.subscribeBtnText,
-                        subscribedOrganizer && styles.subscribeBtnTextActive,
-                      ]}
-                    >
-                      {subscribedOrganizer ? 'Təşkilatçı ✓' : 'Təşkilatçıya abunə'}
-                    </Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            ) : null}
-
-            {listing.type === 'local_service' ? (
-              <>
-                <Text style={styles.detailLine}>📍 Region: {regionLabel}</Text>
-                <Text style={styles.detailLine}>💰 Qiymət: {formatPrice(listing)}</Text>
-                {listing.is_recurring ? (
-                  <Text style={styles.detailLine}>🔄 Daimi xidmət</Text>
-                ) : null}
-              </>
+              <SubscribeMenuButton
+                expandable
+                listingId={listing.id}
+                organizerId={
+                  listing.created_by && listing.created_by !== currentUserId
+                    ? listing.created_by
+                    : null
+                }
+              />
             ) : null}
 
             {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
@@ -1216,15 +1169,23 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: colors.overlay,
   },
   sheet: {
-    maxHeight: '90%',
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingTop: 12,
+    maxHeight: '92%',
+    backgroundColor: colors.bg,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingTop: 8,
     overflow: 'hidden',
+  },
+  handle: {
+    alignSelf: 'center',
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    marginBottom: 4,
   },
   toastHost: {
     position: 'absolute',
@@ -1243,7 +1204,7 @@ const styles = StyleSheet.create({
   },
   sheetHeader: {
     position: 'absolute',
-    top: 14,
+    top: 18,
     right: 14,
     zIndex: 2,
     flexDirection: 'row',
@@ -1251,15 +1212,19 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   content: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
+    paddingTop: 8,
     paddingBottom: 80,
     flexGrow: 1,
   },
   badge: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     borderRadius: 999,
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 5,
     marginBottom: 12,
   },
   badgeText: {
@@ -1271,7 +1236,90 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.text,
     marginBottom: 12,
-    paddingRight: 36,
+    paddingRight: 88,
+    letterSpacing: -0.3,
+  },
+  descriptionCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  descriptionText: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.textSecondary,
+  },
+  infoCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    marginBottom: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  infoFact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  infoIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoFactBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  infoFactLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginBottom: 2,
+  },
+  infoFactValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  routeListCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    marginBottom: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    overflow: 'hidden',
+  },
+  poiIndex: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  poiIndexText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.accent,
+  },
+  poiItemBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.borderSoft,
+  },
+  poiItemPad: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginLeft: 0,
   },
   creatorActionsRow: {
     flexDirection: 'row',
@@ -1349,41 +1397,36 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textMuted,
     textTransform: 'uppercase',
+    letterSpacing: 0.4,
     marginBottom: 8,
-  },
-  detailLine: {
-    fontSize: 14,
-    color: colors.chipText,
-    marginBottom: 6,
   },
   routeToggle: {
     marginTop: 4,
-    marginBottom: 6,
-    paddingVertical: 6,
+    marginBottom: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   routeToggleText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
     color: colors.accent,
   },
   poiItem: {
     flex: 1,
     fontSize: 13,
-    color: colors.textSecondary,
-    marginLeft: 8,
+    fontWeight: '600',
+    color: colors.text,
     marginBottom: 0,
   },
   poiItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingVertical: 4,
-    paddingRight: 4,
-  },
-  poiMapsLink: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.accent,
+    gap: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
   },
   muted: {
     fontSize: 13,
@@ -1393,33 +1436,6 @@ const styles = StyleSheet.create({
   inlineLoader: {
     alignSelf: 'flex-start',
     marginBottom: 8,
-  },
-  subscribeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 10,
-    marginBottom: 4,
-  },
-  subscribeBtn: {
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-  },
-  subscribeBtnActive: {
-    backgroundColor: colors.successSoft,
-    borderColor: colors.success,
-  },
-  subscribeBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  subscribeBtnTextActive: {
-    color: colors.success,
   },
   actions: {
     marginTop: 16,
