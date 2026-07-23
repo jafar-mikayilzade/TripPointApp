@@ -55,6 +55,8 @@ export type Profile = {
   bio: string | null;
   rating_avg: number | null;
   email_verified_at: string | null;
+  telegram_chat_id?: string | null;
+  telegram_linked_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -307,6 +309,27 @@ export type Database = {
         Row: Profile;
         Insert: Partial<Profile> & Pick<Profile, 'id'>;
         Update: Partial<Profile>;
+        Relationships: [];
+      };
+      telegram_link_codes: {
+        Row: {
+          code: string;
+          user_id: string;
+          expires_at: string;
+          created_at: string;
+        };
+        Insert: {
+          code: string;
+          user_id: string;
+          expires_at: string;
+          created_at?: string;
+        };
+        Update: Partial<{
+          code: string;
+          user_id: string;
+          expires_at: string;
+          created_at: string;
+        }>;
         Relationships: [];
       };
       pois: {

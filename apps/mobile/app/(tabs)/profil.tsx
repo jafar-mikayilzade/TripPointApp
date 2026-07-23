@@ -43,6 +43,7 @@ import {
   validateTextWordPatterns,
 } from '../../lib/formValidation';
 import { signOutEverywhere } from '../../lib/googleAuth';
+import { startTelegramLink } from '../../lib/telegramLink';
 import { supabase } from '../../lib/supabase';
 import { uploadImage } from '../../lib/uploadImage';
 import { useIsAdmin } from '../../lib/useIsAdmin';
@@ -804,14 +805,18 @@ export default function ProfilScreen() {
             <View style={styles.actionColumn}>
               <View style={styles.actionRow}>
                 <Pressable style={styles.primaryButton} onPress={openEditModal}>
-                  <Text style={styles.primaryButtonText}>Redaktə et</Text>
+                  <Text style={styles.primaryButtonText} numberOfLines={1}>
+                    Redaktə et
+                  </Text>
                 </Pressable>
                 <Pressable
                   style={styles.splitBillButton}
                   onPress={() => router.push('/split-bill' as never)}
                 >
                   <FontAwesome name="money" size={13} color="#fff" />
-                  <Text style={styles.splitBillButtonText}>Xərc bölüşdürücü</Text>
+                  <Text style={styles.splitBillButtonText} numberOfLines={1}>
+                    Xərc bölüşdürücü
+                  </Text>
                 </Pressable>
               </View>
               {isAdmin ? (
@@ -823,6 +828,50 @@ export default function ProfilScreen() {
                   <Text style={styles.splitBillButtonText}>Admin nəzarəti</Text>
                 </Pressable>
               ) : null}
+              <Pressable
+                style={[
+                  styles.telegramButton,
+                  profile.telegram_chat_id ? styles.telegramButtonLinked : null,
+                ]}
+                onPress={() => {
+                  void (async () => {
+                    if (profile.telegram_chat_id) {
+                      Alert.alert(
+                        'Telegram bağlıdır',
+                        'Yenidən bağlamaq üçün botda köhnə sessiya əvəzinə app-dən yenidən «Telegram bağla» aça bilərsiniz.',
+                        [
+                          { text: 'Bağla', style: 'cancel' },
+                          {
+                            text: 'Yenidən bağla',
+                            onPress: () => {
+                              void (async () => {
+                                const result = await startTelegramLink();
+                                if (result.error) {
+                                  setErrorMessage(result.error);
+                                }
+                              })();
+                            },
+                          },
+                        ]
+                      );
+                      return;
+                    }
+                    const result = await startTelegramLink();
+                    if (result.error) {
+                      setErrorMessage(result.error);
+                    }
+                  })();
+                }}
+              >
+                <FontAwesome
+                  name="telegram"
+                  size={14}
+                  color="#fff"
+                />
+                <Text style={styles.splitBillButtonText}>
+                  {profile.telegram_chat_id ? 'Telegram bağlıdır' : 'Telegram bağla'}
+                </Text>
+              </Pressable>
             </View>
           ) : profile.phone ? (
             <Pressable style={styles.whatsappButton} onPress={openWhatsApp}>
@@ -1351,6 +1400,7 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     width: '100%',
   },
@@ -1361,13 +1411,17 @@ const styles = StyleSheet.create({
   },
   bottomActionRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     width: '100%',
     marginTop: 16,
     marginBottom: 8,
   },
   splitBillButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '47%',
+    minWidth: 0,
+    maxWidth: '100%',
     backgroundColor: colors.accent,
     borderRadius: 10,
     paddingVertical: 10,
@@ -1387,23 +1441,43 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  splitBillButtonText: {
-    color: colors.textOnAccent,
-    fontWeight: '700',
-    fontSize: 12,
+  telegramButton: {
+    width: '100%',
+    backgroundColor: '#229ED9',
+    borderRadius: 10,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  telegramButtonLinked: {
+    backgroundColor: '#1a7aa8',
   },
   primaryButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '47%',
+    minWidth: 0,
+    maxWidth: '100%',
     backgroundColor: colors.accent,
     borderRadius: 10,
     paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 8,
   },
   primaryButtonText: {
     color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 12,
+    flexShrink: 1,
+    textAlign: 'center',
+  },
+  splitBillButtonText: {
+    color: colors.textOnAccent,
+    fontWeight: '700',
+    fontSize: 12,
+    flexShrink: 1,
   },
   dangerButton: {
     flex: 1,

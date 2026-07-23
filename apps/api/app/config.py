@@ -53,9 +53,12 @@ _raw_tg_token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
 TELEGRAM_BOT_TOKEN = _raw_tg_token.strip('"').strip("'") or None
 _raw_tg_chat = (os.getenv("TELEGRAM_CHAT_ID") or "").strip()
 TELEGRAM_CHAT_ID = _raw_tg_chat.strip('"').strip("'") or None
-# Optional: if set, /api/telegram/* requires header X-Notify-Secret
+# Optional: if set, /api/telegram/test|notify requires header X-Notify-Secret
 _raw_tg_secret = (os.getenv("TELEGRAM_NOTIFY_SECRET") or "").strip()
 TELEGRAM_NOTIFY_SECRET = _raw_tg_secret.strip('"').strip("'") or None
+# Optional: Telegram setWebhook secret_token → header X-Telegram-Bot-Api-Secret-Token
+_raw_tg_webhook = (os.getenv("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+TELEGRAM_WEBHOOK_SECRET = _raw_tg_webhook.strip('"').strip("'") or None
 
 
 def validate_settings() -> None:
