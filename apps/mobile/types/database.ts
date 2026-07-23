@@ -332,6 +332,30 @@ export type Database = {
         }>;
         Relationships: [];
       };
+      telegram_users: {
+        Row: {
+          telegram_chat_id: string;
+          linked_user_id: string | null;
+          username: string | null;
+          created_at: string;
+          last_seen_at: string;
+        };
+        Insert: {
+          telegram_chat_id: string;
+          linked_user_id?: string | null;
+          username?: string | null;
+          created_at?: string;
+          last_seen_at?: string;
+        };
+        Update: Partial<{
+          telegram_chat_id: string;
+          linked_user_id: string | null;
+          username: string | null;
+          created_at: string;
+          last_seen_at: string;
+        }>;
+        Relationships: [];
+      };
       pois: {
         Row: Poi;
         Insert: Pick<Poi, 'name' | 'category' | 'region' | 'lat' | 'lng' | 'submitted_by'> &

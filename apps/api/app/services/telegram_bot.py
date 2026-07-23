@@ -1,6 +1,8 @@
-"""Telegram user bot — link account + AI/manual route (MVP in-memory sessions).
+"""Telegram user bot — guest chat_id + optional app link + AI/manual routes.
 
+App is optional: /start alone opens the menu. App link merges profiles later.
 Production note: replace _SESSIONS with DB/Redis for multi-worker Railway.
+# TODO: optional email OTP verification (not required for Faza 1).
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ MAX_MANUAL_STOPS = 8
 BTN_AI = "🤖 AI marşrut"
 BTN_MANUAL = "🗺️ Manual marşrut"
 BTN_HELP = "ℹ️ Kömək"
+BTN_LINK_APP = "🔗 App hesabı bağla"
 BTN_CANCEL = "❌ Ləğv et"
 BTN_DONE = "✅ Hazır"
 
@@ -73,7 +76,7 @@ INTEREST_MAP: dict[str, str] = {
 MAIN_KEYBOARD: dict[str, Any] = {
     "keyboard": [
         [{"text": BTN_AI}, {"text": BTN_MANUAL}],
-        [{"text": BTN_HELP}],
+        [{"text": BTN_HELP}, {"text": BTN_LINK_APP}],
     ],
     "resize_keyboard": True,
 }
@@ -139,11 +142,27 @@ def _parse_region(text: str) -> str | None:
 
 
 def _lookup_user_id(chat_id: str | int) -> str | None:
+    """Optional app profile linked to this Telegram chat."""
+    chat_s = str(chat_id)
+    try:
+        res = (
+            supabase.table("telegram_users")
+            .select("linked_user_id")
+            .eq("telegram_chat_id", chat_s)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if rows and rows[0].get("linked_user_id"):
+            return str(rows[0]["linked_user_id"])
+    except Exception:
+        logger.exception("lookup telegram_users.linked_user_id failed")
+
     try:
         res = (
             supabase.table("profiles")
             .select("id")
-            .eq("telegram_chat_id", str(chat_id))
+            .eq("telegram_chat_id", chat_s)
             .limit(1)
             .execute()
         )
@@ -152,8 +171,45 @@ def _lookup_user_id(chat_id: str | int) -> str | None:
             return None
         return str(rows[0]["id"])
     except Exception:
-        logger.exception("lookup telegram_chat_id failed")
+        logger.exception("lookup profiles.telegram_chat_id failed")
         return None
+
+
+def _ensure_telegram_user(
+    chat_id: str | int,
+    *,
+    username: str | None = None,
+) -> None:
+    """Upsert guest row by chat_id. App link not required. TODO: email OTP later."""
+    chat_s = str(chat_id)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    payload: dict[str, Any] = {
+        "telegram_chat_id": chat_s,
+        "last_seen_at": now_iso,
+    }
+    if username:
+        payload["username"] = username
+    try:
+        existing = (
+            supabase.table("telegram_users")
+            .select("telegram_chat_id")
+            .eq("telegram_chat_id", chat_s)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            update_payload = {"last_seen_at": now_iso}
+            if username:
+                update_payload["username"] = username
+            supabase.table("telegram_users").update(update_payload).eq(
+                "telegram_chat_id", chat_s
+            ).execute()
+        else:
+            payload["created_at"] = now_iso
+            supabase.table("telegram_users").insert(payload).execute()
+    except Exception:
+        # Table may not be migrated yet — bot still works in-memory
+        logger.warning("ensure telegram_users failed (migration pending?)", exc_info=True)
 
 
 def _link_account(chat_id: str | int, code: str) -> tuple[bool, str]:
@@ -188,19 +244,31 @@ def _link_account(chat_id: str | int, code: str) -> tuple[bool, str]:
 
         user_id = str(row["user_id"])
         chat_s = str(chat_id)
+        now_iso = datetime.now(timezone.utc).isoformat()
 
         # Detach this chat from any other profile
         supabase.table("profiles").update(
             {"telegram_chat_id": None, "telegram_linked_at": None}
         ).eq("telegram_chat_id", chat_s).execute()
 
-        now_iso = datetime.now(timezone.utc).isoformat()
         supabase.table("profiles").update(
             {"telegram_chat_id": chat_s, "telegram_linked_at": now_iso}
         ).eq("id", user_id).execute()
 
+        # Clear previous link on telegram_users for this profile; bind this chat
+        try:
+            supabase.table("telegram_users").update({"linked_user_id": None}).eq(
+                "linked_user_id", user_id
+            ).execute()
+            _ensure_telegram_user(chat_id)
+            supabase.table("telegram_users").update({"linked_user_id": user_id}).eq(
+                "telegram_chat_id", chat_s
+            ).execute()
+        except Exception:
+            logger.warning("telegram_users link update failed", exc_info=True)
+
         supabase.table("telegram_link_codes").delete().eq("code", code_clean).execute()
-        return True, "Hesab bağlandı ✅ TripPoint menyusundan seçin."
+        return True, "App hesabı bağlandı ✅ Marşrutlar əvvəlki kimi işləyir."
     except Exception:
         logger.exception("link_account failed")
         return False, "Bağlama alınmadı. Bir az sonra yenidən yoxlayın."
@@ -208,10 +276,30 @@ def _link_account(chat_id: str | int, code: str) -> tuple[bool, str]:
 
 def _help_text() -> str:
     return (
-        "TripPoint bot\n\n"
+        "TripPoint bot (app lazım deyil)\n\n"
         f"{BTN_AI} — region, gün, büdcə, maraqlar → AI marşrut\n"
-        f"{BTN_MANUAL} — region + stop siyahısı (xəritə app-də)\n\n"
-        "Hesabı bağlamaq: app → Profil → Telegram bağla"
+        f"{BTN_MANUAL} — region + stop siyahısı (xəritə app-də)\n"
+        f"{BTN_LINK_APP} — istəyə görə app hesabını birləşdir\n\n"
+        "Email OTP / telefon — sonra əlavə olunacaq."
+    )
+
+
+def _link_app_help(chat_id: str | int) -> None:
+    linked = _lookup_user_id(chat_id)
+    if linked:
+        _reply(
+            chat_id,
+            "Bu Telegram artıq app hesabına bağlıdır ✅",
+            reply_markup=MAIN_KEYBOARD,
+        )
+        return
+    _reply(
+        chat_id,
+        "App hesabı opsionaldır.\n\n"
+        "1) TripPoint app → Profil → «Telegram bağla»\n"
+        "2) Açılan botda Start / kod avtomatik gəlir\n\n"
+        "App yoxdursa da AI və manual marşrut işləyir.",
+        reply_markup=MAIN_KEYBOARD,
     )
 
 
@@ -482,38 +570,34 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
         if not text:
             return {"ok": True, "ignored": True}
 
-        # /start CODE
+        from_user = message.get("from") or {}
+        username = from_user.get("username")
+        _ensure_telegram_user(
+            chat_id,
+            username=str(username) if username else None,
+        )
+
+        # /start [CODE] — CODE optional app link; guests get menu either way
         if text.startswith("/start"):
             parts = text.split(maxsplit=1)
             code = parts[1].strip() if len(parts) > 1 else ""
+            _clear_session(chat_id)
             if code:
                 ok, msg = _link_account(chat_id, code)
-                _clear_session(chat_id)
                 if ok:
                     _show_main_menu(chat_id, msg)
                 else:
-                    _reply(chat_id, msg)
+                    _show_main_menu(
+                        chat_id,
+                        msg + "\n\nYenə də menyudan istifadə edə bilərsiniz.",
+                    )
                 return {"ok": True, "linked": ok}
 
-            user_id = _lookup_user_id(chat_id)
-            if not user_id:
-                _reply(
-                    chat_id,
-                    "Salam! Əvvəl TripPoint app-də Profil → «Telegram bağla» basın, "
-                    "sonra buraya qayıdıb /start edin.",
-                )
-                return {"ok": True, "linked": False}
-            _clear_session(chat_id)
-            _show_main_menu(chat_id, "Xoş gəldiniz!")
-            return {"ok": True}
-
-        user_id = _lookup_user_id(chat_id)
-        if not user_id:
-            _reply(
+            _show_main_menu(
                 chat_id,
-                "Hesab bağlı deyil.\nApp → Profil → Telegram bağla → botda /start CODE",
+                "Xoş gəldiniz! App lazım deyil — AI və manual marşrut buradadır.",
             )
-            return {"ok": True, "linked": False}
+            return {"ok": True, "guest": True}
 
         if text == BTN_CANCEL or text.lower() in {"ləğv", "legv", "cancel", "/cancel"}:
             _clear_session(chat_id)
@@ -522,6 +606,10 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
 
         if text == BTN_HELP or text.lower() in {"kömək", "komek", "/help", "help"}:
             _reply(chat_id, _help_text(), reply_markup=MAIN_KEYBOARD)
+            return {"ok": True}
+
+        if text == BTN_LINK_APP or text.lower() in {"bağla", "bagla", "link"}:
+            _link_app_help(chat_id)
             return {"ok": True}
 
         if text == BTN_AI:
