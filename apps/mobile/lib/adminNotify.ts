@@ -5,6 +5,8 @@ import { supabase } from './supabase';
 
 export type AdminNotifyKind = 'poi_pending' | 'photo_pending' | 'listing_report';
 
+const TELEGRAM_NOTIFY_TIMEOUT_MS = 6000;
+
 /** Admin profil telefonlarını gətirir (E.164). */
 export async function fetchAdminPhones(): Promise<string[]> {
   const { data, error } = await supabase
@@ -35,32 +37,57 @@ function buildMessage(kind: AdminNotifyKind, summary: string): string {
   return `${prefix}. ${summary}`.trim();
 }
 
-/** Fire-and-forget Telegram admin notify via FastAPI (no-op if API URL unset). */
-async function notifyAdminsViaTelegram(message: string): Promise<void> {
+/**
+ * Telegram admin notify via FastAPI.
+ * Awaited before WhatsApp so the request is not aborted when the app backgrounds.
+ */
+async function notifyAdminsViaTelegram(message: string): Promise<boolean> {
   const base = getApiBaseUrl();
   if (!base) {
-    return;
+    if (__DEV__) {
+      console.warn('[adminNotify] EXPO_PUBLIC_API_URL missing — skip Telegram');
+    }
+    return false;
   }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TELEGRAM_NOTIFY_TIMEOUT_MS);
+
   try {
-    await fetch(`${base}/api/telegram/notify`, {
+    const res = await fetch(`${base}/api/telegram/notify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: message }),
+      signal: controller.signal,
     });
-  } catch {
-    // API/Telegram optional — never block WhatsApp or UI
+    if (!res.ok) {
+      if (__DEV__) {
+        console.warn('[adminNotify] Telegram HTTP', res.status);
+      }
+      return false;
+    }
+    const json = (await res.json().catch(() => null)) as { sent?: boolean } | null;
+    return Boolean(json?.sent);
+  } catch (err) {
+    if (__DEV__) {
+      console.warn('[adminNotify] Telegram failed', err);
+    }
+    return false;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 /**
- * Adminə Telegram (API) + WhatsApp (istifadəçi göndərir).
+ * Adminə əvvəl Telegram (API), sonra WhatsApp (istifadəçi göndərir).
  */
 export async function notifyAdminsViaWhatsApp(
   kind: AdminNotifyKind,
   summary: string
-): Promise<{ opened: boolean; error: string | null }> {
+): Promise<{ opened: boolean; error: string | null; telegramSent: boolean }> {
   const message = buildMessage(kind, summary);
-  void notifyAdminsViaTelegram(message);
+  // Must finish before Linking.openURL — otherwise RN aborts the fetch on background
+  const telegramSent = await notifyAdminsViaTelegram(message);
 
   try {
     const phones = await fetchAdminPhones();
@@ -68,15 +95,16 @@ export async function notifyAdminsViaWhatsApp(
 
     if (phones.length === 0) {
       await Linking.openURL(`https://wa.me/?text=${text}`);
-      return { opened: true, error: null };
+      return { opened: true, error: null, telegramSent };
     }
 
     await Linking.openURL(`https://wa.me/${phones[0]}?text=${text}`);
-    return { opened: true, error: null };
+    return { opened: true, error: null, telegramSent };
   } catch (err) {
     return {
       opened: false,
       error: err instanceof Error ? err.message : 'WhatsApp açıla bilmədi',
+      telegramSent,
     };
   }
 }
