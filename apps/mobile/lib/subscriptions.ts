@@ -41,6 +41,42 @@ export async function isSubscribed(
   return !!data;
 }
 
+/** One query for list screens — avoids N× isSubscribed per card. */
+export async function listMySubscriptionTargetIds(): Promise<{
+  listingIds: Set<string>;
+  organizerIds: Set<string>;
+  error?: string;
+}> {
+  const empty = { listingIds: new Set<string>(), organizerIds: new Set<string>() };
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return empty;
+  }
+
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('target_type, target_id')
+    .eq('user_id', user.id)
+    .limit(200);
+
+  if (error) {
+    return { ...empty, error: error.message };
+  }
+
+  const listingIds = new Set<string>();
+  const organizerIds = new Set<string>();
+  for (const row of data ?? []) {
+    if (row.target_type === 'listing') {
+      listingIds.add(row.target_id);
+    } else if (row.target_type === 'organizer') {
+      organizerIds.add(row.target_id);
+    }
+  }
+  return { listingIds, organizerIds };
+}
+
 export async function toggleSubscription(
   targetType: SubscriptionTargetType,
   targetId: string
@@ -162,12 +198,40 @@ export async function notifyTourSubscribersUpdate(input: {
   });
 }
 
-export async function listMyNotifications(limit = 40): Promise<AppNotification[]> {
+/** Tur ləğv ediləndə — listing abunələrinə bildiriş */
+export async function notifyTourSubscribersCancelled(input: {
+  listingId: string;
+  title: string;
+  actorId: string;
+}): Promise<void> {
+  const { data } = await supabase
+    .from('subscriptions')
+    .select('user_id')
+    .eq('target_type', 'listing')
+    .eq('target_id', input.listingId);
+
+  const userIds = (data ?? [])
+    .map((r) => r.user_id)
+    .filter((id) => id !== input.actorId);
+
+  await insertNotificationsForUsers({
+    userIds,
+    kind: 'tour_cancelled',
+    title: 'Tur ləğv edildi',
+    body: `${input.title} elanı ləğv olunub.`,
+    listingId: input.listingId,
+    actorId: input.actorId,
+  });
+}
+
+export async function listMyNotifications(
+  limit = 40
+): Promise<{ data: AppNotification[]; error?: string }> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return [];
+    return { data: [] };
   }
 
   const { data, error } = await supabase
@@ -177,21 +241,23 @@ export async function listMyNotifications(limit = 40): Promise<AppNotification[]
     .order('created_at', { ascending: false })
     .limit(limit);
 
-  if (error || !data) {
-    return [];
+  if (error) {
+    return { data: [], error: error.message };
   }
 
-  return data.map((row) => ({
-    id: row.id,
-    user_id: row.user_id,
-    kind: row.kind,
-    title: row.title,
-    body: row.body,
-    listing_id: row.listing_id,
-    actor_id: row.actor_id,
-    read_at: row.read_at,
-    created_at: row.created_at,
-  }));
+  return {
+    data: (data ?? []).map((row) => ({
+      id: row.id,
+      user_id: row.user_id,
+      kind: row.kind,
+      title: row.title,
+      body: row.body,
+      listing_id: row.listing_id,
+      actor_id: row.actor_id,
+      read_at: row.read_at,
+      created_at: row.created_at,
+    })),
+  };
 }
 
 export async function markNotificationRead(id: string): Promise<void> {
@@ -232,12 +298,15 @@ export type MySubscriptionRow = {
 };
 
 /** User's active subscriptions — tours + organizers they follow. */
-export async function listMySubscriptions(): Promise<MySubscriptionRow[]> {
+export async function listMySubscriptions(): Promise<{
+  data: MySubscriptionRow[];
+  error?: string;
+}> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return [];
+    return { data: [] };
   }
 
   const { data: rows, error } = await supabase
@@ -247,8 +316,11 @@ export async function listMySubscriptions(): Promise<MySubscriptionRow[]> {
     .order('created_at', { ascending: false })
     .limit(80);
 
-  if (error || !rows?.length) {
-    return [];
+  if (error) {
+    return { data: [], error: error.message };
+  }
+  if (!rows?.length) {
+    return { data: [] };
   }
 
   const listingIds = rows
@@ -280,33 +352,35 @@ export async function listMySubscriptions(): Promise<MySubscriptionRow[]> {
     (organizersRes.data ?? []).map((o) => [o.id, o] as const)
   );
 
-  return rows.map((row) => {
-    if (row.target_type === 'listing') {
-      const listing = listingMap.get(row.target_id) ?? null;
+  return {
+    data: rows.map((row) => {
+      if (row.target_type === 'listing') {
+        const listing = listingMap.get(row.target_id) ?? null;
+        return {
+          id: row.id,
+          target_type: 'listing' as const,
+          target_id: row.target_id,
+          created_at: row.created_at,
+          title: listing?.title || 'Tur',
+          subtitle: listing
+            ? `${listing.type === 'tour' ? 'Tur' : listing.type} abunəliyi`
+            : 'Tur abunəliyi',
+          listing,
+          organizer: null,
+        };
+      }
+      const organizer = organizerMap.get(row.target_id) ?? null;
       return {
         id: row.id,
-        target_type: 'listing' as const,
+        target_type: 'organizer' as const,
         target_id: row.target_id,
         created_at: row.created_at,
-        title: listing?.title || 'Tur',
-        subtitle: listing
-          ? `${listing.type === 'tour' ? 'Tur' : listing.type} abunəliyi`
-          : 'Tur abunəliyi',
-        listing,
-        organizer: null,
+        title: organizer?.full_name?.trim() || 'Təşkilatçı',
+        subtitle: 'Təşkilatçı abunəliyi',
+        avatar_url: organizer?.avatar_url ?? null,
+        listing: null,
+        organizer,
       };
-    }
-    const organizer = organizerMap.get(row.target_id) ?? null;
-    return {
-      id: row.id,
-      target_type: 'organizer' as const,
-      target_id: row.target_id,
-      created_at: row.created_at,
-      title: organizer?.full_name?.trim() || 'Təşkilatçı',
-      subtitle: 'Təşkilatçı abunəliyi',
-      avatar_url: organizer?.avatar_url ?? null,
-      listing: null,
-      organizer,
-    };
-  });
+    }),
+  };
 }

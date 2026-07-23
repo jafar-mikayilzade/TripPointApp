@@ -15,8 +15,6 @@ import { colors, radii, shadows } from '../constants/theme';
 import { openStopInMaps } from '../lib/listingRouteStops';
 import type { SavedRoute } from '../lib/savedRoutes';
 
-const FAVORITE_YELLOW = '#E8B84A';
-
 type Props = {
   route: SavedRoute | null;
   visible: boolean;
@@ -77,7 +75,7 @@ export function SavedRouteDetailModal({
                     hitSlop={8}
                     accessibilityLabel="Sevimlidən çıxar"
                   >
-                    <FontAwesome name="bookmark" size={14} color={FAVORITE_YELLOW} />
+                    <FontAwesome name="bookmark" size={14} color={colors.favorite} />
                   </Pressable>
                 </View>
               </View>
@@ -241,7 +239,7 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 16,
     borderWidth: 1.5,
-    borderColor: FAVORITE_YELLOW,
+    borderColor: colors.favorite,
     backgroundColor: '#FFF3D0',
     alignItems: 'center',
     justifyContent: 'center',

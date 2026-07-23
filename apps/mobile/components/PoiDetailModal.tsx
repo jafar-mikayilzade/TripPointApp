@@ -22,6 +22,7 @@ import { FavoriteButton } from './FavoriteButton';
 import { TransientHint } from './TransientHint';
 import { notifyAdminsViaWhatsApp } from '../lib/adminNotify';
 import { getErrorMessage } from '../lib/errors';
+import { isDatabasePoiId } from '../lib/livePlaces';
 import {
   getCategoryColor,
   getCategoryLabel,
@@ -301,7 +302,11 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
       >
         <View style={styles.sheet}>
           <View style={styles.sheetHeader}>
-            <FavoriteButton targetType="poi" targetId={poi.id} />
+            {isDatabasePoiId(poi.id) ? (
+              <FavoriteButton targetType="poi" targetId={poi.id} />
+            ) : (
+              <View style={{ width: 42 }} />
+            )}
             <Pressable onPress={onClose} style={styles.closeButton} hitSlop={12}>
               <FontAwesome name="times" size={18} color={colors.text} />
             </Pressable>

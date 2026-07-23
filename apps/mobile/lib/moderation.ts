@@ -1,6 +1,7 @@
 import type { Listing, PoiStatus } from '../types/database';
 import { getErrorMessage } from './errors';
 import { fetchIsAdmin } from './adminMap';
+import { notifyTourSubscribersCancelled } from './subscriptions';
 import { supabase } from './supabase';
 
 type Result = { error: string | null };
@@ -94,11 +95,23 @@ export async function deleteListingAsAdminOrOwner(listingId: string): Promise<Re
       return { error: 'Daxil olmaq lazımdır' };
     }
 
+    const { data: listingMeta } = await supabase
+      .from('listings')
+      .select('title')
+      .eq('id', listingId)
+      .maybeSingle();
+    const title = listingMeta?.title?.trim() || 'Tur';
+
     const { error } = await supabase.rpc('cancel_listing', {
       p_listing_id: listingId,
     });
 
     if (!error) {
+      void notifyTourSubscribersCancelled({
+        listingId,
+        title,
+        actorId: user.id,
+      });
       return { error: null };
     }
 
@@ -131,6 +144,11 @@ export async function deleteListingAsAdminOrOwner(listingId: string): Promise<Re
         error: 'Elan silinmədi. İcazə yoxdur və ya elan tapılmadı.',
       };
     }
+    void notifyTourSubscribersCancelled({
+      listingId,
+      title,
+      actorId: user.id,
+    });
     return { error: null };
   } catch (err) {
     return { error: getErrorMessage(err) };

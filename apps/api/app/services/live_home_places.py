@@ -172,8 +172,10 @@ def load_live_home_places(
                 "weight": 1.0,
             }
         ]
-        # Include strong hubs that intersect the viewport (continuity)
+        # Cap hub fan-out in viewport mode (Google call budget)
         for hub in region_hubs:
+            if len(centers) >= 2:
+                break
             if float(hub.get("weight") or 0) < 0.85:
                 continue
             dist_km = haversine_km(

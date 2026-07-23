@@ -31,7 +31,7 @@ import { getErrorMessage } from '../../lib/errors';
 import { collectRouteStops, openRouteInGoogleMaps } from '../../lib/openNavigation';
 import { planRoute as requestPlanRoute } from '../../lib/planRoute';
 import { fetchRouteCandidates } from '../../lib/routeCandidates';
-import { saveRoute } from '../../lib/savedRoutes';
+import { saveRoute, planDaysToSavedStops } from '../../lib/savedRoutes';
 import { shareRouteText } from '../../lib/shareRoute';
 import { supabase } from '../../lib/supabase';
 import { useInfoToast } from '../../components/InfoToastProvider';
@@ -344,20 +344,7 @@ export default function MarsrutScreen() {
     }
     setSavingRoute(true);
     try {
-      const stops = plan.days.flatMap((day) =>
-        (day.stops ?? []).map((stop, index) => ({
-          day: day.day,
-          sort_order: index + 1,
-          poi_id: stop.poi_id || null,
-          name: stop.name,
-          lat: stop.lat,
-          lng: stop.lng,
-          category: stop.category,
-          time: stop.time,
-          duration: stop.duration,
-          tip: stop.tip,
-        }))
-      );
+      const stops = planDaysToSavedStops(plan.days ?? []);
       const result = await saveRoute({
         source: 'ai',
         title: `${plan.regionLabel} · ${plan.daysCount} gün`,
@@ -582,7 +569,7 @@ export default function MarsrutScreen() {
         };
 
         restaurants = pois
-          .filter((p) => ['restaurant', 'home_restaurant', 'cafe'].includes(p.category))
+          .filter((p) => ['restaurant', 'home_restaurant'].includes(p.category))
           .sort(byRating)
           .slice(0, 12);
         accommodations = pois

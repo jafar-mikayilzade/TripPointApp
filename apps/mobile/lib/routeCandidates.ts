@@ -1,5 +1,7 @@
 /** Fetch rating-ranked POI buckets from FastAPI for AI route planning. */
 
+import { getApiBaseUrl } from './apiBase';
+
 export type RouteCandidatePoi = {
   id: string;
   name: string;
@@ -20,14 +22,6 @@ export type RouteCandidateBuckets = {
   source?: string;
   warnings?: string[];
 };
-
-function getApiBaseUrl(): string | null {
-  const raw = process.env.EXPO_PUBLIC_API_URL?.trim();
-  if (!raw) {
-    return null;
-  }
-  return raw.replace(/\/+$/, '');
-}
 
 export async function fetchRouteCandidates(
   region: string,

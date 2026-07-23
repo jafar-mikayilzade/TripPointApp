@@ -1,5 +1,6 @@
 /** Home / Qur map: live Google Places via FastAPI (DB fallback on server). */
 
+import { getApiBaseUrl } from './apiBase';
 import type { Poi, PoiCategory } from '../types/database';
 
 export type LivePlace = {
@@ -32,14 +33,6 @@ export type LivePlacesQuery = {
   lng?: number;
   radius?: number;
 };
-
-function getApiBaseUrl(): string | null {
-  const raw = process.env.EXPO_PUBLIC_API_URL?.trim();
-  if (!raw) {
-    return null;
-  }
-  return raw.replace(/\/+$/, '');
-}
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

@@ -317,17 +317,23 @@ export default function HomeScreen() {
 
         if (live && live.places.length > 0) {
           const mapped = mapLiveToListItems(live.places, selectedRegionId);
-          console.log('Live places:', mapped.length, live.source, live.hubs_used);
+          if (__DEV__) {
+            console.log('Live places:', mapped.length, live.source, live.hubs_used);
+          }
           setPois(mapped);
           return;
         }
       }
 
       const mapped = await fetchPoisFromDb();
-      console.log('POI sayı (DB):', mapped.length);
+      if (__DEV__) {
+        console.log('POI sayı (DB):', mapped.length);
+      }
       setPois(mapped);
     } catch (err: unknown) {
-      console.log('Catch xətası:', err);
+      if (__DEV__) {
+        console.log('Catch xətası:', err);
+      }
       if (!silent) {
         const message = err instanceof Error ? err.message : String(err);
         setErrorMessage('Xəta: ' + message);
@@ -342,6 +348,10 @@ export default function HomeScreen() {
   const fetchViewportPlaces = useCallback(
     (region: MapRegion) => {
       if (!selectedRegionId) return;
+      // Region overview already covers zoomed-out view — skip Google spam
+      if (region.longitudeDelta > 0.45) {
+        return;
+      }
 
       if (viewportFetchTimer.current) {
         clearTimeout(viewportFetchTimer.current);
@@ -379,9 +389,11 @@ export default function HomeScreen() {
 
           const incoming = mapLiveToListItems(live.places, selectedRegionId);
           setPois((prev) => mergeLivePlacesById(prev, incoming));
-          console.log('Viewport merge:', incoming.length, tile);
+          if (__DEV__) {
+            console.log('Viewport merge:', incoming.length, tile);
+          }
         })();
-      }, 450);
+      }, 650);
     },
     [selectedRegionId, categoryFilter, mapLiveToListItems]
   );
@@ -522,7 +534,9 @@ export default function HomeScreen() {
       }
     } catch (err) {
       // Xəta olsa səssizcə keç, istifadəçini narahat etmə
-      console.log('Lokasiya xətası:', err);
+      if (__DEV__) {
+        console.log('Lokasiya xətası:', err);
+      }
     }
   };
 

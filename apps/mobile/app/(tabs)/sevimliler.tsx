@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -24,7 +24,6 @@ import { useInfoToast } from '../../components/InfoToastProvider';
 import { REGIONS } from '../../constants/regions';
 import { colors } from '../../constants/theme';
 
-const FAVORITE_YELLOW = '#E8B84A';
 import { getCategoryLabel } from '../../lib/categoryUtils';
 import { getErrorMessage } from '../../lib/errors';
 import {
@@ -108,20 +107,26 @@ export default function SevimlilerScreen() {
   const load = useCallback(async () => {
     setLoading(true);
     setErrorMessage(null);
+    const errors: string[] = [];
+
+    const [listingIds, poiIds, routesRes, subsRes, notifsRes] = await Promise.all([
+      listFavoriteListingIdsOrdered(),
+      listFavoritePoiIdsOrdered(),
+      listSavedRoutes(),
+      listMySubscriptions(),
+      listMyNotifications(),
+    ]);
+
+    setRoutes(routesRes.data);
+    if (routesRes.error) errors.push(routesRes.error);
+
+    setSubscriptions(subsRes.data);
+    if (subsRes.error) errors.push(subsRes.error);
+
+    setNotifications(notifsRes.data);
+    if (notifsRes.error) errors.push(notifsRes.error);
 
     try {
-      const [listingIds, poiIds, savedRoutes, subs, notifs] = await Promise.all([
-        listFavoriteListingIdsOrdered(),
-        listFavoritePoiIdsOrdered(),
-        listSavedRoutes(),
-        listMySubscriptions(),
-        listMyNotifications(),
-      ]);
-
-      setRoutes(savedRoutes);
-      setSubscriptions(subs);
-      setNotifications(notifs);
-
       if (listingIds.length === 0) {
         setListings([]);
       } else {
@@ -159,7 +164,12 @@ export default function SevimlilerScreen() {
           }))
         );
       }
+    } catch (err) {
+      setListings([]);
+      errors.push(getErrorMessage(err));
+    }
 
+    try {
       if (poiIds.length === 0) {
         setPois([]);
       } else {
@@ -179,15 +189,14 @@ export default function SevimlilerScreen() {
         setPois(rows);
       }
     } catch (err) {
-      setErrorMessage(getErrorMessage(err));
-      setListings([]);
       setPois([]);
-      setRoutes([]);
-      setSubscriptions([]);
-      setNotifications([]);
-    } finally {
-      setLoading(false);
+      errors.push(getErrorMessage(err));
     }
+
+    if (errors.length > 0) {
+      setErrorMessage(errors[0]);
+    }
+    setLoading(false);
   }, []);
 
   useFocusEffect(
@@ -201,6 +210,24 @@ export default function SevimlilerScreen() {
   const routeCount = routes.length;
   const subscriptionCount = subscriptions.length;
   const unreadCount = notifications.filter((n) => !n.read_at).length;
+
+  const subListingIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const row of subscriptions) {
+      if (row.target_type === 'listing') ids.add(row.target_id);
+    }
+    return ids;
+  }, [subscriptions]);
+
+  const subOrganizerIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const row of subscriptions) {
+      if (row.target_type === 'organizer') ids.add(row.target_id);
+    }
+    return ids;
+  }, [subscriptions]);
+
+  const subsReady = !loading;
 
   function tabCount(id: TabId): number {
     if (id === 'listings') {
@@ -331,6 +358,11 @@ export default function SevimlilerScreen() {
                 setSelectedListing(item);
                 setDetailVisible(true);
               }}
+              statusReady={subsReady}
+              listingSubscribed={subListingIds.has(item.id)}
+              organizerSubscribed={subOrganizerIds.has(
+                item.created_by ?? item.creator?.id ?? ''
+              )}
             />
           )}
         />
@@ -516,13 +548,20 @@ export default function SevimlilerScreen() {
 function FavoriteListingCard({
   listing,
   onPress,
+  statusReady = false,
+  listingSubscribed = false,
+  organizerSubscribed = false,
 }: {
   listing: ListingWithCreator;
   onPress: () => void;
+  statusReady?: boolean;
+  listingSubscribed?: boolean;
+  organizerSubscribed?: boolean;
 }) {
   const meta = LISTING_TYPE_META[listing.type];
   const creatorName = listing.creator?.full_name?.trim() || 'İstifadəçi';
   const region = getRegionLabel(listing.region);
+  const organizerId = listing.created_by ?? listing.creator?.id;
 
   return (
     <Pressable style={styles.card} onPress={onPress}>
@@ -563,7 +602,10 @@ function FavoriteListingCard({
           <SubscribeMenuButton
             compact
             listingId={listing.id}
-            organizerId={listing.created_by ?? listing.creator?.id}
+            organizerId={organizerId}
+            statusReady={statusReady}
+            listingSubscribed={listingSubscribed}
+            organizerSubscribed={organizerSubscribed}
           />
         ) : null}
       </View>
@@ -644,7 +686,7 @@ function SavedRouteCard({
                 hitSlop={8}
                 accessibilityLabel="Sevimlidən çıxar"
               >
-                <FontAwesome name="bookmark" size={14} color={FAVORITE_YELLOW} />
+                <FontAwesome name="bookmark" size={14} color={colors.favorite} />
               </Pressable>
             </View>
           </View>
@@ -1057,7 +1099,7 @@ const styles = StyleSheet.create({
     height: 30,
     borderRadius: 15,
     borderWidth: 1.5,
-    borderColor: FAVORITE_YELLOW,
+    borderColor: colors.favorite,
     backgroundColor: '#FFF3D0',
     alignItems: 'center',
     justifyContent: 'center',

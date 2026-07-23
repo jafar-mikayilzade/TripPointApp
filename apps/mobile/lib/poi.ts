@@ -2,9 +2,6 @@ import type { ComponentProps } from 'react';
 import type FontAwesome from '@expo/vector-icons/FontAwesome';
 
 import type { PoiCategory } from '../types/database';
-import { getCategoryEmoji as getCategoryEmojiFn } from './categoryUtils';
-
-export { getCategoryEmoji } from './categoryUtils';
 
 export const CATEGORY_COLORS: Record<PoiCategory, string> = {
   restaurant: '#C47A2C',
@@ -65,22 +62,6 @@ export function getCategoryLabel(category: PoiCategory): string {
 export function getCategoryIcon(category: PoiCategory): ComponentProps<typeof FontAwesome>['name'] {
   return CATEGORY_ICONS[category] ?? CATEGORY_ICONS.other;
 }
-
-export const CATEGORY_EMOJIS: Record<PoiCategory, string> = {
-  restaurant: getCategoryEmojiFn('restaurant'),
-  cafe: getCategoryEmojiFn('cafe'),
-  home_restaurant: getCategoryEmojiFn('home_restaurant'),
-  hotel: getCategoryEmojiFn('hotel'),
-  hostel: getCategoryEmojiFn('hostel'),
-  guesthouse: getCategoryEmojiFn('guesthouse'),
-  nature: getCategoryEmojiFn('nature'),
-  waterfall: getCategoryEmojiFn('waterfall'),
-  mountain: getCategoryEmojiFn('mountain'),
-  lake: getCategoryEmojiFn('lake'),
-  historical: getCategoryEmojiFn('historical'),
-  monument: getCategoryEmojiFn('monument'),
-  other: getCategoryEmojiFn('other'),
-};
 
 export type CategoryFilterId = 'all' | 'restaurant' | 'hotel' | 'nature' | 'historical';
 
@@ -159,6 +140,7 @@ export function parseCoordsFromGoogleMapsUrl(url: string): { lat: number; lng: n
   return null;
 }
 
+/** Admin / AddPoi — cafe omitted (tourism map ignores cafe). */
 export const POI_CATEGORY_OPTIONS: { value: PoiCategory; label: string }[] = [
   { value: 'restaurant', label: 'Restoran' },
   { value: 'hotel', label: 'Otel' },

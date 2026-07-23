@@ -36,6 +36,8 @@ export const colors = {
   whatsapp: '#25D366',
   skeleton: '#E8E9ED',
   mapAccent: '#4A8FE8',
+  /** Bookmark / sevimli accent (matches FavoriteButton) */
+  favorite: '#E8B84A',
 } as const;
 
 export const radii = {

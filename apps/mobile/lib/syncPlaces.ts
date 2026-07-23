@@ -1,5 +1,7 @@
 /** Background Places sync via FastAPI worker. Read path stays on Supabase. */
 
+import { getApiBaseUrl } from './apiBase';
+
 /** Mobile/DB PoiCategory + region-wide "all" */
 const APP_CATEGORIES = [
   'restaurant',
@@ -56,14 +58,6 @@ export type SyncPlacesResult = {
   attempted: boolean;
   error?: string;
 };
-
-function getApiBaseUrl(): string | null {
-  const raw = process.env.EXPO_PUBLIC_API_URL?.trim();
-  if (!raw) {
-    return null;
-  }
-  return raw.replace(/\/+$/, '');
-}
 
 /** Pass real app category (or all) — API maps OSM tags → DB category. */
 function mapCategoryToApi(categoryFilter: string | null | undefined): SyncCategory {

@@ -57,6 +57,60 @@ export type SaveRouteInput = {
   stops: SavedRouteStop[];
 };
 
+/** Map AI plan day stops → saved_routes.stops JSON. */
+export function planDaysToSavedStops(
+  days: Array<{
+    day: number;
+    stops?: Array<{
+      poi_id?: string;
+      name: string;
+      lat: number;
+      lng: number;
+      category?: string;
+      time?: string;
+      duration?: string;
+      tip?: string;
+    }>;
+  }>
+): SavedRouteStop[] {
+  return days.flatMap((day) =>
+    (day.stops ?? []).map((stop, index) => ({
+      day: day.day,
+      sort_order: index + 1,
+      poi_id: stop.poi_id || null,
+      name: stop.name,
+      lat: stop.lat,
+      lng: stop.lng,
+      category: stop.category,
+      time: stop.time,
+      duration: stop.duration,
+      tip: stop.tip,
+    }))
+  );
+}
+
+/** Map Qur manual stops → saved_routes.stops JSON. */
+export function manualStopsToSavedStops(
+  stops: Array<{
+    id?: string;
+    name: string;
+    lat: number;
+    lng: number;
+    category?: string;
+    source?: string;
+  }>
+): SavedRouteStop[] {
+  return stops.map((stop, index) => ({
+    sort_order: index + 1,
+    poi_id: stop.source === 'poi' ? stop.id ?? null : null,
+    name: stop.name,
+    lat: stop.lat,
+    lng: stop.lng,
+    category: stop.category,
+    source: stop.source,
+  }));
+}
+
 function mapRow(row: Record<string, unknown>): SavedRoute {
   return {
     id: String(row.id),
@@ -127,12 +181,15 @@ export async function saveRoute(
   return { id: data?.id };
 }
 
-export async function listSavedRoutes(): Promise<SavedRoute[]> {
+export async function listSavedRoutes(): Promise<{
+  data: SavedRoute[];
+  error?: string;
+}> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return [];
+    return { data: [] };
   }
 
   const { data, error } = await supabase
@@ -141,10 +198,12 @@ export async function listSavedRoutes(): Promise<SavedRoute[]> {
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
 
-  if (error || !data) {
-    return [];
+  if (error) {
+    return { data: [], error: error.message };
   }
-  return data.map((row) => mapRow(row as Record<string, unknown>));
+  return {
+    data: (data ?? []).map((row) => mapRow(row as Record<string, unknown>)),
+  };
 }
 
 export async function deleteSavedRoute(id: string): Promise<{ error?: string }> {
@@ -189,7 +248,10 @@ export async function linkSavedRouteToListing(
 
   if (error) {
     if (/listing_id/i.test(error.message)) {
-      return {};
+      return {
+        error:
+          'Tur bağlantısı saxlanmadı (listing_id migration lazımdır). Elan yaradıldı.',
+      };
     }
     return { error: error.message };
   }

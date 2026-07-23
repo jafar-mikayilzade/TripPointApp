@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { isDatabasePoiId } from './livePlaces';
 
 export type FavoriteTargetType = 'poi' | 'listing';
 
@@ -6,6 +7,9 @@ export async function isFavorited(
   targetType: FavoriteTargetType,
   targetId: string
 ): Promise<boolean> {
+  if (targetType === 'poi' && !isDatabasePoiId(targetId)) {
+    return false;
+  }
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -31,6 +35,13 @@ export async function toggleFavorite(
   targetType: FavoriteTargetType,
   targetId: string
 ): Promise<{ favorited: boolean; error?: string }> {
+  if (targetType === 'poi' && !isDatabasePoiId(targetId)) {
+    return {
+      favorited: false,
+      error:
+        'Canlı Google məkanlarını hələ sevimliyə əlavə etmək olmur.',
+    };
+  }
   const {
     data: { user },
   } = await supabase.auth.getUser();

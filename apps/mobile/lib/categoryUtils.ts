@@ -1,25 +1,5 @@
 import type { PoiCategory } from '../types/database';
 
-/** @deprecated UI üçün CategoryIcon istifadə et — yalnız köhnə mətn/paylaşım üçün. */
-export function getCategoryEmoji(category: string): string {
-  const map: Record<string, string> = {
-    restaurant: '🍽️',
-    cafe: '☕',
-    hotel: '🏨',
-    hostel: '🛏️',
-    home_restaurant: '🏠',
-    guesthouse: '🏡',
-    nature: '🌿',
-    waterfall: '💧',
-    mountain: '⛰️',
-    lake: '🏞️',
-    historical: '🏛️',
-    monument: '🗿',
-    other: '📍',
-  };
-  return map[category] || '📍';
-}
-
 export function getCategoryLabel(cat: string): string {
   const map: Record<string, string> = {
     restaurant: 'Restoran',
@@ -39,7 +19,8 @@ export function getCategoryLabel(cat: string): string {
   return map[cat] || cat;
 }
 
-export type HomeCategoryFilterId = 'all' | PoiCategory;
+/** Home map chips — cafe excluded (noisy; live/DB also skip cafe). */
+export type HomeCategoryFilterId = 'all' | Exclude<PoiCategory, 'cafe'>;
 
 export const HOME_CATEGORY_FILTERS: {
   id: HomeCategoryFilterId;

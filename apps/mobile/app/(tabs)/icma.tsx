@@ -22,6 +22,7 @@ import { SubscribeMenuButton } from '../../components/SubscribeMenuButton';
 import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { REGIONS } from '../../constants/regions';
 import { getErrorMessage } from '../../lib/errors';
+import { listMySubscriptionTargetIds } from '../../lib/subscriptions';
 import { supabase } from '../../lib/supabase';
 import type { Listing, ListingType, Profile } from '../../types/database';
 
@@ -93,6 +94,9 @@ export default function IcmaScreen() {
   const [selectedListing, setSelectedListing] = useState<ListingWithCreator | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
   const [createVisible, setCreateVisible] = useState(false);
+  const [subListingIds, setSubListingIds] = useState<Set<string>>(new Set());
+  const [subOrganizerIds, setSubOrganizerIds] = useState<Set<string>>(new Set());
+  const [subsReady, setSubsReady] = useState(false);
 
   const fetchListings = useCallback(async (selectedFilter: ListingFilter) => {
     setLoading(true);
@@ -108,7 +112,16 @@ export default function IcmaScreen() {
       query = query.eq('type', selectedFilter);
     }
 
-    const { data, error } = await query;
+    const [listingsResult, subTargets] = await Promise.all([
+      query,
+      listMySubscriptionTargetIds(),
+    ]);
+
+    setSubListingIds(subTargets.listingIds);
+    setSubOrganizerIds(subTargets.organizerIds);
+    setSubsReady(true);
+
+    const { data, error } = listingsResult;
 
     if (error) {
       setErrorMessage(getErrorMessage(error));
@@ -220,7 +233,15 @@ export default function IcmaScreen() {
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
-            <MemoListingCard listing={item} onPress={() => openDetail(item)} />
+            <MemoListingCard
+              listing={item}
+              onPress={() => openDetail(item)}
+              statusReady={subsReady}
+              listingSubscribed={subListingIds.has(item.id)}
+              organizerSubscribed={subOrganizerIds.has(
+                item.created_by ?? item.creator?.id ?? ''
+              )}
+            />
           )}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -273,9 +294,15 @@ function formatFilledSpots(listing: ListingWithCreator): string | null {
 function ListingCard({
   listing,
   onPress,
+  statusReady = false,
+  listingSubscribed = false,
+  organizerSubscribed = false,
 }: {
   listing: ListingWithCreator;
   onPress: () => void;
+  statusReady?: boolean;
+  listingSubscribed?: boolean;
+  organizerSubscribed?: boolean;
 }) {
   const meta = TYPE_META[listing.type];
   const creatorName = listing.creator?.full_name?.trim() || 'İstifadəçi';
@@ -297,6 +324,8 @@ function ListingCard({
   } else {
     pairLeft = getRegionLabel(listing.region);
   }
+
+  const organizerId = listing.created_by ?? listing.creator?.id;
 
   return (
     <Pressable style={styles.card} onPress={onPress}>
@@ -339,7 +368,10 @@ function ListingCard({
           <SubscribeMenuButton
             compact
             listingId={listing.id}
-            organizerId={listing.created_by ?? listing.creator?.id}
+            organizerId={organizerId}
+            statusReady={statusReady}
+            listingSubscribed={listingSubscribed}
+            organizerSubscribed={organizerSubscribed}
           />
         ) : null}
       </View>

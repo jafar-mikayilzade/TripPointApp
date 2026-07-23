@@ -21,6 +21,13 @@ type Props = {
   /** When true, show tour+organizer toggles inline (detail sheet). */
   expandable?: boolean;
   disabled?: boolean;
+  /**
+   * Batch hint from parent (1 query for whole list).
+   * When `statusReady`, skip per-card isSubscribed fetches.
+   */
+  listingSubscribed?: boolean;
+  organizerSubscribed?: boolean;
+  statusReady?: boolean;
 };
 
 /**
@@ -33,6 +40,9 @@ export function SubscribeMenuButton({
   compact = false,
   expandable = false,
   disabled = false,
+  listingSubscribed,
+  organizerSubscribed,
+  statusReady = false,
 }: Props) {
   const { showInfo } = useInfoToast();
   const [tourOn, setTourOn] = useState(false);
@@ -41,26 +51,36 @@ export function SubscribeMenuButton({
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
 
-  const refresh = useCallback(async () => {
-    const [t, o] = await Promise.all([
-      isSubscribed('listing', listingId),
-      organizerId ? isSubscribed('organizer', organizerId) : Promise.resolve(false),
-    ]);
-    setTourOn(t);
-    setOrgOn(o);
-    setReady(true);
-  }, [listingId, organizerId]);
-
   useEffect(() => {
+    if (statusReady) {
+      setTourOn(Boolean(listingSubscribed));
+      setOrgOn(Boolean(organizerSubscribed));
+      setReady(true);
+      return;
+    }
+
     let active = true;
     setReady(false);
-    void refresh().then(() => {
+    void (async () => {
+      const [t, o] = await Promise.all([
+        isSubscribed('listing', listingId),
+        organizerId ? isSubscribed('organizer', organizerId) : Promise.resolve(false),
+      ]);
       if (!active) return;
-    });
+      setTourOn(t);
+      setOrgOn(o);
+      setReady(true);
+    })();
     return () => {
       active = false;
     };
-  }, [refresh]);
+  }, [
+    listingId,
+    organizerId,
+    statusReady,
+    listingSubscribed,
+    organizerSubscribed,
+  ]);
 
   const anyOn = tourOn || orgOn;
 

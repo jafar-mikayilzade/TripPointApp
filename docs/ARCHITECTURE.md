@@ -32,6 +32,20 @@ Yalnız Supabase Auth (email / Google). Python auth etmir.
 
 `SUPABASE_SERVICE_KEY` / Places API key **heç vaxt** mobile `EXPO_PUBLIC_*` içində olmamalıdır.
 
+### AI marşrut (plan-route)
+
+| Priority | Endpoint | Notes |
+|----------|----------|--------|
+| **Primary** | FastAPI `POST /api/plan-route` | Geo itinerary (Haversine NN), optional Claude tips, live Google candidates, `varietySeed` / travel window |
+| **Fallback** | Supabase Edge `plan-route` | Yalnız FastAPI əlçatan deyilsə (`EXPO_PUBLIC_API_URL` yox / 5xx / network). Edge-də fromOrigin / varietySeed tam dəstəklənməyə bilər |
+
+Mobile: `apps/mobile/lib/planRoute.ts` — əvvəl FastAPI, uğursuz olsa Edge.  
+Edge faylı: `apps/mobile/supabase/functions/plan-route` (primary deyil).
+
+### Live places / cafe
+
+Home + Qur live map və DB oxuma `cafe` kateqoriyasını atır (turizm səsi). Home filter çiplərində də `cafe` yoxdur; `PoiCategory` tipində legacy sətirlər üçün qala bilər.
+
 ## POI contract (upsert)
 
 | Field | Rule |

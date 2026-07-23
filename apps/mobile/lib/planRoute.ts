@@ -1,5 +1,10 @@
-/** Plan AI route via FastAPI (geo order on server). Edge function = fallback only. */
+/**
+ * Plan AI route via FastAPI (primary geo planner).
+ * Supabase Edge `plan-route` = fallback only when API unreachable / 5xx.
+ * See docs/ARCHITECTURE.md → "AI marşrut (plan-route)".
+ */
 
+import { getApiBaseUrl } from './apiBase';
 import { supabase } from './supabase';
 
 export type PlanRouteStop = {
@@ -83,14 +88,6 @@ export type PlanRouteInput = {
   /** Soft-exclude POIs from the previous plan */
   excludePoiIds?: string[];
 };
-
-function getApiBaseUrl(): string | null {
-  const raw = process.env.EXPO_PUBLIC_API_URL?.trim();
-  if (!raw) {
-    return null;
-  }
-  return raw.replace(/\/+$/, '');
-}
 
 async function planRouteViaFastApi(
   input: PlanRouteInput

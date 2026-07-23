@@ -323,10 +323,15 @@ export function ShareAsTourModal({
       });
 
       if (savedRouteId) {
-        await linkSavedRouteToListing(savedRouteId, listingId);
+        const link = await linkSavedRouteToListing(savedRouteId, listingId);
+        if (link.error) {
+          showInfo(`Tur paylaşıldı · ${link.error}`);
+        } else {
+          showInfo('Tur paylaşıldı · İcma elanlarında görünür');
+        }
+      } else {
+        showInfo('Tur paylaşıldı · İcma elanlarında görünür');
       }
-
-      showInfo('Tur paylaşıldı · İcma elanlarında görünür');
       onCreated?.(listingId);
       onClose();
     } catch (err) {

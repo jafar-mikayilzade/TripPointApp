@@ -1,5 +1,7 @@
 /** Cached regional weather from FastAPI — keeps OpenWeather key + quota off the client. */
 
+import { getApiBaseUrl } from './apiBase';
+
 export type WeatherAdvice = {
   ok: boolean;
   available?: boolean;
@@ -14,14 +16,6 @@ export type WeatherAdvice = {
 
 const MEMORY_TTL_MS = 10 * 60_000;
 const memory = new Map<string, { at: number; data: WeatherAdvice }>();
-
-function getApiBaseUrl(): string | null {
-  const raw = process.env.EXPO_PUBLIC_API_URL?.trim();
-  if (!raw) {
-    return null;
-  }
-  return raw.replace(/\/+$/, '');
-}
 
 export async function fetchRegionWeather(
   region: string,

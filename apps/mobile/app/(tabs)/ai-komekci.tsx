@@ -31,7 +31,7 @@ import { ShareAsTourModal } from '../../components/ShareAsTourModal';
 import { useInfoToast } from '../../components/InfoToastProvider';
 import { REGIONS } from '../../constants/regions';
 import { getErrorMessage } from '../../lib/errors';
-import { saveRoute } from '../../lib/savedRoutes';
+import { saveRoute, manualStopsToSavedStops } from '../../lib/savedRoutes';
 import {
   POI_PAGE_SIZE,
   createManualStop,
@@ -194,6 +194,9 @@ export default function AiKomekciScreen() {
   const fetchViewportPois = useCallback(
     (region: MapRegion) => {
       if (!selectedRegion) return;
+      if (region.longitudeDelta > 0.45) {
+        return;
+      }
 
       if (viewportFetchTimer.current) {
         clearTimeout(viewportFetchTimer.current);
@@ -241,7 +244,7 @@ export default function AiKomekciScreen() {
           });
           setRegionPois((prev) => mergeLivePlacesById(prev, incoming));
         })();
-      }, 450);
+      }, 650);
     },
     [selectedRegion]
   );
@@ -535,15 +538,7 @@ export default function AiKomekciScreen() {
         fromOrigin,
         originLat: fromOrigin ? userLocation?.latitude ?? null : null,
         originLng: fromOrigin ? userLocation?.longitude ?? null : null,
-        stops: routeStops.map((stop, index) => ({
-          sort_order: index + 1,
-          poi_id: stop.source === 'poi' ? stop.id : null,
-          name: stop.name,
-          lat: stop.lat,
-          lng: stop.lng,
-          category: stop.category,
-          source: stop.source,
-        })),
+        stops: manualStopsToSavedStops(routeStops),
       });
       if (result.error) {
         Alert.alert('Yadda saxla', result.error);

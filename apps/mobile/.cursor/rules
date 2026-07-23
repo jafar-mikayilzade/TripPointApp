@@ -4,7 +4,7 @@ TECH STACK:
 - Frontend: React Native (Expo, TypeScript)
 - Backend: Supabase (PostgreSQL + PostGIS + Auth + Storage + Realtime)
 - Xəritə: react-native-maps (Google Maps)
-- AI: OpenAI API (Edge Function vasitəsilə)
+- AI marşrut: FastAPI `/api/plan-route` (primary); Edge `plan-route` yalnız fallback
 
 SUPABASE CƏDVƏLLƏRİ:
 profiles, pois, poi_photos, businesses, listings, listing_photos,
