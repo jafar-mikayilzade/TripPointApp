@@ -376,7 +376,7 @@ def _help_text(chat_id: str | int) -> str:
     ]
     if linked:
         lines.append(f"{BTN_ICMA} — aktiv elanlar")
-        lines.append(f"{BTN_FAVS} — sevimliləriniz")
+        lines.append(f"{BTN_FAVS} — Elanlar / Yerlər / Marşrutlar / Abunə / Bildiriş")
     else:
         lines.append(f"{BTN_LINK_APP} — opsional app birləşdirmə")
     return "\n".join(lines)
@@ -613,7 +613,18 @@ def _show_icma(chat_id: str | int) -> None:
     _reply(chat_id, "\n".join(lines), reply_markup=_main_keyboard(chat_id))
 
 
-def _show_favorites(chat_id: str | int) -> None:
+def _favorites_menu_keyboard() -> dict[str, Any]:
+    return _ik(
+        [
+            [_btn("📋 Elanlar", "fav:listings"), _btn("📍 Yerlər", "fav:pois")],
+            [_btn("🗺️ Marşrutlar", "fav:routes"), _btn("🔔 Abunə", "fav:subs")],
+            [_btn("📬 Bildiriş", "fav:notifs")],
+            [_btn("🏠 Menyu", "menu")],
+        ]
+    )
+
+
+def _show_favorites(chat_id: str | int, *, message_id: int | None = None) -> None:
     user_id = _lookup_user_id(chat_id)
     if not user_id:
         _reply(
@@ -622,39 +633,232 @@ def _show_favorites(chat_id: str | int) -> None:
             reply_markup=_main_keyboard(chat_id),
         )
         return
+    _edit_or_reply(
+        chat_id,
+        "⭐ Sevimlilər — hansı hissəyə baxmaq istəyirsiniz?",
+        message_id=message_id,
+        reply_markup=_favorites_menu_keyboard(),
+    )
+
+
+def _show_fav_listings(chat_id: str | int, user_id: str, *, message_id: int | None) -> None:
     try:
         res = (
             supabase.table("favorites")
+            .select("target_id")
+            .eq("user_id", user_id)
+            .eq("target_type", "listing")
+            .limit(FAVORITES_LIMIT)
+            .execute()
+        )
+        ids = [str(r["target_id"]) for r in (res.data or []) if r.get("target_id")]
+    except Exception:
+        logger.exception("fav listings ids failed")
+        _edit_or_reply(
+            chat_id,
+            "Elanlar yüklənmədi.",
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
+        return
+    if not ids:
+        _edit_or_reply(
+            chat_id,
+            "📋 Sevimli elan yoxdur.",
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
+        return
+    try:
+        lr = (
+            supabase.table("listings")
+            .select("id, title, type, region, price, status")
+            .in_("id", ids)
+            .execute()
+        )
+        by_id = {str(L["id"]): L for L in (lr.data or [])}
+    except Exception:
+        logger.exception("fav listings fetch failed")
+        _edit_or_reply(
+            chat_id,
+            "Elanlar yüklənmədi.",
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
+        return
+    lines = ["📋 Sevimli elanlar", ""]
+    for lid in ids:
+        L = by_id.get(lid)
+        if not L:
+            continue
+        emoji = LISTING_TYPE_EMOJI.get(str(L.get("type") or ""), "📌")
+        title = str(L.get("title") or "Elan")
+        region = str(L.get("region") or "").strip()
+        suffix = f" · {region}" if region else ""
+        lines.append(f"{emoji} {title}{suffix}")
+    if len(lines) == 2:
+        lines.append("Sevimli elan tapılmadı.")
+    lines.append("\n⬅️ geri üçün yenə Sevimlilər bölməsindən seçin")
+    _edit_or_reply(
+        chat_id,
+        "\n".join(lines),
+        message_id=message_id,
+        reply_markup=_favorites_menu_keyboard(),
+    )
+
+
+def _show_fav_pois(chat_id: str | int, user_id: str, *, message_id: int | None) -> None:
+    try:
+        res = (
+            supabase.table("favorites")
+            .select("target_id")
+            .eq("user_id", user_id)
+            .eq("target_type", "poi")
+            .limit(FAVORITES_LIMIT)
+            .execute()
+        )
+        ids = [str(r["target_id"]) for r in (res.data or []) if r.get("target_id")]
+    except Exception:
+        logger.exception("fav poi ids failed")
+        _edit_or_reply(
+            chat_id,
+            "Yerlər yüklənmədi.",
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
+        return
+    if not ids:
+        _edit_or_reply(
+            chat_id,
+            "📍 Sevimli yer yoxdur.",
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
+        return
+    try:
+        pr = (
+            supabase.table("pois")
+            .select("id, name, region, category")
+            .in_("id", ids)
+            .execute()
+        )
+        by_id = {str(p["id"]): p for p in (pr.data or [])}
+    except Exception:
+        logger.exception("fav pois fetch failed")
+        _edit_or_reply(
+            chat_id,
+            "Yerlər yüklənmədi.",
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
+        return
+    lines = ["📍 Sevimli yerlər", ""]
+    for pid in ids:
+        p = by_id.get(pid)
+        if not p:
+            continue
+        name = str(p.get("name") or "Məkan")
+        region = str(p.get("region") or "").strip()
+        suffix = f" · {region}" if region else ""
+        lines.append(f"• {name}{suffix}")
+    if len(lines) == 2:
+        lines.append("Sevimli yer tapılmadı.")
+    _edit_or_reply(
+        chat_id,
+        "\n".join(lines),
+        message_id=message_id,
+        reply_markup=_favorites_menu_keyboard(),
+    )
+
+
+def _show_fav_routes(chat_id: str | int, user_id: str, *, message_id: int | None) -> None:
+    try:
+        res = (
+            supabase.table("saved_routes")
+            .select("id, title, source, region, days_count, summary")
+            .eq("user_id", user_id)
+            .order("updated_at", desc=True)
+            .limit(FAVORITES_LIMIT)
+            .execute()
+        )
+        rows = list(res.data or [])
+    except Exception:
+        logger.exception("saved routes failed")
+        _edit_or_reply(
+            chat_id,
+            "Marşrutlar yüklənmədi.",
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
+        return
+    if not rows:
+        _edit_or_reply(
+            chat_id,
+            "🗺️ Saxlanmış marşrut yoxdur.",
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
+        return
+    lines = ["🗺️ Saxlanmış marşrutlar", ""]
+    for r in rows:
+        src = "🤖" if r.get("source") == "ai" else "🗺️"
+        title = str(r.get("title") or "Marşrut")
+        days = r.get("days_count")
+        region = str(r.get("region") or "").strip()
+        bits = []
+        if days:
+            bits.append(f"{days} gün")
+        if region:
+            bits.append(region)
+        suffix = f" ({', '.join(bits)})" if bits else ""
+        lines.append(f"{src} {title}{suffix}")
+    _edit_or_reply(
+        chat_id,
+        "\n".join(lines),
+        message_id=message_id,
+        reply_markup=_favorites_menu_keyboard(),
+    )
+
+
+def _show_fav_subscriptions(
+    chat_id: str | int, user_id: str, *, message_id: int | None
+) -> None:
+    try:
+        res = (
+            supabase.table("subscriptions")
             .select("target_type, target_id")
             .eq("user_id", user_id)
             .limit(FAVORITES_LIMIT)
             .execute()
         )
-        favs = list(res.data or [])
+        rows = list(res.data or [])
     except Exception:
-        logger.exception("favorites fetch failed")
-        _reply(chat_id, "Sevimlilər yüklənmədi.", reply_markup=_main_keyboard(chat_id))
+        logger.exception("subscriptions failed")
+        _edit_or_reply(
+            chat_id,
+            "Abunəliklər yüklənmədi.",
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
+        return
+    if not rows:
+        _edit_or_reply(
+            chat_id,
+            "🔔 Abunəlik yoxdur.",
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
         return
 
-    if not favs:
-        _reply(chat_id, "Sevimli yoxdur.", reply_markup=_main_keyboard(chat_id))
-        return
-
-    poi_ids = [str(f["target_id"]) for f in favs if f.get("target_type") == "poi"]
     listing_ids = [
-        str(f["target_id"]) for f in favs if f.get("target_type") == "listing"
+        str(r["target_id"]) for r in rows if r.get("target_type") == "listing"
     ]
-    names: dict[str, str] = {}
+    organizer_ids = [
+        str(r["target_id"]) for r in rows if r.get("target_type") == "organizer"
+    ]
+    listing_names: dict[str, str] = {}
+    org_names: dict[str, str] = {}
     try:
-        if poi_ids:
-            pr = (
-                supabase.table("pois")
-                .select("id, name")
-                .in_("id", poi_ids)
-                .execute()
-            )
-            for p in pr.data or []:
-                names[str(p["id"])] = f"📍 {p.get('name') or 'Məkan'}"
         if listing_ids:
             lr = (
                 supabase.table("listings")
@@ -664,16 +868,116 @@ def _show_favorites(chat_id: str | int) -> None:
             )
             for L in lr.data or []:
                 emoji = LISTING_TYPE_EMOJI.get(str(L.get("type") or ""), "📌")
-                names[str(L["id"])] = f"{emoji} {L.get('title') or 'Elan'}"
+                listing_names[str(L["id"])] = f"{emoji} {L.get('title') or 'Tur'}"
+        if organizer_ids:
+            pr = (
+                supabase.table("profiles")
+                .select("id, full_name")
+                .in_("id", organizer_ids)
+                .execute()
+            )
+            for p in pr.data or []:
+                org_names[str(p["id"])] = f"👤 {p.get('full_name') or 'Təşkilatçı'}"
     except Exception:
-        logger.exception("favorite names failed")
+        logger.exception("subscription names failed")
 
-    lines = ["⭐ Sevimlilər", ""]
-    for f in favs:
-        tid = str(f.get("target_id") or "")
-        lines.append(names.get(tid) or f"• {tid[:8]}…")
-    lines.append("\nApp → Sevimlilər")
-    _reply(chat_id, "\n".join(lines), reply_markup=_main_keyboard(chat_id))
+    lines = ["🔔 Abunəliklər", ""]
+    for r in rows:
+        tid = str(r.get("target_id") or "")
+        if r.get("target_type") == "listing":
+            lines.append(listing_names.get(tid) or f"📌 Tur {tid[:8]}…")
+        else:
+            lines.append(org_names.get(tid) or f"👤 {tid[:8]}…")
+    _edit_or_reply(
+        chat_id,
+        "\n".join(lines),
+        message_id=message_id,
+        reply_markup=_favorites_menu_keyboard(),
+    )
+
+
+def _show_fav_notifications(
+    chat_id: str | int, user_id: str, *, message_id: int | None
+) -> None:
+    try:
+        res = (
+            supabase.table("notifications")
+            .select("kind, title, body, created_at, read_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(FAVORITES_LIMIT)
+            .execute()
+        )
+        rows = list(res.data or [])
+    except Exception:
+        logger.exception("notifications failed")
+        _edit_or_reply(
+            chat_id,
+            "Bildirişlər yüklənmədi.",
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
+        return
+    if not rows:
+        _edit_or_reply(
+            chat_id,
+            "📬 Bildiriş yoxdur.",
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
+        return
+    lines = ["📬 Bildirişlər", ""]
+    for n in rows:
+        unread = "•" if not n.get("read_at") else "○"
+        title = str(n.get("title") or "Bildiriş")
+        body = str(n.get("body") or "").strip()
+        if body:
+            lines.append(f"{unread} {title}\n  {body[:120]}")
+        else:
+            lines.append(f"{unread} {title}")
+    _edit_or_reply(
+        chat_id,
+        "\n".join(lines),
+        message_id=message_id,
+        reply_markup=_favorites_menu_keyboard(),
+    )
+
+
+def _handle_fav_callback(
+    chat_id: str | int, data: str, *, message_id: int | None
+) -> bool:
+    """Handle fav:* callbacks. Returns True if handled."""
+    if not data.startswith("fav:"):
+        return False
+    user_id = _lookup_user_id(chat_id)
+    if not user_id:
+        _edit_or_reply(
+            chat_id,
+            "App hesabı bağlı deyil.",
+            message_id=message_id,
+            reply_markup=_main_keyboard(chat_id),
+        )
+        return True
+    section = data.split(":", 1)[1]
+    if section == "menu":
+        _show_favorites(chat_id, message_id=message_id)
+        return True
+    if section == "listings":
+        _show_fav_listings(chat_id, user_id, message_id=message_id)
+        return True
+    if section == "pois":
+        _show_fav_pois(chat_id, user_id, message_id=message_id)
+        return True
+    if section == "routes":
+        _show_fav_routes(chat_id, user_id, message_id=message_id)
+        return True
+    if section == "subs":
+        _show_fav_subscriptions(chat_id, user_id, message_id=message_id)
+        return True
+    if section == "notifs":
+        _show_fav_notifications(chat_id, user_id, message_id=message_id)
+        return True
+    return False
 
 
 def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
@@ -698,6 +1002,9 @@ def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
     if data == "menu":
         _clear_session(chat_id)
         _show_main_menu(chat_id)
+        return {"ok": True}
+
+    if _handle_fav_callback(chat_id, data, message_id=message_id):
         return {"ok": True}
 
     if data == "ai:again" or data == "ai:edit":
