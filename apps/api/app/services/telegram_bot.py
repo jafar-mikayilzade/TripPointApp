@@ -1,14 +1,12 @@
-"""Telegram user bot — guest chat_id + optional app link + AI/manual routes.
+"""Telegram user bot — guest + optional app link + AI/manual (inline UX).
 
-App is optional: /start alone opens the menu. App link merges profiles later.
-Production note: replace _SESSIONS with DB/Redis for multi-worker Railway.
-# TODO: optional email OTP verification (not required for Faza 1).
+Production note: replace _SESSIONS / _LAST_PLANS with DB/Redis for multi-worker.
+# TODO: optional email OTP (not required).
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -16,67 +14,106 @@ from app.constants.regions import REGION_DB_ID
 from app.db import supabase
 from app.services.plan_route_run import (
     BOT_REGION_KEYS,
+    REGION_EMOJI,
     REGION_LABELS,
     format_plan_for_telegram,
     run_plan_route,
 )
-from app.services.telegram_notify import send_telegram_message
+from app.services.telegram_notify import (
+    answer_callback_query,
+    edit_telegram_message,
+    send_telegram_message,
+)
 
 logger = logging.getLogger(__name__)
 
-# chat_id -> session dict. MVP only — not shared across workers.
+# chat_id -> session / last plan text. MVP — not shared across workers.
 _SESSIONS: dict[str, dict[str, Any]] = {}
+_LAST_PLANS: dict[str, str] = {}
 
 MAX_MANUAL_STOPS = 8
 
 BTN_AI = "🤖 AI marşrut"
 BTN_MANUAL = "🗺️ Manual marşrut"
+BTN_LAST = "📄 Son marşrut"
 BTN_HELP = "ℹ️ Kömək"
 BTN_LINK_APP = "🔗 App hesabı bağla"
 BTN_CANCEL = "❌ Ləğv et"
 BTN_DONE = "✅ Hazır"
+BTN_SKIP_LOC = "❌ Keç"
+BTN_SHARE_LOC = "📍 Lokasiyamı göndər"
 
-BUDGET_MAP: dict[str, str] = {
-    "1": "budget",
-    "2": "mid",
-    "3": "premium",
-    "budget": "budget",
-    "qənaətcil": "budget",
-    "qenaetcil": "budget",
-    "mid": "mid",
-    "orta": "mid",
-    "premium": "premium",
-}
+INTERESTS: list[tuple[str, str]] = [
+    ("nature", "🌿 Təbiət"),
+    ("history", "🏛 Tarix"),
+    ("food", "🍽 Yemək"),
+    ("family", "👨‍👩‍👧 Ailə"),
+    ("active", "🏃 Aktiv"),
+    ("photo", "📷 Foto"),
+]
 
-INTEREST_MAP: dict[str, str] = {
-    "1": "nature",
-    "2": "history",
-    "3": "food",
-    "4": "family",
-    "5": "active",
-    "6": "photo",
-    "nature": "nature",
-    "təbiət": "nature",
-    "tebiət": "nature",
-    "tebiet": "nature",
-    "history": "history",
-    "tarix": "history",
-    "food": "food",
-    "yemək": "food",
-    "yemek": "food",
-    "family": "family",
-    "ailə": "family",
-    "aile": "family",
-    "active": "active",
-    "aktiv": "active",
-    "photo": "photo",
-    "foto": "photo",
-}
+PRESETS: list[dict[str, Any]] = [
+    {
+        "id": "0",
+        "label": "🏔 Quba · 1 gün · Orta · 👨‍👩‍👧",
+        "region": "quba",
+        "days": 1,
+        "budget": "mid",
+        "interests": ["family"],
+        "group_type": "family",
+    },
+    {
+        "id": "1",
+        "label": "🏔 Quba · 2 gün · Orta · 🌿",
+        "region": "quba",
+        "days": 2,
+        "budget": "mid",
+        "interests": ["nature"],
+        "group_type": "solo",
+    },
+    {
+        "id": "2",
+        "label": "🏛 Şəki · 2 gün · Orta · 🏛",
+        "region": "seki",
+        "days": 2,
+        "budget": "mid",
+        "interests": ["history"],
+        "group_type": "solo",
+    },
+    {
+        "id": "3",
+        "label": "🌲 Qəbələ · 1 gün · Orta · 🌿",
+        "region": "qabala",
+        "days": 1,
+        "budget": "mid",
+        "interests": ["nature"],
+        "group_type": "solo",
+    },
+    {
+        "id": "4",
+        "label": "🏙 Bakı · 1 gün · Orta · 🍽",
+        "region": "baku",
+        "days": 1,
+        "budget": "mid",
+        "interests": ["food", "history"],
+        "group_type": "solo",
+    },
+    {
+        "id": "5",
+        "label": "🌿 Lerik · 2 gün · Qənaət · 🌿",
+        "region": "lerik",
+        "days": 2,
+        "budget": "budget",
+        "interests": ["nature", "active"],
+        "group_type": "solo",
+    },
+]
 
 MAIN_KEYBOARD: dict[str, Any] = {
     "keyboard": [
         [{"text": BTN_AI}, {"text": BTN_MANUAL}],
-        [{"text": BTN_HELP}, {"text": BTN_LINK_APP}],
+        [{"text": BTN_LAST}, {"text": BTN_HELP}],
+        [{"text": BTN_LINK_APP}],
     ],
     "resize_keyboard": True,
 }
@@ -87,11 +124,26 @@ FLOW_KEYBOARD: dict[str, Any] = {
 }
 
 MANUAL_KEYBOARD: dict[str, Any] = {
-    "keyboard": [
-        [{"text": BTN_DONE}, {"text": BTN_CANCEL}],
-    ],
+    "keyboard": [[{"text": BTN_DONE}, {"text": BTN_CANCEL}]],
     "resize_keyboard": True,
 }
+
+LOCATION_KEYBOARD: dict[str, Any] = {
+    "keyboard": [
+        [{"text": BTN_SHARE_LOC, "request_location": True}],
+        [{"text": BTN_SKIP_LOC}],
+    ],
+    "resize_keyboard": True,
+    "one_time_keyboard": True,
+}
+
+
+def _ik(rows: list[list[dict[str, str]]]) -> dict[str, Any]:
+    return {"inline_keyboard": rows}
+
+
+def _btn(text: str, data: str) -> dict[str, str]:
+    return {"text": text, "callback_data": data[:64]}
 
 
 def _chat_key(chat_id: str | int) -> str:
@@ -107,42 +159,152 @@ def _reply(
     send_telegram_message(text, chat_id=chat_id, reply_markup=reply_markup)
 
 
+def _edit_or_reply(
+    chat_id: str | int,
+    text: str,
+    *,
+    message_id: int | None,
+    reply_markup: dict[str, Any] | None = None,
+) -> None:
+    if message_id is not None and edit_telegram_message(
+        chat_id, message_id, text, reply_markup=reply_markup
+    ):
+        return
+    _reply(chat_id, text, reply_markup=reply_markup)
+
+
 def _clear_session(chat_id: str | int) -> None:
     _SESSIONS.pop(_chat_key(chat_id), None)
 
 
 def _get_session(chat_id: str | int) -> dict[str, Any]:
-    return _SESSIONS.setdefault(_chat_key(chat_id), {"mode": "idle", "step": None, "data": {}})
+    return _SESSIONS.setdefault(
+        _chat_key(chat_id), {"mode": "idle", "step": None, "data": {}}
+    )
 
 
-def _region_menu_text() -> str:
-    lines = ["Region seç (nömrə və ya ad):"]
-    for i, key in enumerate(BOT_REGION_KEYS, start=1):
-        lines.append(f"{i}. {REGION_LABELS.get(key, key)}")
-    return "\n".join(lines)
+def _save_last(chat_id: str | int, text: str) -> None:
+    _LAST_PLANS[_chat_key(chat_id)] = text
 
 
-def _parse_region(text: str) -> str | None:
-    raw = (text or "").strip().lower()
-    if raw.isdigit():
-        idx = int(raw) - 1
-        if 0 <= idx < len(BOT_REGION_KEYS):
-            return BOT_REGION_KEYS[idx]
-    # label / key match
+def _ai_result_keyboard() -> dict[str, Any]:
+    return _ik(
+        [
+            [
+                _btn("🔄 Yenidən", "ai:again"),
+                _btn("✏️ Dəyiş", "ai:edit"),
+                _btn("🏠 Menyu", "menu"),
+            ]
+        ]
+    )
+
+
+def _preset_keyboard() -> dict[str, Any]:
+    rows: list[list[dict[str, str]]] = []
+    for p in PRESETS:
+        rows.append([_btn(p["label"], f"ai:p:{p['id']}")])
+    rows.append([_btn("🛠 Özüm seçim", "ai:custom")])
+    rows.append([_btn("🏠 Menyu", "menu")])
+    return _ik(rows)
+
+
+def _region_inline(prefix: str) -> dict[str, Any]:
+    rows: list[list[dict[str, str]]] = []
+    row: list[dict[str, str]] = []
     for key in BOT_REGION_KEYS:
-        label = REGION_LABELS.get(key, key).lower()
-        if raw in {key, label, label.replace("ə", "e"), label.replace("ə", "a")}:
-            return key
-    aliases = {"sheki": "seki", "gabala": "qabala", "şəki": "seki", "qəbələ": "qabala"}
-    if raw in aliases:
-        return aliases[raw]
-    if raw in REGION_LABELS or raw in BOT_REGION_KEYS:
-        return raw if raw in BOT_REGION_KEYS else REGION_DB_ID.get(raw, raw)
-    return None
+        emoji = REGION_EMOJI.get(key, "📍")
+        label = REGION_LABELS.get(key, key)
+        row.append(_btn(f"{emoji} {label}", f"{prefix}:{key}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([_btn("🏠 Menyu", "menu")])
+    return _ik(rows)
+
+
+def _days_inline() -> dict[str, Any]:
+    row = [_btn(f"{i} gün", f"ai:d:{i}") for i in range(1, 8)]
+    return _ik([row[:4], row[4:], [_btn("🏠 Menyu", "menu")]])
+
+
+def _budget_inline() -> dict[str, Any]:
+    return _ik(
+        [
+            [
+                _btn("💸 Qənaətcil", "ai:b:budget"),
+                _btn("⚖️ Orta", "ai:b:mid"),
+                _btn("✨ Premium", "ai:b:premium"),
+            ],
+            [_btn("🏠 Menyu", "menu")],
+        ]
+    )
+
+
+def _interests_inline(selected: list[str]) -> dict[str, Any]:
+    rows: list[list[dict[str, str]]] = []
+    row: list[dict[str, str]] = []
+    for key, label in INTERESTS:
+        mark = "✅ " if key in selected else ""
+        row.append(_btn(f"{mark}{label}", f"ai:i:{key}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([_btn("✅ Hazır", "ai:i_done"), _btn("🏠 Menyu", "menu")])
+    return _ik(rows)
+
+
+def _from_origin_inline() -> dict[str, Any]:
+    return _ik(
+        [
+            [
+                _btn("✅ Bəli — cari məkandan", "ai:fo:1"),
+                _btn("❌ Xeyr", "ai:fo:0"),
+            ],
+            [_btn("🏠 Menyu", "menu")],
+        ]
+    )
+
+
+def _ensure_telegram_user(
+    chat_id: str | int,
+    *,
+    username: str | None = None,
+) -> None:
+    chat_s = str(chat_id)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        existing = (
+            supabase.table("telegram_users")
+            .select("telegram_chat_id")
+            .eq("telegram_chat_id", chat_s)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            update_payload: dict[str, Any] = {"last_seen_at": now_iso}
+            if username:
+                update_payload["username"] = username
+            supabase.table("telegram_users").update(update_payload).eq(
+                "telegram_chat_id", chat_s
+            ).execute()
+        else:
+            payload: dict[str, Any] = {
+                "telegram_chat_id": chat_s,
+                "created_at": now_iso,
+                "last_seen_at": now_iso,
+            }
+            if username:
+                payload["username"] = username
+            supabase.table("telegram_users").insert(payload).execute()
+    except Exception:
+        logger.warning("ensure telegram_users failed", exc_info=True)
 
 
 def _lookup_user_id(chat_id: str | int) -> str | None:
-    """Optional app profile linked to this Telegram chat."""
     chat_s = str(chat_id)
     try:
         res = (
@@ -156,8 +318,7 @@ def _lookup_user_id(chat_id: str | int) -> str | None:
         if rows and rows[0].get("linked_user_id"):
             return str(rows[0]["linked_user_id"])
     except Exception:
-        logger.exception("lookup telegram_users.linked_user_id failed")
-
+        logger.exception("lookup linked_user_id failed")
     try:
         res = (
             supabase.table("profiles")
@@ -167,56 +328,17 @@ def _lookup_user_id(chat_id: str | int) -> str | None:
             .execute()
         )
         rows = res.data or []
-        if not rows:
-            return None
-        return str(rows[0]["id"])
+        if rows:
+            return str(rows[0]["id"])
     except Exception:
-        logger.exception("lookup profiles.telegram_chat_id failed")
-        return None
-
-
-def _ensure_telegram_user(
-    chat_id: str | int,
-    *,
-    username: str | None = None,
-) -> None:
-    """Upsert guest row by chat_id. App link not required. TODO: email OTP later."""
-    chat_s = str(chat_id)
-    now_iso = datetime.now(timezone.utc).isoformat()
-    payload: dict[str, Any] = {
-        "telegram_chat_id": chat_s,
-        "last_seen_at": now_iso,
-    }
-    if username:
-        payload["username"] = username
-    try:
-        existing = (
-            supabase.table("telegram_users")
-            .select("telegram_chat_id")
-            .eq("telegram_chat_id", chat_s)
-            .limit(1)
-            .execute()
-        )
-        if existing.data:
-            update_payload = {"last_seen_at": now_iso}
-            if username:
-                update_payload["username"] = username
-            supabase.table("telegram_users").update(update_payload).eq(
-                "telegram_chat_id", chat_s
-            ).execute()
-        else:
-            payload["created_at"] = now_iso
-            supabase.table("telegram_users").insert(payload).execute()
-    except Exception:
-        # Table may not be migrated yet — bot still works in-memory
-        logger.warning("ensure telegram_users failed (migration pending?)", exc_info=True)
+        logger.exception("lookup profiles telegram failed")
+    return None
 
 
 def _link_account(chat_id: str | int, code: str) -> tuple[bool, str]:
     code_clean = (code or "").strip()
     if not code_clean or len(code_clean) > 64:
         return False, "Kod düzgün deyil. App-də yenidən «Telegram bağla» basın."
-
     try:
         res = (
             supabase.table("telegram_link_codes")
@@ -227,7 +349,7 @@ def _link_account(chat_id: str | int, code: str) -> tuple[bool, str]:
         )
         rows = res.data or []
         if not rows:
-            return False, "Kod tapılmadı və ya artıq istifadə olunub. App-də yenidən bağlayın."
+            return False, "Kod tapılmadı və ya artıq istifadə olunub."
 
         row = rows[0]
         expires_at = row.get("expires_at")
@@ -237,8 +359,10 @@ def _link_account(chat_id: str | int, code: str) -> tuple[bool, str]:
                 if exp.tzinfo is None:
                     exp = exp.replace(tzinfo=timezone.utc)
                 if exp < datetime.now(timezone.utc):
-                    supabase.table("telegram_link_codes").delete().eq("code", code_clean).execute()
-                    return False, "Kodun müddəti bitib. App-də yenidən «Telegram bağla» basın."
+                    supabase.table("telegram_link_codes").delete().eq(
+                        "code", code_clean
+                    ).execute()
+                    return False, "Kodun müddəti bitib. App-də yenidən bağlayın."
             except ValueError:
                 pass
 
@@ -246,16 +370,13 @@ def _link_account(chat_id: str | int, code: str) -> tuple[bool, str]:
         chat_s = str(chat_id)
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # Detach this chat from any other profile
         supabase.table("profiles").update(
             {"telegram_chat_id": None, "telegram_linked_at": None}
         ).eq("telegram_chat_id", chat_s).execute()
-
         supabase.table("profiles").update(
             {"telegram_chat_id": chat_s, "telegram_linked_at": now_iso}
         ).eq("id", user_id).execute()
 
-        # Clear previous link on telegram_users for this profile; bind this chat
         try:
             supabase.table("telegram_users").update({"linked_user_id": None}).eq(
                 "linked_user_id", user_id
@@ -268,38 +389,20 @@ def _link_account(chat_id: str | int, code: str) -> tuple[bool, str]:
             logger.warning("telegram_users link update failed", exc_info=True)
 
         supabase.table("telegram_link_codes").delete().eq("code", code_clean).execute()
-        return True, "App hesabı bağlandı ✅ Marşrutlar əvvəlki kimi işləyir."
+        return True, "App hesabı bağlandı ✅"
     except Exception:
         logger.exception("link_account failed")
-        return False, "Bağlama alınmadı. Bir az sonra yenidən yoxlayın."
+        return False, "Bağlama alınmadı."
 
 
 def _help_text() -> str:
     return (
         "TripPoint bot (app lazım deyil)\n\n"
-        f"{BTN_AI} — region, gün, büdcə, maraqlar → AI marşrut\n"
-        f"{BTN_MANUAL} — region + stop siyahısı (xəritə app-də)\n"
-        f"{BTN_LINK_APP} — istəyə görə app hesabını birləşdir\n\n"
-        "Email OTP / telefon — sonra əlavə olunacaq."
-    )
-
-
-def _link_app_help(chat_id: str | int) -> None:
-    linked = _lookup_user_id(chat_id)
-    if linked:
-        _reply(
-            chat_id,
-            "Bu Telegram artıq app hesabına bağlıdır ✅",
-            reply_markup=MAIN_KEYBOARD,
-        )
-        return
-    _reply(
-        chat_id,
-        "App hesabı opsionaldır.\n\n"
-        "1) TripPoint app → Profil → «Telegram bağla»\n"
-        "2) Açılan botda Start / kod avtomatik gəlir\n\n"
-        "App yoxdursa da AI və manual marşrut işləyir.",
-        reply_markup=MAIN_KEYBOARD,
+        f"{BTN_AI} — hazır paket və ya öz seçim (düymələrlə)\n"
+        f"{BTN_MANUAL} — stop siyahısı\n"
+        f"{BTN_LAST} — son AI marşrut\n"
+        "Cari məkandan: AI seçimində «Bəli» → lokasiya paylaş\n"
+        f"{BTN_LINK_APP} — opsional app birləşdirmə"
     )
 
 
@@ -308,162 +411,297 @@ def _show_main_menu(chat_id: str | int, preface: str | None = None) -> None:
     _reply(chat_id, text, reply_markup=MAIN_KEYBOARD)
 
 
-def _start_ai(chat_id: str | int) -> None:
+def _show_ai_home(
+    chat_id: str | int,
+    *,
+    message_id: int | None = None,
+) -> None:
+    _SESSIONS[_chat_key(chat_id)] = {"mode": "ai", "step": "pick", "data": {}}
+    text = (
+        "🤖 AI marşrut\n\n"
+        "Hazır paket seçin (1 toxunuş) və ya «Özüm seçim»:"
+    )
+    _edit_or_reply(chat_id, text, message_id=message_id, reply_markup=_preset_keyboard())
+
+
+def _run_and_send_plan(chat_id: str | int, data: dict[str, Any]) -> None:
+    _reply(chat_id, "⏳ Marşrut hazırlanır…", reply_markup=MAIN_KEYBOARD)
+    try:
+        plan = run_plan_route(
+            region=str(data["region"]),
+            days=int(data["days"]),
+            budget=str(data.get("budget") or "mid"),
+            interests=list(data.get("interests") or []),
+            group_type=str(data.get("group_type") or "solo"),
+            from_origin=bool(data.get("from_origin")),
+            origin_lat=data.get("origin_lat"),
+            origin_lng=data.get("origin_lng"),
+        )
+        text = format_plan_for_telegram(plan)
+        _save_last(chat_id, text)
+        _clear_session(chat_id)
+        _reply(chat_id, text, reply_markup=_ai_result_keyboard())
+    except ValueError as exc:
+        _clear_session(chat_id)
+        _reply(chat_id, f"Xəta: {exc}", reply_markup=MAIN_KEYBOARD)
+    except Exception:
+        logger.exception("AI plan failed")
+        _clear_session(chat_id)
+        _reply(
+            chat_id,
+            "Marşrut hazırlanmadı. Bir az sonra yenidən yoxlayın.",
+            reply_markup=MAIN_KEYBOARD,
+        )
+
+
+def _ask_from_origin(chat_id: str | int, message_id: int | None) -> None:
+    session = _get_session(chat_id)
+    session["mode"] = "ai"
+    session["step"] = "from_origin"
+    _edit_or_reply(
+        chat_id,
+        "🚗 Cari məkandan gedirsiniz?\n"
+        "(App-dəki «Cari məkandan gedirəm» — yol vaxtı üçün)",
+        message_id=message_id,
+        reply_markup=_from_origin_inline(),
+    )
+
+
+def _request_location(chat_id: str | int) -> None:
+    session = _get_session(chat_id)
+    session["step"] = "await_location"
+    _reply(
+        chat_id,
+        "📍 Lokasiyanızı paylaşın (düymə) və ya «Keç» basın.",
+        reply_markup=LOCATION_KEYBOARD,
+    )
+
+
+def _start_custom_wizard(chat_id: str | int, message_id: int | None) -> None:
     _SESSIONS[_chat_key(chat_id)] = {
         "mode": "ai",
         "step": "region",
-        "data": {},
+        "data": {"interests": [], "group_type": "solo"},
     }
-    _reply(chat_id, "AI marşrut\n\n" + _region_menu_text(), reply_markup=FLOW_KEYBOARD)
-
-
-def _start_manual(chat_id: str | int) -> None:
-    _SESSIONS[_chat_key(chat_id)] = {
-        "mode": "manual",
-        "step": "region",
-        "data": {"stops": []},
-    }
-    _reply(chat_id, "Manual marşrut\n\n" + _region_menu_text(), reply_markup=FLOW_KEYBOARD)
+    _edit_or_reply(
+        chat_id,
+        "Region seçin:",
+        message_id=message_id,
+        reply_markup=_region_inline("ai:r"),
+    )
 
 
 def _search_pois(region_key: str, query: str) -> list[dict[str, Any]]:
     db_region = REGION_DB_ID.get(region_key, region_key)
     q = (query or "").strip()
     try:
+        query_builder = (
+            supabase.table("pois")
+            .select("id, name, region, category")
+            .eq("region", db_region)
+            .eq("status", "approved")
+        )
         if q:
-            res = (
-                supabase.table("pois")
-                .select("id, name, region, category")
-                .eq("region", db_region)
-                .eq("status", "approved")
-                .ilike("name", f"%{q}%")
-                .limit(8)
-                .execute()
-            )
-        else:
-            res = (
-                supabase.table("pois")
-                .select("id, name, region, category")
-                .eq("region", db_region)
-                .eq("status", "approved")
-                .limit(8)
-                .execute()
-            )
+            query_builder = query_builder.ilike("name", f"%{q}%")
+        res = query_builder.limit(8).execute()
         return list(res.data or [])
     except Exception:
         logger.exception("POI search failed")
         return []
 
 
-def _handle_ai_step(chat_id: str | int, text: str, session: dict[str, Any]) -> None:
-    step = session.get("step")
-    data = session.setdefault("data", {})
+def _start_manual(chat_id: str | int, message_id: int | None = None) -> None:
+    _SESSIONS[_chat_key(chat_id)] = {
+        "mode": "manual",
+        "step": "region",
+        "data": {"stops": []},
+    }
+    _edit_or_reply(
+        chat_id,
+        "🗺️ Manual marşrut — region seçin:",
+        message_id=message_id,
+        reply_markup=_region_inline("man:r"),
+    )
 
-    if step == "region":
-        region = _parse_region(text)
-        if not region:
-            _reply(chat_id, "Region tapılmadı.\n\n" + _region_menu_text(), reply_markup=FLOW_KEYBOARD)
-            return
-        data["region"] = region
+
+def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
+    cq = update.get("callback_query") or {}
+    cq_id = str(cq.get("id") or "")
+    data = str(cq.get("data") or "")
+    message = cq.get("message") or {}
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+    message_id = message.get("message_id")
+    from_user = cq.get("from") or {}
+
+    if chat_id is None:
+        return {"ok": True, "ignored": True}
+
+    _ensure_telegram_user(
+        chat_id,
+        username=str(from_user["username"]) if from_user.get("username") else None,
+    )
+    answer_callback_query(cq_id)
+
+    if data == "menu":
+        _clear_session(chat_id)
+        _show_main_menu(chat_id)
+        return {"ok": True}
+
+    if data == "ai:again" or data == "ai:edit":
+        _show_ai_home(chat_id, message_id=message_id)
+        return {"ok": True}
+
+    if data == "ai:custom":
+        _start_custom_wizard(chat_id, message_id)
+        return {"ok": True}
+
+    if data.startswith("ai:p:"):
+        preset_id = data.split(":")[-1]
+        preset = next((p for p in PRESETS if p["id"] == preset_id), None)
+        if not preset:
+            _reply(chat_id, "Paket tapılmadı.", reply_markup=MAIN_KEYBOARD)
+            return {"ok": True}
+        _SESSIONS[_chat_key(chat_id)] = {
+            "mode": "ai",
+            "step": "from_origin",
+            "data": {
+                "region": preset["region"],
+                "days": preset["days"],
+                "budget": preset["budget"],
+                "interests": list(preset["interests"]),
+                "group_type": preset.get("group_type") or "solo",
+            },
+        }
+        _ask_from_origin(chat_id, message_id)
+        return {"ok": True}
+
+    if data.startswith("ai:r:"):
+        region = data.split(":")[-1]
+        if region not in BOT_REGION_KEYS:
+            return {"ok": True}
+        session = _get_session(chat_id)
+        session["mode"] = "ai"
+        session["data"]["region"] = region
         session["step"] = "days"
-        _reply(
+        label = REGION_LABELS.get(region, region)
+        _edit_or_reply(
             chat_id,
-            f"Region: {REGION_LABELS.get(region, region)}\nNeçə gün? (1–7)",
-            reply_markup=FLOW_KEYBOARD,
+            f"Region: {label}\nNeçə gün?",
+            message_id=message_id,
+            reply_markup=_days_inline(),
         )
-        return
+        return {"ok": True}
 
-    if step == "days":
-        if not text.isdigit() or not (1 <= int(text) <= 7):
-            _reply(chat_id, "1–7 arası rəqəm yazın.", reply_markup=FLOW_KEYBOARD)
-            return
-        data["days"] = int(text)
+    if data.startswith("ai:d:"):
+        days = data.split(":")[-1]
+        if not days.isdigit() or not (1 <= int(days) <= 7):
+            return {"ok": True}
+        session = _get_session(chat_id)
+        session["data"]["days"] = int(days)
         session["step"] = "budget"
-        _reply(
+        _edit_or_reply(
             chat_id,
-            "Büdcə seçin:\n1. Qənaətcil\n2. Orta\n3. Premium",
-            reply_markup=FLOW_KEYBOARD,
+            "Büdcə seçin:",
+            message_id=message_id,
+            reply_markup=_budget_inline(),
         )
-        return
+        return {"ok": True}
 
-    if step == "budget":
-        key = text.strip().lower()
-        budget = BUDGET_MAP.get(key)
-        if not budget:
-            _reply(chat_id, "1 / 2 / 3 və ya qənaətcil / orta / premium yazın.", reply_markup=FLOW_KEYBOARD)
-            return
-        data["budget"] = budget
+    if data.startswith("ai:b:"):
+        budget = data.split(":")[-1]
+        if budget not in {"budget", "mid", "premium"}:
+            return {"ok": True}
+        session = _get_session(chat_id)
+        session["data"]["budget"] = budget
         session["step"] = "interests"
-        _reply(
+        session["data"].setdefault("interests", [])
+        _edit_or_reply(
             chat_id,
-            "Maraqlar (bir və ya bir neçə, vergüllə):\n"
-            "1 təbiət  2 tarix  3 yemək\n"
-            "4 ailə  5 aktiv  6 foto\n"
-            "Məs: 1,3 və ya təbiət,yemək",
-            reply_markup=FLOW_KEYBOARD,
+            "Maraqlar (bir neçə seçin), sonra ✅ Hazır:",
+            message_id=message_id,
+            reply_markup=_interests_inline(list(session["data"]["interests"])),
         )
-        return
+        return {"ok": True}
 
-    if step == "interests":
-        parts = re.split(r"[,;\s]+", text.strip().lower())
-        interests: list[str] = []
-        for p in parts:
-            if not p:
-                continue
-            mapped = INTEREST_MAP.get(p)
-            if mapped and mapped not in interests:
-                interests.append(mapped)
+    if data.startswith("ai:i:") and data != "ai:i_done":
+        interest = data.split(":")[-1]
+        session = _get_session(chat_id)
+        selected: list[str] = list(session["data"].get("interests") or [])
+        if interest in selected:
+            selected = [x for x in selected if x != interest]
+        else:
+            if interest in {k for k, _ in INTERESTS}:
+                selected.append(interest)
+        session["data"]["interests"] = selected
+        if "family" in selected:
+            session["data"]["group_type"] = "family"
+        _edit_or_reply(
+            chat_id,
+            "Maraqlar (bir neçə seçin), sonra ✅ Hazır:",
+            message_id=message_id,
+            reply_markup=_interests_inline(selected),
+        )
+        return {"ok": True}
+
+    if data == "ai:i_done":
+        session = _get_session(chat_id)
+        interests = list(session["data"].get("interests") or [])
         if not interests:
-            _reply(chat_id, "Ən azı bir maraq seçin (məs: 1 və ya təbiət).", reply_markup=FLOW_KEYBOARD)
-            return
-        data["interests"] = interests
-        _reply(chat_id, "Marşrut hazırlanır…", reply_markup=FLOW_KEYBOARD)
-        try:
-            plan = run_plan_route(
-                region=data["region"],
-                days=int(data["days"]),
-                budget=str(data.get("budget") or "mid"),
-                interests=interests,
+            _edit_or_reply(
+                chat_id,
+                "Ən azı bir maraq seçin, sonra ✅ Hazır:",
+                message_id=message_id,
+                reply_markup=_interests_inline([]),
             )
-            _clear_session(chat_id)
-            _reply(chat_id, format_plan_for_telegram(plan), reply_markup=MAIN_KEYBOARD)
-        except ValueError as exc:
-            _clear_session(chat_id)
-            _reply(chat_id, f"Xəta: {exc}", reply_markup=MAIN_KEYBOARD)
-        except Exception:
-            logger.exception("AI plan failed")
-            _clear_session(chat_id)
-            _reply(chat_id, "Marşrut hazırlanmadı. Bir az sonra yenidən yoxlayın.", reply_markup=MAIN_KEYBOARD)
-        return
+            return {"ok": True}
+        _ask_from_origin(chat_id, message_id)
+        return {"ok": True}
 
-    _clear_session(chat_id)
-    _show_main_menu(chat_id)
+    if data == "ai:fo:0":
+        session = _get_session(chat_id)
+        session["data"]["from_origin"] = False
+        session["data"].pop("origin_lat", None)
+        session["data"].pop("origin_lng", None)
+        payload = dict(session.get("data") or {})
+        _clear_session(chat_id)
+        _run_and_send_plan(chat_id, payload)
+        return {"ok": True}
 
+    if data == "ai:fo:1":
+        _request_location(chat_id)
+        return {"ok": True}
 
-def _handle_manual_step(chat_id: str | int, text: str, session: dict[str, Any]) -> None:
-    step = session.get("step")
-    data = session.setdefault("data", {})
-    stops: list[str] = list(data.get("stops") or [])
-
-    if step == "region":
-        region = _parse_region(text)
-        if not region:
-            _reply(chat_id, "Region tapılmadı.\n\n" + _region_menu_text(), reply_markup=FLOW_KEYBOARD)
-            return
-        data["region"] = region
+    if data.startswith("man:r:"):
+        region = data.split(":")[-1]
+        if region not in BOT_REGION_KEYS:
+            return {"ok": True}
+        session = _get_session(chat_id)
+        session["mode"] = "manual"
+        session["data"] = {"stops": [], "region": region}
         session["step"] = "stops"
         sample = _search_pois(region, "")
         hint = ""
         if sample:
-            hint = "\nNümunələr:\n" + "\n".join(f"• {p.get('name')}" for p in sample[:5])
+            hint = "\nNümunələr:\n" + "\n".join(
+                f"• {p.get('name')}" for p in sample[:5]
+            )
+        label = REGION_LABELS.get(region, region)
         _reply(
             chat_id,
-            f"Region: {REGION_LABELS.get(region, region)}\n"
-            f"Stop adı yazın (max {MAX_MANUAL_STOPS}).\n"
-            f"Bitirəndə «{BTN_DONE}» basın.{hint}",
+            f"Region: {label}\nStop adı yazın (max {MAX_MANUAL_STOPS})."
+            f"\nBitirəndə «{BTN_DONE}».{hint}",
             reply_markup=MANUAL_KEYBOARD,
         )
-        return
+        return {"ok": True}
+
+    return {"ok": True}
+
+
+def _handle_manual_text(chat_id: str | int, text: str, session: dict[str, Any]) -> None:
+    data = session.setdefault("data", {})
+    stops: list[str] = list(data.get("stops") or [])
+    step = session.get("step")
 
     if step == "stops":
         if text.strip() == BTN_DONE or text.strip().lower() in {"hazır", "hazir", "done"}:
@@ -471,92 +709,49 @@ def _handle_manual_step(chat_id: str | int, text: str, session: dict[str, Any]) 
                 _reply(chat_id, "Ən azı bir stop əlavə edin.", reply_markup=MANUAL_KEYBOARD)
                 return
             region = data.get("region") or ""
-            label = REGION_LABELS.get(region, region)
+            label = REGION_LABELS.get(str(region), region)
             lines = [f"🗺️ Manual marşrut — {label}", ""]
             for i, name in enumerate(stops, start=1):
                 lines.append(f"{i}. {name}")
-            lines.append("\nXəritə / redaktə: trippoint://ai-komekci")
+            lines.append("\nXəritə: trippoint://ai-komekci")
+            text_out = "\n".join(lines)
+            _save_last(chat_id, text_out)
             _clear_session(chat_id)
-            _reply(chat_id, "\n".join(lines), reply_markup=MAIN_KEYBOARD)
+            _reply(chat_id, text_out, reply_markup=MAIN_KEYBOARD)
             return
 
         if len(stops) >= MAX_MANUAL_STOPS:
             _reply(
                 chat_id,
-                f"Maksimum {MAX_MANUAL_STOPS} stop. «{BTN_DONE}» basın.",
+                f"Maksimum {MAX_MANUAL_STOPS}. «{BTN_DONE}» basın.",
                 reply_markup=MANUAL_KEYBOARD,
             )
             return
 
         region = str(data.get("region") or "")
         found = _search_pois(region, text)
+        name = text.strip()
         if found:
-            name = str(found[0].get("name") or text.strip())
-            # If multiple, let user pick by showing list once then use first match for MVP
-            if len(found) > 1 and text.strip().lower() not in {
-                str(p.get("name") or "").lower() for p in found
-            }:
-                listing = "\n".join(f"{i}. {p.get('name')}" for i, p in enumerate(found[:5], start=1))
-                data["pending_choices"] = [str(p.get("name") or "") for p in found[:5]]
-                session["step"] = "pick_stop"
-                _reply(
-                    chat_id,
-                    f"Bir neçə yer tapıldı — nömrə seçin:\n{listing}",
-                    reply_markup=MANUAL_KEYBOARD,
-                )
-                return
-        else:
-            name = text.strip()
-            if len(name) < 2:
-                _reply(chat_id, "Daha uzun ad yazın və ya «Hazır» basın.", reply_markup=MANUAL_KEYBOARD)
-                return
-
-        stops.append(name)
-        data["stops"] = stops
-        data.pop("pending_choices", None)
-        _reply(
-            chat_id,
-            f"Əlavə olundu ({len(stops)}/{MAX_MANUAL_STOPS}): {name}\n"
-            f"Növbəti stop və ya «{BTN_DONE}».",
-            reply_markup=MANUAL_KEYBOARD,
-        )
-        return
-
-    if step == "pick_stop":
-        choices: list[str] = list(data.get("pending_choices") or [])
-        pick = text.strip()
-        name: str | None = None
-        if pick.isdigit():
-            idx = int(pick) - 1
-            if 0 <= idx < len(choices):
-                name = choices[idx]
-        else:
-            for c in choices:
-                if c.lower() == pick.lower():
-                    name = c
-                    break
-        if not name:
-            _reply(chat_id, "Nömrə ilə seçin.", reply_markup=MANUAL_KEYBOARD)
+            name = str(found[0].get("name") or name)
+        if len(name) < 2:
+            _reply(chat_id, "Daha uzun ad yazın.", reply_markup=MANUAL_KEYBOARD)
             return
         stops.append(name)
         data["stops"] = stops
-        data.pop("pending_choices", None)
-        session["step"] = "stops"
         _reply(
             chat_id,
             f"Əlavə olundu ({len(stops)}/{MAX_MANUAL_STOPS}): {name}\n"
-            f"Növbəti stop və ya «{BTN_DONE}».",
+            f"Növbəti və ya «{BTN_DONE}».",
             reply_markup=MANUAL_KEYBOARD,
         )
-        return
-
-    _clear_session(chat_id)
-    _show_main_menu(chat_id)
 
 
 def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
-    """Process one Telegram Update. Always returns quickly; never raises to caller."""
+    """Process one Telegram Update. Never raises to caller."""
     try:
+        if update.get("callback_query"):
+            return _handle_callback(update)
+
         message = update.get("message") or update.get("edited_message")
         if not isinstance(message, dict):
             return {"ok": True, "ignored": True}
@@ -566,36 +761,43 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
         if chat_id is None:
             return {"ok": True, "ignored": True}
 
+        from_user = message.get("from") or {}
+        _ensure_telegram_user(
+            chat_id,
+            username=str(from_user["username"]) if from_user.get("username") else None,
+        )
+
+        # Location for fromOrigin flow
+        loc = message.get("location")
+        if isinstance(loc, dict) and loc.get("latitude") is not None:
+            session = _get_session(chat_id)
+            if session.get("mode") == "ai" and session.get("step") == "await_location":
+                data = dict(session.get("data") or {})
+                data["from_origin"] = True
+                data["origin_lat"] = float(loc["latitude"])
+                data["origin_lng"] = float(loc["longitude"])
+                _clear_session(chat_id)
+                _run_and_send_plan(chat_id, data)
+                return {"ok": True}
+
         text = (message.get("text") or "").strip()
         if not text:
             return {"ok": True, "ignored": True}
 
-        from_user = message.get("from") or {}
-        username = from_user.get("username")
-        _ensure_telegram_user(
-            chat_id,
-            username=str(username) if username else None,
-        )
-
-        # /start [CODE] — CODE optional app link; guests get menu either way
         if text.startswith("/start"):
             parts = text.split(maxsplit=1)
             code = parts[1].strip() if len(parts) > 1 else ""
             _clear_session(chat_id)
             if code:
                 ok, msg = _link_account(chat_id, code)
-                if ok:
-                    _show_main_menu(chat_id, msg)
-                else:
-                    _show_main_menu(
-                        chat_id,
-                        msg + "\n\nYenə də menyudan istifadə edə bilərsiniz.",
-                    )
+                _show_main_menu(
+                    chat_id,
+                    msg if ok else msg + "\n\nYenə də menyudan istifadə edə bilərsiniz.",
+                )
                 return {"ok": True, "linked": ok}
-
             _show_main_menu(
                 chat_id,
-                "Xoş gəldiniz! App lazım deyil — AI və manual marşrut buradadır.",
+                "Xoş gəldiniz! App lazım deyil — paket və ya öz seçimlə AI marşrut.",
             )
             return {"ok": True, "guest": True}
 
@@ -604,16 +806,58 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
             _show_main_menu(chat_id, "Ləğv edildi.")
             return {"ok": True}
 
+        if text == BTN_SKIP_LOC:
+            session = _get_session(chat_id)
+            if session.get("mode") == "ai" and session.get("step") == "await_location":
+                data = dict(session.get("data") or {})
+                data["from_origin"] = False
+                data.pop("origin_lat", None)
+                data.pop("origin_lng", None)
+                _clear_session(chat_id)
+                _reply(
+                    chat_id,
+                    "Lokasiya olmadan davam (cari məkan nəzərə alınmadı).",
+                    reply_markup=MAIN_KEYBOARD,
+                )
+                _run_and_send_plan(chat_id, data)
+                return {"ok": True}
+
         if text == BTN_HELP or text.lower() in {"kömək", "komek", "/help", "help"}:
             _reply(chat_id, _help_text(), reply_markup=MAIN_KEYBOARD)
             return {"ok": True}
 
         if text == BTN_LINK_APP or text.lower() in {"bağla", "bagla", "link"}:
-            _link_app_help(chat_id)
+            if _lookup_user_id(chat_id):
+                _reply(
+                    chat_id,
+                    "Bu Telegram artıq app hesabına bağlıdır ✅",
+                    reply_markup=MAIN_KEYBOARD,
+                )
+            else:
+                _reply(
+                    chat_id,
+                    "App opsionaldır.\n"
+                    "1) TripPoint → Profil → Telegram bağla\n"
+                    "2) Botda Start\n\n"
+                    "App yoxdursa da AI/manual işləyir.",
+                    reply_markup=MAIN_KEYBOARD,
+                )
+            return {"ok": True}
+
+        if text == BTN_LAST or text.lower() in {"/last", "son"}:
+            last = _LAST_PLANS.get(_chat_key(chat_id))
+            if last:
+                _reply(chat_id, last, reply_markup=_ai_result_keyboard())
+            else:
+                _reply(
+                    chat_id,
+                    "Hələ son marşrut yoxdur. AI və ya Manual seçin.",
+                    reply_markup=MAIN_KEYBOARD,
+                )
             return {"ok": True}
 
         if text == BTN_AI:
-            _start_ai(chat_id)
+            _show_ai_home(chat_id)
             return {"ok": True}
 
         if text == BTN_MANUAL:
@@ -621,13 +865,8 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
             return {"ok": True}
 
         session = _get_session(chat_id)
-        mode = session.get("mode") or "idle"
-
-        if mode == "ai":
-            _handle_ai_step(chat_id, text, session)
-            return {"ok": True}
-        if mode == "manual":
-            _handle_manual_step(chat_id, text, session)
+        if session.get("mode") == "manual":
+            _handle_manual_text(chat_id, text, session)
             return {"ok": True}
 
         _show_main_menu(chat_id)

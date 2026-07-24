@@ -19,6 +19,15 @@ REGION_LABELS: dict[str, str] = {
     "baku": "Bakı",
 }
 
+REGION_EMOJI: dict[str, str] = {
+    "quba": "🏔",
+    "qusar": "🏔",
+    "seki": "🏛",
+    "qabala": "🌲",
+    "lerik": "🌿",
+    "baku": "🏙",
+}
+
 # Canonical region keys for bot menus (no alias duplicates)
 BOT_REGION_KEYS: list[str] = ["quba", "qusar", "seki", "qabala", "lerik", "baku"]
 
@@ -30,6 +39,9 @@ def run_plan_route(
     budget: str = "mid",
     interests: list[str] | None = None,
     group_type: str = "solo",
+    from_origin: bool = False,
+    origin_lat: float | None = None,
+    origin_lng: float | None = None,
 ) -> dict[str, Any]:
     """Build itinerary. Raises ValueError on user/input errors."""
     region_key = (region or "").strip().lower()
@@ -42,6 +54,10 @@ def run_plan_route(
     days_n = int(days)
     if days_n < 1 or days_n > 7:
         raise ValueError("Gün sayı 1–7 arası olmalıdır")
+
+    use_origin = bool(
+        from_origin and origin_lat is not None and origin_lng is not None
+    )
 
     db_region = REGION_DB_ID.get(region_key, region_key)
     region_label = REGION_LABELS.get(region_key) or REGION_LABELS.get(db_region) or db_region
@@ -72,9 +88,9 @@ def run_plan_route(
         accommodations=accommodations,
         attractions=attractions,
         weather=None,
-        origin_lat=None,
-        origin_lng=None,
-        from_origin=False,
+        origin_lat=float(origin_lat) if use_origin else None,
+        origin_lng=float(origin_lng) if use_origin else None,
+        from_origin=use_origin,
         depart_time="08:00",
         return_by_time="21:00",
         variety_seed=None,
@@ -107,6 +123,7 @@ def run_plan_route(
         "lodging": lodging,
         "source": "fastapi_geo",
         "candidatesSource": candidate_source,
+        "fromOrigin": use_origin,
     }
 
 
@@ -114,6 +131,8 @@ def format_plan_for_telegram(plan: dict[str, Any]) -> str:
     """Compact AZ text for Telegram (under ~4000 chars)."""
     label = plan.get("regionLabel") or plan.get("region") or ""
     lines: list[str] = [f"📍 {label} — AI marşrut"]
+    if plan.get("fromOrigin"):
+        lines.append("🚗 Cari məkandan gediş nəzərə alınıb")
     summary = (plan.get("summary") or "").strip()
     if summary:
         lines.append(summary)

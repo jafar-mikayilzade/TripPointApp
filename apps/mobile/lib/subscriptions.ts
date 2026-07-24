@@ -1,3 +1,4 @@
+import { getApiBaseUrl } from './apiBase';
 import { supabase } from './supabase';
 
 export type SubscriptionTargetType = 'listing' | 'organizer';
@@ -121,6 +122,28 @@ export async function toggleSubscription(
   return { subscribed: true };
 }
 
+/** Fire-and-forget Telegram mirror for linked users only. */
+async function mirrorNotificationsToTelegram(
+  userIds: string[],
+  title: string,
+  body?: string | null
+): Promise<void> {
+  const base = getApiBaseUrl();
+  if (!base || userIds.length === 0) {
+    return;
+  }
+  const text = body?.trim() ? `${title}\n${body.trim()}` : title;
+  try {
+    await fetch(`${base}/api/telegram/notify-users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_ids: userIds, text }),
+    });
+  } catch {
+    // optional channel
+  }
+}
+
 async function insertNotificationsForUsers(input: {
   userIds: string[];
   kind: AppNotificationKind;
@@ -144,6 +167,7 @@ async function insertNotificationsForUsers(input: {
   }));
 
   await supabase.from('notifications').insert(rows);
+  void mirrorNotificationsToTelegram(unique, input.title, input.body);
 }
 
 /** Yeni tur yaradılanda — təşkilatçı abunələrinə bildiriş */
