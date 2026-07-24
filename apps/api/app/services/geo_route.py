@@ -546,12 +546,11 @@ def assign_to_nearest_seed(
 def rebalance_clusters(
     clusters: list[list[dict[str, Any]]],
     *,
-    min_size: int = 1,
+    min_size: int = 2,
 ) -> list[list[dict[str, Any]]]:
     """
-    Soft fill: only move into *empty* clusters (avoid stretching days).
-    Prefer donor points closest to needy cluster's eventual neighbor seeds —
-    here: closest to donor centroid (core) so we don't steal far outliers.
+    Steal from rich days into thin ones so middle days are not left with 1 POI.
+    Donor must stay above min_size after the move.
     """
     if not clusters:
         return clusters
@@ -560,31 +559,35 @@ def rebalance_clusters(
     def size(i: int) -> int:
         return len(clusters[i])
 
-    for i in range(len(clusters)):
-        if size(i) >= min_size:
-            continue
-        # Only fill completely empty clusters once
-        if size(i) > 0:
-            continue
-        donor = max(range(len(clusters)), key=size)
-        if donor == i or size(donor) <= 2:
-            continue
-        donor_c = cluster_centroid(clusters[donor])
-        if not donor_c or not clusters[donor]:
-            continue
-        # Move a mid-distance point (not the farthest outlier)
-        scored = []
-        for j, poi in enumerate(clusters[donor]):
-            coord = _coord(poi)
-            if coord is None:
+    # Multiple passes — keep filling until no donor can give
+    for _ in range(max(8, len(clusters) * 3)):
+        needy = [i for i in range(len(clusters)) if size(i) < min_size]
+        if not needy:
+            break
+        progressed = False
+        for i in needy:
+            donor = max(range(len(clusters)), key=size)
+            if donor == i or size(donor) <= min_size:
                 continue
-            d = haversine_km(donor_c[0], donor_c[1], coord[0], coord[1])
-            scored.append((d, j))
-        if not scored:
-            continue
-        scored.sort(key=lambda t: t[0])
-        move_i = scored[len(scored) // 2][1]
-        clusters[i].append(clusters[donor].pop(move_i))
+            donor_c = cluster_centroid(clusters[donor])
+            if not donor_c or not clusters[donor]:
+                continue
+            scored: list[tuple[float, int]] = []
+            for j, poi in enumerate(clusters[donor]):
+                coord = _coord(poi)
+                if coord is None:
+                    continue
+                d = haversine_km(donor_c[0], donor_c[1], coord[0], coord[1])
+                scored.append((d, j))
+            if not scored:
+                continue
+            scored.sort(key=lambda t: t[0])
+            # Prefer a mid-distance point (not the farthest outlier)
+            move_i = scored[len(scored) // 2][1]
+            clusters[i].append(clusters[donor].pop(move_i))
+            progressed = True
+        if not progressed:
+            break
 
     return clusters
 
@@ -635,7 +638,7 @@ def build_day_clusters(
     while len(clusters) < days and len(usable) > len(clusters):
         clusters.append([])
 
-    clusters = rebalance_clusters(clusters, min_size=1)
+    clusters = rebalance_clusters(clusters, min_size=2)
     clusters = [
         trim_cluster_diameter(c, max_diameter_km=25.0) if c else [] for c in clusters
     ]

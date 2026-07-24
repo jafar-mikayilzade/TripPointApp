@@ -28,6 +28,7 @@ import { ResizableSplit } from '../../components/ResizableSplit';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
 import { colors } from '../../constants/theme';
 import { getErrorMessage } from '../../lib/errors';
+import { useResponsiveLayout } from '../../lib/layout';
 import { collectRouteStops, openRouteInGoogleMaps } from '../../lib/openNavigation';
 import { planRoute as requestPlanRoute } from '../../lib/planRoute';
 import { fetchRouteCandidates } from '../../lib/routeCandidates';
@@ -256,6 +257,7 @@ const MARSRUT_PLAN_SPLIT = 0.5;
 export default function MarsrutScreen() {
   const mapRef = useRef<MapRef | null>(null);
   const { showInfo } = useInfoToast();
+  const responsive = useResponsiveLayout();
   const GOOGLE_MAPS_KEY =
     Constants.expoConfig?.extra?.googleMapsKey ||
     process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY ||
@@ -668,7 +670,7 @@ export default function MarsrutScreen() {
                   duration: String(stop.duration ?? ''),
                   lat: Number(stop.lat),
                   lng: Number(stop.lng),
-                  tip: travel ? '' : String(stop.tip ?? ''),
+                  tip: String(stop.tip ?? ''),
                   daypart,
                   sequence_order: travel ? null : visitSeq,
                   arrival_time: String(stop.time ?? ''),
@@ -710,7 +712,7 @@ export default function MarsrutScreen() {
               duration: String((original as { duration?: string }).duration ?? ''),
               lat: step.lat,
               lng: step.lng,
-              tip: travel ? '' : String((original as { tip?: string }).tip ?? ''),
+              tip: String((original as { tip?: string }).tip ?? ''),
               daypart,
               sequence_order: travel ? null : step.sequence_order,
               arrival_time: step.arrival_time,
@@ -913,7 +915,7 @@ export default function MarsrutScreen() {
                   </Text>
                 </TouchableOpacity>
               ) : null}
-              <ProfileCornerButton style={styles.profileCorner} />
+              {plan ? <ProfileCornerButton style={styles.profileCorner} /> : null}
             </View>
           }
           bottom={
@@ -921,14 +923,33 @@ export default function MarsrutScreen() {
               {!plan ? (
                 <ScrollView
                   style={styles.flex}
-                  contentContainerStyle={styles.formContent}
+                  contentContainerStyle={[
+                    styles.formContent,
+                    {
+                      paddingHorizontal: responsive.padH,
+                      paddingBottom: responsive.formBottomPad,
+                    },
+                  ]}
                   keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={false}
                 >
-                  <Text style={styles.title}>AI Marşrut Planlayıcı</Text>
-                  <Text style={styles.subtitle}>
-                    Sizin üçün ən optimal marşrutu hazırlayırıq
-                  </Text>
+                  <View style={styles.formHeader}>
+                    <View style={styles.formHeaderText}>
+                      <Text
+                        style={[styles.title, { fontSize: responsive.titleSize }]}
+                        numberOfLines={2}
+                      >
+                        AI Marşrut Planlayıcı
+                      </Text>
+                      <Text
+                        style={[styles.subtitle, { fontSize: responsive.subtitleSize }]}
+                        numberOfLines={2}
+                      >
+                        Sizin üçün ən optimal marşrutu hazırlayırıq
+                      </Text>
+                    </View>
+                    <ProfileCornerButton />
+                  </View>
 
                   {errorMessage ? (
                     <Text style={styles.errorText}>{errorMessage}</Text>
@@ -977,7 +998,11 @@ export default function MarsrutScreen() {
                           style={[styles.chip, selected && styles.chipSelected]}
                         >
                           <Text
-                            style={[styles.chipText, selected && styles.chipTextSelected]}
+                            style={[
+                              styles.chipText,
+                              { fontSize: responsive.chipFontSize },
+                              selected && styles.chipTextSelected,
+                            ]}
                           >
                             {region.label}
                           </Text>
@@ -1050,14 +1075,17 @@ export default function MarsrutScreen() {
                           onPress={() => toggleInterest(option.id)}
                           style={[
                             styles.interestChip,
+                            { flexBasis: responsive.interestBasis },
                             selected && styles.interestChipSelected,
                           ]}
                         >
                           <Text
                             style={[
                               styles.interestText,
+                              { fontSize: responsive.chipFontSize },
                               selected && styles.interestTextSelected,
                             ]}
+                            numberOfLines={1}
                           >
                             {option.label}
                           </Text>
@@ -1281,6 +1309,11 @@ export default function MarsrutScreen() {
                                   </Text>
                                   {stop.duration ? (
                                     <Text style={styles.stopDuration}>{stop.duration}</Text>
+                                  ) : null}
+                                  {stop.tip?.trim() ? (
+                                    <Text style={styles.travelTip} numberOfLines={2}>
+                                      {stop.tip.trim()}
+                                    </Text>
                                   ) : null}
                                 </>
                               ) : (
@@ -1522,6 +1555,17 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     flexGrow: 1,
   },
+  formHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 4,
+  },
+  formHeaderText: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 4,
+  },
   planContent: {
     paddingHorizontal: 12,
     paddingBottom: 40,
@@ -1533,6 +1577,7 @@ const styles = StyleSheet.create({
     color: colors.text,
     letterSpacing: -0.4,
     marginTop: 4,
+    flexShrink: 1,
   },
   subtitle: {
     marginTop: 4,
@@ -1541,6 +1586,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: colors.textMuted,
     lineHeight: 17,
+    flexShrink: 1,
   },
   label: {
     fontSize: 12,
@@ -1585,7 +1631,10 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   interestChip: {
-    width: '48%',
+    flexGrow: 1,
+    flexBasis: '47%',
+    maxWidth: '100%',
+    minWidth: 0,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderSoft,
@@ -1624,11 +1673,15 @@ const styles = StyleSheet.create({
     color: colors.textOnAccent,
     fontSize: 14,
     fontWeight: '700',
+    flexShrink: 1,
   },
   loadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
+    maxWidth: '100%',
+    paddingHorizontal: 4,
   },
   secondaryButton: {
     marginTop: 12,
@@ -1757,6 +1810,7 @@ const styles = StyleSheet.create({
   },
   dayTitle: {
     flex: 1,
+    minWidth: 0,
     fontSize: 13,
     fontWeight: '700',
     color: colors.text,
@@ -1765,6 +1819,9 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textMuted,
     fontWeight: '600',
+    flexShrink: 1,
+    maxWidth: '42%',
+    textAlign: 'right',
   },
   dayNotes: {
     fontSize: 12,
@@ -1853,6 +1910,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.textMuted,
     marginTop: 1,
+  },
+  travelTip: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 4,
+    lineHeight: 15,
   },
   stopTip: {
     fontSize: 11,

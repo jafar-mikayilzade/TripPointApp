@@ -67,9 +67,16 @@ HISTORICAL_CATS = frozenset({"historical", "monument"})
 
 MAX_RESTAURANT_KM = 8.0
 ATTRACTIONS_PER_DAY = 3
-# Tight corridor — opposite-side stops must not enter the day set
+# Full (middle) days pack denser; travel days stay a bit tighter
+ATTRACTIONS_PER_FULL_DAY = 4
+ATTRACTIONS_PER_TRAVEL_DAY = 3
 MAX_DAY_DIAMETER_KM = 8.0
 MAX_ADD_FROM_PATH_KM = 3.5
+# Looser corridor for full on-site days (rural POIs are often 5–12 km apart)
+FULL_DAY_DIAMETER_KM = 15.0
+FULL_DAY_ADD_FROM_PATH_KM = 6.5
+TRAVEL_DAY_DIAMETER_KM = 12.0
+TRAVEL_DAY_ADD_FROM_PATH_KM = 5.5
 # Food/hotel only if they barely bend the path
 MAX_FOOD_DETOUR_KM = 1.2
 MAX_HOTEL_FROM_PATH_END_KM = 6.0
@@ -210,6 +217,24 @@ def _nearest_food(
     return poi
 
 
+def _day_pack_params(day_i: int, days_n: int) -> tuple[int, float, float]:
+    """
+    (attraction_limit, max_diameter_km, max_add_from_path_km)
+
+    Middle days are fully on-site → denser packing.
+    Day 1 / last day lose time to travel → still try for several stops.
+    """
+    if days_n <= 1:
+        return ATTRACTIONS_PER_FULL_DAY, FULL_DAY_DIAMETER_KM, FULL_DAY_ADD_FROM_PATH_KM
+    if day_i == 1 or day_i == days_n:
+        return (
+            ATTRACTIONS_PER_TRAVEL_DAY,
+            TRAVEL_DAY_DIAMETER_KM,
+            TRAVEL_DAY_ADD_FROM_PATH_KM,
+        )
+    return ATTRACTIONS_PER_FULL_DAY, FULL_DAY_DIAMETER_KM, FULL_DAY_ADD_FROM_PATH_KM
+
+
 def pick_day_pieces(
     *,
     cluster: list[dict[str, Any]],
@@ -219,49 +244,99 @@ def pick_day_pieces(
     origin_lat: float,
     origin_lng: float,
     rng: random.Random | None = None,
+    attraction_limit: int | None = None,
+    max_diameter_km: float | None = None,
+    max_add_from_path_km: float | None = None,
+    global_pool: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Interest-aware compact open tour from the cluster.
     Food is NOT picked here — only added later if detour is tiny.
+    If cluster is thin, top up from global_pool with the same day limits.
     """
     del restaurants  # lunch/breakfast deferred to assemble (detour-gated)
-    cluster = trim_cluster_diameter(cluster, max_diameter_km=MAX_DAY_DIAMETER_KM)
-    if not cluster:
+    limit = attraction_limit if attraction_limit is not None else ATTRACTIONS_PER_DAY
+    diameter = max_diameter_km if max_diameter_km is not None else MAX_DAY_DIAMETER_KM
+    add_km = (
+        max_add_from_path_km
+        if max_add_from_path_km is not None
+        else MAX_ADD_FROM_PATH_KM
+    )
+
+    cluster = trim_cluster_diameter(cluster, max_diameter_km=diameter)
+    if not cluster and not global_pool:
         return {"attractions": []}
 
-    anchor = cluster_centroid(cluster)
+    anchor = cluster_centroid(cluster) if cluster else None
     lat = anchor[0] if anchor else origin_lat
     lng = anchor[1] if anchor else origin_lng
 
-    # Strict interest pass first
-    attractions = grow_compact_tour(
-        cluster,
-        origin_lat=lat,
-        origin_lng=lng,
-        used=used,
-        limit=ATTRACTIONS_PER_DAY,
-        max_diameter_km=MAX_DAY_DIAMETER_KM,
-        max_add_from_path_km=MAX_ADD_FROM_PATH_KM,
-        prefer_categories=interest_cats or None,
-        rng=rng,
-    )
-
-    # If interest pool too thin in this cluster, fill remaining slots without prefer
-    if interest_cats and len(attractions) < min(2, ATTRACTIONS_PER_DAY):
-        already = {str(p.get("id") or "") for p in attractions}
-        fill_used = set(used) | already
-        extra = grow_compact_tour(
+    attractions: list[dict[str, Any]] = []
+    if cluster:
+        attractions = grow_compact_tour(
             cluster,
             origin_lat=lat,
             origin_lng=lng,
+            used=used,
+            limit=limit,
+            max_diameter_km=diameter,
+            max_add_from_path_km=add_km,
+            prefer_categories=interest_cats or None,
+            rng=rng,
+        )
+
+        if interest_cats and len(attractions) < min(2, limit):
+            already = {str(p.get("id") or "") for p in attractions}
+            fill_used = set(used) | already
+            extra = grow_compact_tour(
+                cluster,
+                origin_lat=lat,
+                origin_lng=lng,
+                used=fill_used,
+                limit=limit - len(attractions),
+                max_diameter_km=diameter,
+                max_add_from_path_km=add_km,
+                prefer_categories=None,
+                rng=rng,
+            )
+            attractions = attractions + extra
+
+    # Thin cluster (common on day 2/3) — pull more from unused global POIs
+    if global_pool and len(attractions) < limit:
+        already = {str(p.get("id") or "") for p in attractions}
+        fill_used = set(used) | already
+        seed_lat, seed_lng = lat, lng
+        if attractions:
+            last_c = poi_coord(attractions[-1])
+            if last_c:
+                seed_lat, seed_lng = last_c
+        extra = grow_compact_tour(
+            global_pool,
+            origin_lat=seed_lat,
+            origin_lng=seed_lng,
             used=fill_used,
-            limit=ATTRACTIONS_PER_DAY - len(attractions),
-            max_diameter_km=MAX_DAY_DIAMETER_KM,
-            max_add_from_path_km=MAX_ADD_FROM_PATH_KM,
-            prefer_categories=None,
+            limit=limit - len(attractions),
+            max_diameter_km=diameter,
+            max_add_from_path_km=add_km,
+            prefer_categories=interest_cats or None,
             rng=rng,
         )
         attractions = attractions + extra
+        if interest_cats and len(attractions) < limit:
+            already = {str(p.get("id") or "") for p in attractions}
+            fill_used = set(used) | already
+            extra2 = grow_compact_tour(
+                global_pool,
+                origin_lat=seed_lat,
+                origin_lng=seed_lng,
+                used=fill_used,
+                limit=limit - len(attractions),
+                max_diameter_km=diameter,
+                max_add_from_path_km=add_km,
+                prefer_categories=None,
+                rng=rng,
+            )
+            attractions = attractions + extra2
 
     for poi in attractions:
         pid = str(poi.get("id") or "")
@@ -414,6 +489,7 @@ def _travel_leg_stop(
     lat: float,
     lng: float,
     daypart: str,
+    tip: str = "",
 ) -> dict[str, Any]:
     return {
         "id": None,
@@ -430,7 +506,7 @@ def _travel_leg_stop(
         "duration": _duration_label(duration_min),
         "duration_minutes": duration_min,
         "daypart": daypart,
-        "tip": "",
+        "tip": tip or "",
     }
 
 
@@ -549,6 +625,7 @@ def build_skeleton(
     last_day_end = int(travel.get("last_day_end_min") or travel.get("day_end_min") or 19 * 60)
 
     for day_i in range(1, days_n + 1):
+        limit, diameter, add_km = _day_pack_params(day_i, days_n)
         cluster = clusters[day_i - 1] if day_i - 1 < len(clusters) else []
         if not cluster:
             leftovers = [p for p in attractions if str(p.get("id") or "") not in used]
@@ -565,8 +642,9 @@ def build_skeleton(
                 ]
                 leftovers = pref + rest
             if leftovers:
-                cluster = leftovers[:ATTRACTIONS_PER_DAY]
+                cluster = leftovers[: max(limit, ATTRACTIONS_PER_DAY)]
 
+        global_pool = [p for p in attractions if str(p.get("id") or "") not in used]
         pieces = pick_day_pieces(
             cluster=cluster,
             restaurants=restaurants,
@@ -575,6 +653,10 @@ def build_skeleton(
             origin_lat=start_lat,
             origin_lng=start_lng,
             rng=rng,
+            attraction_limit=limit,
+            max_diameter_km=diameter,
+            max_add_from_path_km=add_km,
+            global_pool=global_pool,
         )
 
         # Time windows
@@ -603,58 +685,54 @@ def build_skeleton(
             allow_hotel=allow_hotel and day_i < days_n,
         )
 
-        # Prepend outbound travel leg on day 1 when coming from elsewhere
+        region_label = str(db_region or region).replace("_", " ").title()
+        # Single outbound card (no separate 15-min "arrival" node)
         if travel.get("from_origin") and day_i == 1 and stops:
             depart_m = parse_hhmm(travel.get("depart_origin_at"), 8 * 60)
             out_m = int(travel.get("outbound_minutes") or 0)
             o_lat = float(travel.get("origin_lat") or start_lat)
             o_lng = float(travel.get("origin_lng") or start_lng)
+            arrive_at = travel.get("arrive_region_at") or _minutes_to_hhmm(
+                int(travel.get("day_start_min") or w_start)
+            )
+            dist = travel.get("distance_km")
+            tip = f"Çatış ~{arrive_at}"
+            if dist is not None:
+                tip += f" · ~{dist} km"
             stops = [
                 _travel_leg_stop(
-                    name="Yola çıxış (cari məkan)",
+                    name=f"Yola çıxış → {region_label}",
                     time_min=depart_m,
-                    duration_min=out_m,
+                    duration_min=max(out_m, 1),
                     lat=o_lat,
                     lng=o_lng,
                     daypart="travel_out",
-                ),
-                _travel_leg_stop(
-                    name=f"{db_region.title()} — çatış",
-                    time_min=int(travel.get("day_start_min") or w_start),
-                    duration_min=15,
-                    lat=start_lat,
-                    lng=start_lng,
-                    daypart="travel_arrive",
+                    tip=tip,
                 ),
             ] + stops
 
-        # Append return leg on last day
+        # Single return card (no separate 15-min "home arrival" node)
         if travel.get("from_origin") and day_i == days_n and stops:
             leave_m = parse_hhmm(travel.get("leave_region_by"), last_day_end)
             ret_m = int(travel.get("return_minutes") or 0)
             o_lat = float(travel.get("origin_lat") or start_lat)
             o_lng = float(travel.get("origin_lng") or start_lng)
-            # Ensure leave is after last visit
             last_visit = stops[-1]
             last_t = parse_hhmm(str(last_visit.get("time") or ""), leave_m)
             last_dur = int(last_visit.get("duration_minutes") or 0)
             leave_m = max(leave_m, last_t + last_dur)
+            home_at = travel.get("return_origin_by") or _minutes_to_hhmm(
+                leave_m + max(ret_m, 0)
+            )
             stops = stops + [
                 _travel_leg_stop(
-                    name="Geri dönüş — yola çıxış",
+                    name="Geri dönüş → ev",
                     time_min=leave_m,
-                    duration_min=ret_m,
+                    duration_min=max(ret_m, 1),
                     lat=start_lat,
                     lng=start_lng,
                     daypart="travel_return",
-                ),
-                _travel_leg_stop(
-                    name="Evə / Bakıya çatış",
-                    time_min=leave_m + ret_m,
-                    duration_min=15,
-                    lat=o_lat,
-                    lng=o_lng,
-                    daypart="travel_home",
+                    tip=f"Evə çatış ~{home_at}",
                 ),
             ]
 
