@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { Linking } from 'react-native';
 
 import { supabase } from './supabase';
@@ -14,7 +15,11 @@ function randomLinkCode(): string {
 }
 
 export function getTelegramBotUsername(): string | null {
-  const raw = process.env.EXPO_PUBLIC_TELEGRAM_BOT_USERNAME?.trim();
+  const fromEnv = process.env.EXPO_PUBLIC_TELEGRAM_BOT_USERNAME?.trim();
+  const fromExtra = (
+    Constants.expoConfig?.extra as { telegramBotUsername?: string } | undefined
+  )?.telegramBotUsername?.trim();
+  const raw = fromEnv || fromExtra || '';
   if (!raw) {
     return null;
   }
@@ -30,7 +35,7 @@ export async function startTelegramLink(): Promise<{
   if (!bot) {
     return {
       opened: false,
-      error: 'EXPO_PUBLIC_TELEGRAM_BOT_USERNAME təyin edilməyib',
+      error: 'Telegram bot username təyin edilməyib (.env / app.json)',
     };
   }
 

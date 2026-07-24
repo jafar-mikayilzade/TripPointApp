@@ -96,7 +96,8 @@
         "projectId": "d5b536fe-e0fe-4c07-abb0-546bf1154185"
       },
       "googleWebClientId": "361114640439-fof8seso1jgth8kss8v2fi7tsc091v0n.apps.googleusercontent.com",
-      "googleMapsKey": "AIzaSyAx_gGukcD-MTvAc1clUwXdvuK4ARNdODU"
+      "googleMapsKey": "AIzaSyAx_gGukcD-MTvAc1clUwXdvuK4ARNdODU",
+      "telegramBotUsername": "Trip_PointBot"
     },
     "owner": "jafarmikayilzade"
   }
