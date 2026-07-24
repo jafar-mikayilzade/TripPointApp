@@ -1,9 +1,8 @@
 /**
- * Clustered map for dense POI sets.
- * Uses react-native-map-clustering on native; plain MapView on web.
+ * Clustered map for dense POI sets (native).
+ * Uses react-native-map-clustering when available.
  */
 import type { ComponentType } from 'react';
-import { Platform } from 'react-native';
 import MapView, {
   Marker,
   Polyline,
@@ -29,13 +28,11 @@ type ClusteredProps = MapViewProps & {
 
 let ClusteredMapView: ComponentType<ClusteredProps> = MapView as ComponentType<ClusteredProps>;
 
-if (Platform.OS !== 'web') {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    ClusteredMapView = require('react-native-map-clustering').default;
-  } catch {
-    ClusteredMapView = MapView as ComponentType<ClusteredProps>;
-  }
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  ClusteredMapView = require('react-native-map-clustering').default;
+} catch {
+  ClusteredMapView = MapView as ComponentType<ClusteredProps>;
 }
 
 export default ClusteredMapView;

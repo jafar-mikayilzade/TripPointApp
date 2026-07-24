@@ -51,7 +51,7 @@ export async function reportListing(args: {
   listingId: string;
   reason: ListingReportReasonId;
   details?: string;
-}): Promise<Result> {
+}): Promise<Result & { reportId?: string }> {
   try {
     const {
       data: { user },
@@ -64,13 +64,17 @@ export async function reportListing(args: {
     const reasonLabel =
       LISTING_REPORT_REASONS.find((item) => item.id === args.reason)?.label ?? args.reason;
 
-    const { error } = await supabase.from('listing_reports').insert({
-      listing_id: args.listingId,
-      reporter_id: user.id,
-      reason: reasonLabel,
-      details: args.details?.trim() || null,
-      status: 'open',
-    });
+    const { data, error } = await supabase
+      .from('listing_reports')
+      .insert({
+        listing_id: args.listingId,
+        reporter_id: user.id,
+        reason: reasonLabel,
+        details: args.details?.trim() || null,
+        status: 'open',
+      })
+      .select('id')
+      .maybeSingle();
 
     if (error) {
       if (error.code === '23505' || error.message?.includes('unique')) {
@@ -78,7 +82,7 @@ export async function reportListing(args: {
       }
       return { error: getErrorMessage(error) };
     }
-    return { error: null };
+    return { error: null, reportId: data?.id };
   } catch (err) {
     return { error: getErrorMessage(err) };
   }
@@ -235,3 +239,34 @@ export async function setListingReportStatus(
     return { error: getErrorMessage(err) };
   }
 }
+
+export type AdminQueueCounts = {
+  pois: number;
+  photos: number;
+  reports: number;
+};
+
+/** Admin profil / TG: gözləyən növbə sayları */
+export async function fetchAdminQueueCounts(): Promise<AdminQueueCounts> {
+  const [poisRes, photosRes, reportsRes] = await Promise.all([
+    supabase
+      .from('pois')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending'),
+    supabase
+      .from('poi_photos')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending'),
+    supabase
+      .from('listing_reports')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'open'),
+  ]);
+
+  return {
+    pois: poisRes.count ?? 0,
+    photos: photosRes.count ?? 0,
+    reports: reportsRes.count ?? 0,
+  };
+}
+

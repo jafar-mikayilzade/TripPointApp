@@ -41,25 +41,40 @@ export function normalizeListingRouteStops(raw: unknown): ListingRouteStop[] {
   return out;
 }
 
+/** ASCII-safe: Marşrut / Marsrut / Marșrut (encoding fərqləri üçün) */
+const ROUTE_HEADER_RE = /mar[sşș]rut\s*:/i;
+
+function findRouteHeaderIndex(text: string): number {
+  return text.search(ROUTE_HEADER_RE);
+}
+
+function stripRouteHeaderPrefix(text: string): string {
+  return text.replace(/^\s*mar[sşș]rut\s*:\s*/i, '');
+}
+
 /** Köhnə elanlar: təsvirdə "Marşrut:\n1. Ad" formatı */
 export function parseRouteStopsFromDescription(description: string | null): ListingRouteStop[] {
   if (!description) {
     return [];
   }
 
-  const idx = description.search(/Marşrut\s*:/i);
+  const idx = findRouteHeaderIndex(description);
   if (idx < 0) {
-    return [];
+    // Header yoxdur — bəzi elanlarda yalnız nömrəli siyahı / oxlu mətn olur
+    return parseNumberedStops(description);
   }
 
-  const after = description.slice(idx).replace(/^Marşrut\s*:\s*/i, '');
-  const lines = after.split('\n');
+  const after = stripRouteHeaderPrefix(description.slice(idx));
+  return parseNumberedStops(after);
+}
+
+function parseNumberedStops(text: string): ListingRouteStop[] {
+  const lines = text.split('\n');
   const out: ListingRouteStop[] = [];
 
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) {
-      // boş sətir — blok bitib ola bilər
       if (out.length > 0) {
         break;
       }
@@ -70,13 +85,137 @@ export function parseRouteStopsFromDescription(description: string | null): List
       out.push({ name: numbered[1].trim(), lat: null, lng: null });
       continue;
     }
-    // nömrəsiz sətir gələndə marşrut bloku bitib
     if (out.length > 0) {
       break;
     }
   }
 
   return out;
+}
+
+function isArrowItineraryLine(line: string): boolean {
+  // "A → B → C" / "A -> B -> C" / "A — B — C"
+  return /→|->|⇒|⟶/.test(line) || (line.split(/\s+[—–-]\s+/).length >= 3 && line.length > 40);
+}
+
+function isNumberedStopLine(line: string): boolean {
+  return /^\d+[\.)]\s+\S+/.test(line);
+}
+
+/**
+ * Təsvirdən bütün marşrut məzmununu çıxarır.
+ * UI-də marşrut YALNIZ "Marşrut" düyməsi altında göstərilir.
+ */
+export function stripRouteBlockFromDescription(description: string | null): string {
+  if (!description) {
+    return '';
+  }
+
+  let text = description.replace(/\r\n/g, '\n');
+
+  // 1) "Marşrut:" başlıqlı blok + ardınca nömrəli sətirlər
+  const idx = findRouteHeaderIndex(text);
+  if (idx >= 0) {
+    const before = text.slice(0, idx).trimEnd();
+    const afterRaw = stripRouteHeaderPrefix(text.slice(idx));
+    const lines = afterRaw.split('\n');
+    let i = 0;
+    while (i < lines.length && !lines[i].trim()) {
+      i += 1;
+    }
+    while (i < lines.length) {
+      const line = lines[i].trim();
+      if (!line) {
+        i += 1;
+        break;
+      }
+      if (isNumberedStopLine(line)) {
+        i += 1;
+        continue;
+      }
+      break;
+    }
+    text = [before, lines.slice(i).join('\n').trim()].filter(Boolean).join('\n\n');
+  }
+
+  // 2) Oxlu itinerary sətirləri və təmiz nömrəli siyahılar
+  const kept: string[] = [];
+  let skippingNumberedRun = false;
+
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line) {
+      skippingNumberedRun = false;
+      if (kept.length > 0 && kept[kept.length - 1] !== '') {
+        kept.push('');
+      }
+      continue;
+    }
+
+    if (isArrowItineraryLine(line)) {
+      skippingNumberedRun = false;
+      continue;
+    }
+
+    if (isNumberedStopLine(line)) {
+      skippingNumberedRun = true;
+      continue;
+    }
+
+    // "Marşrut" tək başına qalıbsa
+    if (ROUTE_HEADER_RE.test(line) && line.replace(ROUTE_HEADER_RE, '').trim() === '') {
+      continue;
+    }
+
+    if (skippingNumberedRun) {
+      skippingNumberedRun = false;
+    }
+    kept.push(raw.trimEnd());
+  }
+
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Elan detallarında göstəriləcək təsvir.
+ * Tur/carpool-da marşrut heç vaxt yuxarıda görünməsin.
+ */
+export function getListingDisplayDescription(
+  listing: Pick<Listing, 'type' | 'description' | 'route_stops'>
+): string {
+  const stripped = stripRouteBlockFromDescription(listing.description);
+  if (!stripped) {
+    return '';
+  }
+
+  if (listing.type !== 'tour' && listing.type !== 'carpool') {
+    return stripped;
+  }
+
+  const lines = stripped
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) {
+    return '';
+  }
+
+  const routeLikeCount = lines.filter(
+    (l) => isArrowItineraryLine(l) || isNumberedStopLine(l) || ROUTE_HEADER_RE.test(l)
+  ).length;
+  if (routeLikeCount === lines.length) {
+    return '';
+  }
+
+  // Qısa fraqmentlər (köhnə təmizlikdən qalan) — marşrut varsa gizlət
+  const hasStops =
+    normalizeListingRouteStops(listing.route_stops).length > 0 ||
+    parseRouteStopsFromDescription(listing.description).length > 0;
+  if (hasStops && stripped.length < 48 && !/[.!?…]/.test(stripped)) {
+    return '';
+  }
+
+  return stripped;
 }
 
 export function resolveListingRouteStops(

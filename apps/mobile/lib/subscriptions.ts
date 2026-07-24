@@ -321,6 +321,61 @@ export type MySubscriptionRow = {
   } | null;
 };
 
+export type ListingSubscriberRow = {
+  id: string;
+  user_id: string;
+  created_at: string;
+  full_name: string | null;
+  avatar_url: string | null;
+};
+
+/** Listing owner: who subscribed to this tour. Requires owner SELECT RLS. */
+export async function listListingSubscribers(
+  listingId: string
+): Promise<{ data: ListingSubscriberRow[]; error?: string }> {
+  const { data: rows, error } = await supabase
+    .from('subscriptions')
+    .select('id, user_id, created_at')
+    .eq('target_type', 'listing')
+    .eq('target_id', listingId)
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (error) {
+    return { data: [], error: error.message };
+  }
+  if (!rows?.length) {
+    return { data: [] };
+  }
+
+  const userIds = rows.map((r) => r.user_id);
+  const { data: profiles, error: profilesError } = await supabase
+    .from('profiles')
+    .select('id, full_name, avatar_url')
+    .in('id', userIds);
+
+  if (profilesError) {
+    return { data: [], error: profilesError.message };
+  }
+
+  const profileMap = new Map(
+    (profiles ?? []).map((p) => [p.id, p] as const)
+  );
+
+  return {
+    data: rows.map((row) => {
+      const profile = profileMap.get(row.user_id);
+      return {
+        id: row.id,
+        user_id: row.user_id,
+        created_at: row.created_at,
+        full_name: profile?.full_name ?? null,
+        avatar_url: profile?.avatar_url ?? null,
+      };
+    }),
+  };
+}
+
 /** User's active subscriptions — tours + organizers they follow. */
 export async function listMySubscriptions(): Promise<{
   data: MySubscriptionRow[];

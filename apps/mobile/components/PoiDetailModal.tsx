@@ -208,16 +208,21 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
         });
       }
 
-      const { error } = await supabase.from('poi_photos').insert(rows);
+      const { data: insertedPhotos, error } = await supabase
+        .from('poi_photos')
+        .insert(rows)
+        .select('id');
       if (error) {
         setErrorMessage(getErrorMessage(error));
         return;
       }
 
       showInfoToast('Şəkillər təsdiqə göndərildi');
+      const firstId = insertedPhotos?.[0]?.id;
       void notifyAdmins(
         'photo_pending',
-        `"${poi.name}" üçün ${rows.length} şəkil`
+        `"${poi.name}" üçün ${rows.length} şəkil`,
+        firstId ?? undefined
       );
     } catch (err) {
       setErrorMessage(getErrorMessage(err));

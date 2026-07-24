@@ -246,7 +246,8 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
               onClose();
               void notifyAdmins(
                 'poi_pending',
-                `"${name.trim()}" — region: ${regionId}`
+                `"${name.trim()}" — region: ${regionId}`,
+                poi.id
               );
             },
           },

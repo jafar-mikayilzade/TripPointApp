@@ -42,6 +42,7 @@ BTN_HELP = "ℹ️ Kömək"
 BTN_LINK_APP = "🔗 App hesabı bağla"
 BTN_ICMA = "👥 İcma"
 BTN_FAVS = "⭐ Sevimlilər"
+BTN_ADMIN = "🛡 Admin"
 BTN_CANCEL = "❌ Ləğv et"
 BTN_DONE = "✅ Hazır"
 BTN_SKIP_LOC = "❌ Keç"
@@ -131,14 +132,36 @@ def _save_last(chat_id: str | int, text: str) -> None:
     _LAST_PLANS[_chat_key(chat_id)] = text
 
 
+def _is_admin_user(user_id: str | None) -> bool:
+    if not user_id:
+        return False
+    try:
+        rows = (
+            supabase.table("profiles")
+            .select("role")
+            .eq("id", user_id)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+        return bool(rows) and str(rows[0].get("role") or "") == "admin"
+    except Exception:
+        logger.exception("lookup admin role failed")
+        return False
+
+
 def _main_keyboard(chat_id: str | int) -> dict[str, Any]:
-    linked = bool(_lookup_user_id(chat_id))
+    user_id = _lookup_user_id(chat_id)
+    linked = bool(user_id)
     rows: list[list[dict[str, str]]] = [
         [{"text": BTN_AI}, {"text": BTN_MANUAL}],
         [{"text": BTN_LAST}, {"text": BTN_HELP}],
     ]
     if linked:
         rows.append([{"text": BTN_ICMA}, {"text": BTN_FAVS}])
+        if _is_admin_user(user_id):
+            rows.append([{"text": BTN_ADMIN}])
     else:
         rows.append([{"text": BTN_LINK_APP}])
     return {"keyboard": rows, "resize_keyboard": True}
@@ -365,7 +388,8 @@ def _link_account(chat_id: str | int, code: str) -> tuple[bool, str]:
 
 
 def _help_text(chat_id: str | int) -> str:
-    linked = bool(_lookup_user_id(chat_id))
+    user_id = _lookup_user_id(chat_id)
+    linked = bool(user_id)
     lines = [
         "TripPoint bot (app lazım deyil)",
         "",
@@ -375,11 +399,386 @@ def _help_text(chat_id: str | int) -> str:
         "Cari məkandan: AI-də «Bəli» → lokasiya paylaş",
     ]
     if linked:
-        lines.append(f"{BTN_ICMA} — aktiv elanlar")
+        lines.append(f"{BTN_ICMA} — Tur / Carpool / Yerli xidmət")
         lines.append(f"{BTN_FAVS} — Elanlar / Yerlər / Marşrutlar / Abunə / Bildiriş")
+        if _is_admin_user(user_id):
+            lines.append(f"{BTN_ADMIN} — Məkan / Şəkil / Şikayət növbələri")
     else:
         lines.append(f"{BTN_LINK_APP} — opsional app birləşdirmə")
     return "\n".join(lines)
+
+
+def _admin_menu_keyboard() -> dict[str, Any]:
+    return _ik(
+        [
+            [
+                _btn("📍 Məkanlar", "adm:pois"),
+                _btn("🖼 Şəkillər", "adm:photos"),
+            ],
+            [_btn("🚩 Şikayətlər", "adm:reports")],
+            [_btn("🏠 Menyu", "menu")],
+        ]
+    )
+
+
+def _item_action_keyboard(entity: str, target_id: str) -> dict[str, Any]:
+    """Per-item approve/reject under Admin növbə."""
+    if entity == "rep":
+        return _ik(
+            [
+                [
+                    _btn("✅ Bağla", f"adm:ok:rep:{target_id}"),
+                    _btn("🗑 Elanı sil", f"adm:dl:rep:{target_id}"),
+                ],
+                [_btn("⬅️ Növbə", "adm:reports")],
+            ]
+        )
+    return _ik(
+        [
+            [
+                _btn("✅ Təsdiq", f"adm:ok:{entity}:{target_id}"),
+                _btn("❌ Rədd", f"adm:no:{entity}:{target_id}"),
+            ],
+            [
+                _btn(
+                    "⬅️ Növbə",
+                    "adm:pois"
+                    if entity == "poi"
+                    else "adm:photos"
+                    if entity == "pho"
+                    else "adm:home",
+                )
+            ],
+        ]
+    )
+
+
+def _fetch_admin_counts() -> dict[str, int]:
+    counts = {"pois": 0, "photos": 0, "reports": 0}
+    try:
+        pois = (
+            supabase.table("pois")
+            .select("id", count="exact")
+            .eq("status", "pending")
+            .limit(1)
+            .execute()
+        )
+        counts["pois"] = int(pois.count or 0)
+    except Exception:
+        logger.exception("admin count pois failed")
+    try:
+        photos = (
+            supabase.table("poi_photos")
+            .select("id", count="exact")
+            .eq("status", "pending")
+            .limit(1)
+            .execute()
+        )
+        counts["photos"] = int(photos.count or 0)
+    except Exception:
+        logger.exception("admin count photos failed")
+    try:
+        reports = (
+            supabase.table("listing_reports")
+            .select("id", count="exact")
+            .eq("status", "open")
+            .limit(1)
+            .execute()
+        )
+        counts["reports"] = int(reports.count or 0)
+    except Exception:
+        logger.exception("admin count reports failed")
+    return counts
+
+
+def _show_admin_home(
+    chat_id: str | int,
+    *,
+    message_id: int | None = None,
+) -> None:
+    user_id = _lookup_user_id(chat_id)
+    if not _is_admin_user(user_id):
+        _edit_or_reply(
+            chat_id,
+            "Bu bölmə yalnız admin üçündür.",
+            message_id=message_id,
+            reply_markup=_ik([[_btn("🏠 Menyu", "menu")]]),
+        )
+        return
+    counts = _fetch_admin_counts()
+    text = (
+        "🛡 Admin nəzarəti\n\n"
+        f"📍 Gözləyən məkan: {counts['pois']}\n"
+        f"🖼 Gözləyən şəkil: {counts['photos']}\n"
+        f"🚩 Açıq şikayət: {counts['reports']}\n\n"
+        "Növbəni açın — hər elementdə ✅ / ❌ düymələri var.\n"
+        "Yeni hadisələr də birbaşa TG mesajı kimi gəlir."
+    )
+    _edit_or_reply(
+        chat_id,
+        text,
+        message_id=message_id,
+        reply_markup=_admin_menu_keyboard(),
+    )
+
+
+def _show_admin_queue(
+    chat_id: str | int,
+    kind: str,
+    *,
+    message_id: int | None = None,
+) -> None:
+    user_id = _lookup_user_id(chat_id)
+    if not _is_admin_user(user_id):
+        _edit_or_reply(
+            chat_id,
+            "Bu bölmə yalnız admin üçündür.",
+            message_id=message_id,
+            reply_markup=_ik([[_btn("🏠 Menyu", "menu")]]),
+        )
+        return
+
+    try:
+        if kind == "pois":
+            rows = (
+                supabase.table("pois")
+                .select("id, name, region, category")
+                .eq("status", "pending")
+                .order("created_at", desc=True)
+                .limit(5)
+                .execute()
+                .data
+                or []
+            )
+            title = "📍 Gözləyən məkanlar"
+            if not rows:
+                _edit_or_reply(
+                    chat_id,
+                    f"{title}\n\nBoş növbə.",
+                    message_id=message_id,
+                    reply_markup=_admin_menu_keyboard(),
+                )
+                return
+            _edit_or_reply(
+                chat_id,
+                f"{title}\nAşağıda {len(rows)} element — hər birində təsdiq/rədd:",
+                message_id=message_id,
+                reply_markup=_admin_menu_keyboard(),
+            )
+            for row in rows:
+                pid = str(row.get("id") or "")
+                text = (
+                    f"📍 {row.get('name') or '—'}\n"
+                    f"Region: {row.get('region') or '—'}\n"
+                    f"Kateqoriya: {row.get('category') or '—'}"
+                )
+                _reply(chat_id, text, reply_markup=_item_action_keyboard("poi", pid))
+            return
+
+        if kind == "photos":
+            rows = (
+                supabase.table("poi_photos")
+                .select("id, poi_id, photo_url")
+                .eq("status", "pending")
+                .order("created_at", desc=True)
+                .limit(5)
+                .execute()
+                .data
+                or []
+            )
+            title = "🖼 Gözləyən şəkillər"
+            if not rows:
+                _edit_or_reply(
+                    chat_id,
+                    f"{title}\n\nBoş növbə.",
+                    message_id=message_id,
+                    reply_markup=_admin_menu_keyboard(),
+                )
+                return
+            poi_ids = list({str(r.get("poi_id")) for r in rows if r.get("poi_id")})
+            name_by_id: dict[str, str] = {}
+            if poi_ids:
+                pois = (
+                    supabase.table("pois")
+                    .select("id, name")
+                    .in_("id", poi_ids)
+                    .execute()
+                    .data
+                    or []
+                )
+                name_by_id = {str(p["id"]): str(p.get("name") or "Məkan") for p in pois}
+            _edit_or_reply(
+                chat_id,
+                f"{title}\nAşağıda {len(rows)} element:",
+                message_id=message_id,
+                reply_markup=_admin_menu_keyboard(),
+            )
+            for row in rows:
+                pid = str(row.get("id") or "")
+                poi_name = name_by_id.get(str(row.get("poi_id") or ""), "Məkan")
+                url = str(row.get("photo_url") or "").strip()
+                text = f"🖼 {poi_name}"
+                if url:
+                    text += f"\n{url}"
+                _reply(chat_id, text, reply_markup=_item_action_keyboard("pho", pid))
+            return
+
+        # reports
+        rows = (
+            supabase.table("listing_reports")
+            .select("id, reason, details, listing_id")
+            .eq("status", "open")
+            .order("created_at", desc=True)
+            .limit(5)
+            .execute()
+            .data
+            or []
+        )
+        title = "🚩 Açıq şikayətlər"
+        if not rows:
+            _edit_or_reply(
+                chat_id,
+                f"{title}\n\nBoş növbə.",
+                message_id=message_id,
+                reply_markup=_admin_menu_keyboard(),
+            )
+            return
+        listing_ids = list({str(r.get("listing_id")) for r in rows if r.get("listing_id")})
+        title_by_id: dict[str, str] = {}
+        if listing_ids:
+            listings = (
+                supabase.table("listings")
+                .select("id, title")
+                .in_("id", listing_ids)
+                .execute()
+                .data
+                or []
+            )
+            title_by_id = {
+                str(l["id"]): str(l.get("title") or "Elan") for l in listings
+            }
+        _edit_or_reply(
+            chat_id,
+            f"{title}\nAşağıda {len(rows)} element:",
+            message_id=message_id,
+            reply_markup=_admin_menu_keyboard(),
+        )
+        for row in rows:
+            rid = str(row.get("id") or "")
+            listing_title = title_by_id.get(str(row.get("listing_id") or ""), "Elan")
+            reason = str(row.get("reason") or "digər")
+            details = str(row.get("details") or "").strip()
+            text = f"🚩 {listing_title}\nSəbəb: {reason}"
+            if details:
+                text += f"\n{details[:200]}"
+            _reply(chat_id, text, reply_markup=_item_action_keyboard("rep", rid))
+    except Exception:
+        logger.exception("admin queue %s failed", kind)
+        _edit_or_reply(
+            chat_id,
+            "Növbə yüklənmədi. Bir az sonra yenidən yoxlayın.",
+            message_id=message_id,
+            reply_markup=_admin_menu_keyboard(),
+        )
+
+
+def _admin_moderate(
+    action: str,
+    entity: str,
+    target_id: str,
+) -> tuple[bool, str]:
+    """Apply moderation. Returns (ok, user_message)."""
+    tid = (target_id or "").strip()
+    if not tid:
+        return False, "ID yoxdur"
+
+    try:
+        if entity == "poi":
+            status = "approved" if action == "ok" else "rejected"
+            supabase.table("pois").update(
+                {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}
+            ).eq("id", tid).execute()
+            return True, f"Məkan {('təsdiqləndi' if action == 'ok' else 'rədd edildi')} ✅"
+
+        if entity == "pho":
+            status = "approved" if action == "ok" else "rejected"
+            supabase.table("poi_photos").update({"status": status}).eq("id", tid).execute()
+            return True, f"Şəkil {('təsdiqləndi' if action == 'ok' else 'rədd edildi')} ✅"
+
+        if entity == "rep":
+            if action == "ok":
+                supabase.table("listing_reports").update({"status": "dismissed"}).eq(
+                    "id", tid
+                ).execute()
+                return True, "Şikayət bağlandı ✅"
+            if action == "dl":
+                rep = (
+                    supabase.table("listing_reports")
+                    .select("listing_id")
+                    .eq("id", tid)
+                    .limit(1)
+                    .execute()
+                    .data
+                    or []
+                )
+                listing_id = str(rep[0].get("listing_id") or "") if rep else ""
+                if listing_id:
+                    try:
+                        supabase.rpc("cancel_listing", {"p_listing_id": listing_id}).execute()
+                    except Exception:
+                        supabase.table("listings").update({"status": "cancelled"}).eq(
+                            "id", listing_id
+                        ).execute()
+                supabase.table("listing_reports").update({"status": "actioned"}).eq(
+                    "id", tid
+                ).execute()
+                return True, "Elan ləğv edildi, şikayət bağlandı ✅"
+            return False, "Naməlum əməliyyat"
+
+        return False, "Naməlum tip"
+    except Exception:
+        logger.exception("admin_moderate failed %s %s %s", action, entity, tid)
+        return False, "Əməliyyat alınmadı"
+
+
+def _handle_admin_callback(
+    chat_id: str | int,
+    data: str,
+    *,
+    message_id: int | None = None,
+    callback_query_id: str | None = None,
+) -> bool:
+    if data == "adm:home":
+        _show_admin_home(chat_id, message_id=message_id)
+        return True
+    if data in {"adm:pois", "adm:photos", "adm:reports"}:
+        _show_admin_queue(chat_id, data.split(":")[-1], message_id=message_id)
+        return True
+
+    # adm:ok:poi:UUID | adm:no:poi:UUID | adm:ok:pho:UUID | adm:dl:rep:UUID
+    parts = data.split(":")
+    if len(parts) == 4 and parts[0] == "adm" and parts[1] in {"ok", "no", "dl"}:
+        user_id = _lookup_user_id(chat_id)
+        if not _is_admin_user(user_id):
+            if callback_query_id:
+                answer_callback_query(callback_query_id, text="Yalnız admin")
+            return True
+        action, entity, target_id = parts[1], parts[2], parts[3]
+        ok, msg = _admin_moderate(action, entity, target_id)
+        if callback_query_id:
+            answer_callback_query(callback_query_id, text=msg[:180])
+        if message_id is not None:
+            edit_telegram_message(
+                chat_id,
+                message_id,
+                f"🛡 {msg}",
+                reply_markup={"inline_keyboard": []},
+            )
+        else:
+            _reply(chat_id, msg, reply_markup=_admin_menu_keyboard())
+        return True
+
+    return False
 
 
 def _show_main_menu(chat_id: str | int, preface: str | None = None) -> None:
@@ -1061,11 +1460,24 @@ def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
         chat_id,
         username=str(from_user["username"]) if from_user.get("username") else None,
     )
-    answer_callback_query(cq_id)
+
+    is_admin_action = data.startswith("adm:ok:") or data.startswith("adm:no:") or data.startswith(
+        "adm:dl:"
+    )
+    if not is_admin_action:
+        answer_callback_query(cq_id)
 
     if data == "menu":
         _clear_session(chat_id)
         _show_main_menu(chat_id)
+        return {"ok": True}
+
+    if _handle_admin_callback(
+        chat_id,
+        data,
+        message_id=message_id,
+        callback_query_id=cq_id if is_admin_action else None,
+    ):
         return {"ok": True}
 
     if _handle_fav_callback(chat_id, data, message_id=message_id):
@@ -1374,6 +1786,18 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
 
         if text == BTN_FAVS:
             _show_favorites(chat_id)
+            return {"ok": True}
+
+        if text == BTN_ADMIN:
+            user_id = _lookup_user_id(chat_id)
+            if not _is_admin_user(user_id):
+                _reply(
+                    chat_id,
+                    "Bu bölmə yalnız admin üçündür.",
+                    reply_markup=_main_keyboard(chat_id),
+                )
+                return {"ok": True}
+            _show_admin_home(chat_id)
             return {"ok": True}
 
         if text == BTN_LAST or text.lower() in {"/last", "son"}:

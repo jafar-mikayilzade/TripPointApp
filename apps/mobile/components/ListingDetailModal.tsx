@@ -34,10 +34,16 @@ import {
   reportListing,
   updateListingAsAdmin,
 } from '../lib/moderation';
-import { notifyTourSubscribersUpdate } from '../lib/subscriptions';
 import {
+  listListingSubscribers,
+  notifyTourSubscribersUpdate,
+  type ListingSubscriberRow,
+} from '../lib/subscriptions';
+import {
+  getListingDisplayDescription,
   openStopInMaps,
   resolveListingRouteStops,
+  stripRouteBlockFromDescription,
   type ListingRouteStop,
 } from '../lib/listingRouteStops';
 import { supabase } from '../lib/supabase';
@@ -216,6 +222,9 @@ export function ListingDetailModal({
   const [routeStops, setRouteStops] = useState<ListingRouteStop[]>([]);
   const [routeListOpen, setRouteListOpen] = useState(false);
   const [loadingExtras, setLoadingExtras] = useState(false);
+  const [subscribersOpen, setSubscribersOpen] = useState(false);
+  const [subscribers, setSubscribers] = useState<ListingSubscriberRow[]>([]);
+  const [loadingSubscribers, setLoadingSubscribers] = useState(false);
   const [infoToast, setInfoToast] = useState<string | null>(null);
   const [infoToastKey, setInfoToastKey] = useState(0);
 
@@ -355,6 +364,8 @@ export function ListingDetailModal({
       setRoutePois([]);
       setRouteStops([]);
       setRouteListOpen(false);
+      setSubscribersOpen(false);
+      setSubscribers([]);
       setCreatorRating(null);
 
       const {
@@ -598,7 +609,7 @@ export function ListingDetailModal({
 
     setReporting(true);
     setErrorMessage(null);
-    const { error } = await reportListing({
+    const { error, reportId } = await reportListing({
       listingId: listing.id,
       reason: reportReason,
       details: reportDetails,
@@ -617,7 +628,8 @@ export function ListingDetailModal({
       LISTING_REPORT_REASONS.find((item) => item.id === reportReason)?.label ?? reportReason;
     void notifyAdmins(
       'listing_report',
-      `"${listing.title}" — ${reasonLabel}`
+      `"${listing.title}" — ${reasonLabel}`,
+      reportId
     );
   }
 
@@ -629,7 +641,7 @@ export function ListingDetailModal({
     setErrorMessage(null);
     const { error } = await updateListingAsAdmin(listing.id, {
       title: editTitle.trim(),
-      description: editDescription.trim() || null,
+      description: stripRouteBlockFromDescription(editDescription) || null,
     });
     setSavingEdit(false);
     if (error) {
@@ -660,6 +672,27 @@ export function ListingDetailModal({
   const capacity = getCapacity(listing);
   const spotsLeft = listing.spots_left ?? 0;
   const joinedCount = Math.max(capacity - spotsLeft, 0);
+  const displayDescription = getListingDisplayDescription(listing);
+
+  async function toggleSubscribersPanel() {
+    const next = !subscribersOpen;
+    setSubscribersOpen(next);
+    if (!next || !listing) {
+      return;
+    }
+    setLoadingSubscribers(true);
+    const result = await listListingSubscribers(listing.id);
+    setLoadingSubscribers(false);
+    if (result.error) {
+      setErrorMessage(result.error);
+      setSubscribers([]);
+      return;
+    }
+    setSubscribers(result.data);
+    if (result.data.length === 0) {
+      showInfoToast('Hələ abunə yoxdur');
+    }
+  }
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -686,9 +719,9 @@ export function ListingDetailModal({
               {listing.title}
             </Text>
 
-            {listing.description ? (
+            {displayDescription ? (
               <View style={styles.descriptionCard}>
-                <Text style={styles.descriptionText}>{listing.description}</Text>
+                <Text style={styles.descriptionText}>{displayDescription}</Text>
               </View>
             ) : null}
 
@@ -877,6 +910,79 @@ export function ListingDetailModal({
               />
             ) : null}
 
+            {listing.type === 'tour' && isOwner ? (
+              <View style={styles.subscribersWrap}>
+                <Pressable
+                  style={styles.subscribersPill}
+                  onPress={() => void toggleSubscribersPanel()}
+                  accessibilityLabel="Abunəçilər"
+                >
+                  <FontAwesome name="bell" size={14} color={colors.accentPressed} />
+                  <Text style={styles.subscribersPillText}>
+                    Abunəçilər
+                    {subscribersOpen && !loadingSubscribers
+                      ? ` · ${subscribers.length}`
+                      : ''}
+                  </Text>
+                  <FontAwesome
+                    name={subscribersOpen ? 'chevron-up' : 'chevron-down'}
+                    size={11}
+                    color={colors.textMuted}
+                  />
+                </Pressable>
+                {subscribersOpen ? (
+                  loadingSubscribers ? (
+                    <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
+                  ) : subscribers.length === 0 ? (
+                    <Text style={styles.subscribersEmpty}>Hələ heç kim abunə olmayıb</Text>
+                  ) : (
+                    <View style={styles.subscribersPanel}>
+                      {subscribers.map((sub, index) => {
+                        const name = sub.full_name?.trim() || 'İstifadəçi';
+                        return (
+                          <Pressable
+                            key={sub.id}
+                            style={[
+                              styles.subscriberRow,
+                              index > 0 && styles.subscriberRowBorder,
+                            ]}
+                            onPress={() => {
+                              onClose();
+                              router.push({
+                                pathname: '/(tabs)/profil',
+                                params: { userId: sub.user_id },
+                              });
+                            }}
+                          >
+                            {sub.avatar_url ? (
+                              <Image
+                                source={{ uri: sub.avatar_url }}
+                                style={styles.subscriberAvatar}
+                              />
+                            ) : (
+                              <View style={styles.subscriberAvatarPlaceholder}>
+                                <Text style={styles.subscriberAvatarInitial}>
+                                  {name.charAt(0).toUpperCase()}
+                                </Text>
+                              </View>
+                            )}
+                            <Text style={styles.subscriberName} numberOfLines={1}>
+                              {name}
+                            </Text>
+                            <FontAwesome
+                              name="chevron-right"
+                              size={11}
+                              color={colors.textMuted}
+                            />
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )
+                ) : null}
+              </View>
+            ) : null}
+
             {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
             {!isOwner ? (
@@ -987,7 +1093,9 @@ export function ListingDetailModal({
                       style={styles.ownerButton}
                       onPress={() => {
                         setEditTitle(listing.title);
-                        setEditDescription(listing.description ?? '');
+                        setEditDescription(
+                          stripRouteBlockFromDescription(listing.description)
+                        );
                         setShowAdminEdit(true);
                       }}
                     >
@@ -1030,7 +1138,9 @@ export function ListingDetailModal({
                     style={styles.ownerButton}
                     onPress={() => {
                       setEditTitle(listing.title);
-                      setEditDescription(listing.description ?? '');
+                      setEditDescription(
+                        stripRouteBlockFromDescription(listing.description)
+                      );
                       setShowAdminEdit(true);
                     }}
                   >
@@ -1415,6 +1525,76 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  subscribersWrap: {
+    marginTop: 12,
+    marginBottom: 4,
+    gap: 8,
+  },
+  subscribersPill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: colors.accentSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.accent,
+  },
+  subscribersPillText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.accentPressed,
+  },
+  subscribersPanel: {
+    borderRadius: 14,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    overflow: 'hidden',
+  },
+  subscribersEmpty: {
+    fontSize: 13,
+    color: colors.textMuted,
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  subscriberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  subscriberRowBorder: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderSoft,
+  },
+  subscriberAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  subscriberAvatarPlaceholder: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  subscriberAvatarInitial: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.accentPressed,
+  },
+  subscriberName: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
   },
   routeToggleText: {
     fontSize: 14,

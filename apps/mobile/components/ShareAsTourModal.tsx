@@ -120,16 +120,13 @@ export function ShareAsTourModal({
     setPrice('');
     setContactPhone('');
     setRegionId(initialRegionId || DEFAULT_REGION_ID);
-    const routeLines = stops.map((s, i) => `${i + 1}. ${s.name}`).join('\n');
-    const baseDesc = defaultDescription?.trim() || '';
-    setDescription(
-      [baseDesc, routeLines ? `Marşrut:\n${routeLines}` : ''].filter(Boolean).join('\n\n')
-    );
+    // Marşrut yalnız route_stops sütununda; təsvirdə təkrar göstərmə (UI düymə altında)
+    setDescription(defaultDescription?.trim() || '');
     setRegionOpen(false);
     setDateOpen(false);
     setFieldErrors({});
     setLoading(false);
-  }, [visible, defaultTitle, defaultDescription, initialRegionId, stops]);
+  }, [visible, defaultTitle, defaultDescription, initialRegionId]);
 
   const regionLabel = REGIONS.find((r) => r.id === regionId)?.label ?? regionId;
   const departureLabel = departureAt.toLocaleString('az-AZ', {
@@ -267,11 +264,21 @@ export function ShareAsTourModal({
         .select('id')
         .maybeSingle();
 
-      // route_stops sütunu hələ deploy olunmayıbsa — təsvirdəki adlarla davam et
+      // route_stops sütunu hələ deploy olunmayıbsa — təsvirdə saxla (UI strip edir)
       if (insertError && /route_stops/i.test(insertError.message)) {
+        const routeLines = stops.map((s, i) => `${i + 1}. ${s.name}`).join('\n');
+        const fallbackDescription = [
+          description.trim(),
+          routeLines ? `Marşrut:\n${routeLines}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n\n');
         const retry = await supabase
           .from('listings')
-          .insert(basePayload)
+          .insert({
+            ...basePayload,
+            description: fallbackDescription || null,
+          })
           .select('id')
           .maybeSingle();
         listing = retry.data;

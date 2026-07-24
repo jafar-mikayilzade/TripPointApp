@@ -35,10 +35,16 @@ type ReportRow = ListingReport & {
 interface AdminModerationModalProps {
   visible: boolean;
   onClose: () => void;
+  /** Open on a specific queue tab */
+  initialTab?: ModTab;
 }
 
-export function AdminModerationModal({ visible, onClose }: AdminModerationModalProps) {
-  const [tab, setTab] = useState<ModTab>('pois');
+export function AdminModerationModal({
+  visible,
+  onClose,
+  initialTab = 'pois',
+}: AdminModerationModalProps) {
+  const [tab, setTab] = useState<ModTab>(initialTab);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingPois, setPendingPois] = useState<Poi[]>([]);
@@ -119,9 +125,10 @@ export function AdminModerationModal({ visible, onClose }: AdminModerationModalP
 
   useEffect(() => {
     if (visible) {
+      setTab(initialTab);
       void load();
     }
-  }, [visible, load]);
+  }, [visible, initialTab, load]);
 
   async function approvePoi(id: string) {
     setBusyId(id);

@@ -5,10 +5,12 @@
   "dependencies": {
     "@expo/ngrok": "^4.1.0",
     "@expo/vector-icons": "^15.0.2",
+    "@react-google-maps/api": "^2.20.8",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "^9.1.0",
     "@react-native-google-signin/google-signin": "^16.1.2",
     "@supabase/supabase-js": "^2.110.1",
+    "@teovilla/react-native-web-maps": "^0.9.5",
     "base64-arraybuffer": "^1.0.2",
     "expo": "~57.0.4",
     "expo-auth-session": "~57.0.2",

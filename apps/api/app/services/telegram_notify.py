@@ -150,3 +150,86 @@ def notify_telegram_user(user_id: str, text: str) -> bool:
     if not chat_id:
         return False
     return send_telegram_message(text, chat_id=chat_id)
+
+
+def list_admin_telegram_chat_ids() -> list[str]:
+    """TELEGRAM_CHAT_ID + bütün role=admin və Telegram bağlı profillər."""
+    chats: set[str] = set()
+    if TELEGRAM_CHAT_ID and str(TELEGRAM_CHAT_ID).strip():
+        chats.add(str(TELEGRAM_CHAT_ID).strip())
+
+    try:
+        rows = (
+            supabase.table("profiles")
+            .select("id, telegram_chat_id")
+            .eq("role", "admin")
+            .execute()
+            .data
+            or []
+        )
+        for row in rows:
+            chat = row.get("telegram_chat_id")
+            if chat:
+                chats.add(str(chat).strip())
+            else:
+                uid = row.get("id")
+                if uid:
+                    linked = resolve_telegram_chat_id_for_user(str(uid))
+                    if linked:
+                        chats.add(linked)
+    except Exception:
+        logger.exception("list_admin_telegram_chat_ids failed")
+
+    return sorted(chats)
+
+
+def admin_action_keyboard(kind: str, target_id: str) -> dict[str, Any] | None:
+    """Inline ✅/❌ for moderation notify messages.
+
+    callback_data max 64 bytes — short prefixes.
+    """
+    tid = (target_id or "").strip()
+    if not tid or len(tid) > 40:
+        return None
+
+    if kind == "poi_pending":
+        entity = "poi"
+        ok_label, no_label = "✅ Təsdiq", "❌ Rədd"
+        no_action = "no"
+    elif kind == "photo_pending":
+        entity = "pho"
+        ok_label, no_label = "✅ Təsdiq", "❌ Rədd"
+        no_action = "no"
+    elif kind == "listing_report":
+        entity = "rep"
+        ok_label, no_label = "✅ Bağla", "🗑 Elanı sil"
+        no_action = "dl"
+    else:
+        return None
+
+    return {
+        "inline_keyboard": [
+            [
+                {"text": ok_label, "callback_data": f"adm:ok:{entity}:{tid}"},
+                {"text": no_label, "callback_data": f"adm:{no_action}:{entity}:{tid}"},
+            ]
+        ]
+    }
+
+
+def notify_all_admins(
+    text: str,
+    *,
+    reply_markup: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Broadcast moderation alert to env chat + all linked admins."""
+    chats = list_admin_telegram_chat_ids()
+    if not chats:
+        logger.warning("notify_all_admins: no admin chat ids")
+        return {"sent": 0, "requested": 0}
+
+    sent = 0
+    for chat_id in chats:
+        if send_telegram_message(text, chat_id=chat_id, reply_markup=reply_markup):
+            sent += 1
+    return {"sent": sent, "requested": len(chats)}

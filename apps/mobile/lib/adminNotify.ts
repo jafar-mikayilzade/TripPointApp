@@ -2,25 +2,26 @@ import { getApiBaseUrl } from './apiBase';
 
 export type AdminNotifyKind = 'poi_pending' | 'photo_pending' | 'listing_report';
 
-const TELEGRAM_NOTIFY_TIMEOUT_MS = 6000;
+const TELEGRAM_NOTIFY_TIMEOUT_MS = 8000;
 
 function buildMessage(kind: AdminNotifyKind, summary: string): string {
   const prefix =
     kind === 'poi_pending'
-      ? 'TripPoint: yeni məkan təsdiqi gözləyir'
+      ? '🛡 TripPoint · yeni məkan təsdiqi'
       : kind === 'photo_pending'
-        ? 'TripPoint: yeni şəkil təsdiqi gözləyir'
-        : 'TripPoint: elan şikayəti';
+        ? '🛡 TripPoint · yeni şəkil təsdiqi'
+        : '🛡 TripPoint · elan şikayəti';
 
-  return `${prefix}. ${summary}`.trim();
+  return `${prefix}\n${summary}`.trim();
 }
 
 /**
- * Admin bildirişi — yalnız Telegram (şikayət / POI / şəkil təsdiqi).
+ * Admin bildirişi — bütün bağlı admin Telegram-lara + inline təsdiq/rədd.
  */
 export async function notifyAdmins(
   kind: AdminNotifyKind,
-  summary: string
+  summary: string,
+  targetId?: string | null
 ): Promise<{ sent: boolean; error: string | null }> {
   const message = buildMessage(kind, summary);
   const base = getApiBaseUrl();
@@ -35,10 +36,18 @@ export async function notifyAdmins(
   const timer = setTimeout(() => controller.abort(), TELEGRAM_NOTIFY_TIMEOUT_MS);
 
   try {
+    const body: { text: string; kind: AdminNotifyKind; target_id?: string } = {
+      text: message,
+      kind,
+    };
+    if (targetId?.trim()) {
+      body.target_id = targetId.trim();
+    }
+
     const res = await fetch(`${base}/api/telegram/notify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: message }),
+      body: JSON.stringify(body),
       signal: controller.signal,
     });
     if (!res.ok) {
@@ -47,8 +56,8 @@ export async function notifyAdmins(
       }
       return { sent: false, error: `HTTP ${res.status}` };
     }
-    const json = (await res.json().catch(() => null)) as { sent?: boolean } | null;
-    return { sent: Boolean(json?.sent), error: null };
+    const json = (await res.json().catch(() => null)) as { sent?: number } | null;
+    return { sent: (json?.sent ?? 0) > 0, error: null };
   } catch (err) {
     if (__DEV__) {
       console.warn('[adminNotify] Telegram failed', err);

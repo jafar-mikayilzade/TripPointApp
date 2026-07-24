@@ -44,6 +44,7 @@ import {
 } from '../../lib/formValidation';
 import { signOutEverywhere } from '../../lib/googleAuth';
 import { startTelegramLink } from '../../lib/telegramLink';
+import { fetchAdminQueueCounts, type AdminQueueCounts } from '../../lib/moderation';
 import { supabase } from '../../lib/supabase';
 import { uploadImage } from '../../lib/uploadImage';
 import { useIsAdmin } from '../../lib/useIsAdmin';
@@ -175,10 +176,34 @@ export default function ProfilScreen() {
   const [listingDetailVisible, setListingDetailVisible] = useState(false);
   const [addTravelVisible, setAddTravelVisible] = useState(false);
   const [moderationVisible, setModerationVisible] = useState(false);
+  const [moderationTab, setModerationTab] = useState<'pois' | 'photos' | 'reports'>('pois');
+  const [adminCounts, setAdminCounts] = useState<AdminQueueCounts>({
+    pois: 0,
+    photos: 0,
+    reports: 0,
+  });
   const { isAdmin } = useIsAdmin();
 
   const profileUserId = paramUserId ?? authUserId;
   const isOwnProfile = !!authUserId && !!profileUserId && authUserId === profileUserId;
+  const showAdminSection = isOwnProfile && (isAdmin || profile?.role === 'admin');
+
+  const openAdminQueue = useCallback((tab: 'pois' | 'photos' | 'reports') => {
+    setModerationTab(tab);
+    setModerationVisible(true);
+  }, []);
+
+  const refreshAdminCounts = useCallback(async () => {
+    if (!(isAdmin || profile?.role === 'admin') || !isOwnProfile) {
+      return;
+    }
+    try {
+      const counts = await fetchAdminQueueCounts();
+      setAdminCounts(counts);
+    } catch {
+      // ignore — section still usable
+    }
+  }, [isAdmin, profile?.role, isOwnProfile]);
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -427,6 +452,22 @@ export default function ProfilScreen() {
         loadTabData();
       }
     }, [loadTabData, profile])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      const timer = setTimeout(() => {
+        if (!active) {
+          return;
+        }
+        void refreshAdminCounts();
+      }, 0);
+      return () => {
+        active = false;
+        clearTimeout(timer);
+      };
+    }, [refreshAdminCounts])
   );
 
   const displayName = useMemo(
@@ -819,15 +860,6 @@ export default function ProfilScreen() {
                   </Text>
                 </Pressable>
               </View>
-              {isAdmin ? (
-                <Pressable
-                  style={styles.adminModButton}
-                  onPress={() => setModerationVisible(true)}
-                >
-                  <FontAwesome name="shield" size={14} color="#fff" />
-                  <Text style={styles.splitBillButtonText}>Admin nəzarəti</Text>
-                </Pressable>
-              ) : null}
               <Pressable
                 style={[
                   styles.telegramButton,
@@ -863,11 +895,7 @@ export default function ProfilScreen() {
                   })();
                 }}
               >
-                <FontAwesome
-                  name="telegram"
-                  size={14}
-                  color="#fff"
-                />
+                <FontAwesome name="telegram" size={14} color="#fff" />
                 <Text style={styles.splitBillButtonText}>
                   {profile.telegram_chat_id ? 'Telegram bağlıdır' : 'Telegram bağla'}
                 </Text>
@@ -878,6 +906,70 @@ export default function ProfilScreen() {
               <FontAwesome name="whatsapp" size={16} color="#fff" />
               <Text style={styles.whatsappButtonText}>WhatsApp-da Yaz</Text>
             </Pressable>
+          ) : null}
+
+          {isOwnProfile && showAdminSection ? (
+            <View style={styles.adminSection}>
+              <View style={styles.adminSectionHeader}>
+                <FontAwesome name="shield" size={14} color={colors.danger} />
+                <Text style={styles.adminSectionTitle}>Admin nəzarəti</Text>
+              </View>
+              <Text style={styles.adminSectionHint}>
+                Gözləyən məkan, şəkil və şikayətləri buradan idarə edin
+              </Text>
+              <View style={styles.adminQueueList}>
+                {(
+                  [
+                    {
+                      id: 'pois' as const,
+                      label: 'Məkanlar',
+                      icon: 'map-marker' as const,
+                      count: adminCounts.pois,
+                    },
+                    {
+                      id: 'photos' as const,
+                      label: 'Şəkillər',
+                      icon: 'image' as const,
+                      count: adminCounts.photos,
+                    },
+                    {
+                      id: 'reports' as const,
+                      label: 'Şikayətlər',
+                      icon: 'flag' as const,
+                      count: adminCounts.reports,
+                    },
+                  ] as const
+                ).map((item, index) => (
+                  <Pressable
+                    key={item.id}
+                    style={[
+                      styles.adminQueueRow,
+                      index > 0 && styles.adminQueueRowBorder,
+                    ]}
+                    onPress={() => openAdminQueue(item.id)}
+                  >
+                    <View style={styles.adminQueueLeft}>
+                      <View style={styles.adminQueueIcon}>
+                        <FontAwesome name={item.icon} size={14} color={colors.danger} />
+                      </View>
+                      <Text style={styles.adminQueueLabel}>{item.label}</Text>
+                    </View>
+                    <View style={styles.adminQueueRight}>
+                      {item.count > 0 ? (
+                        <View style={styles.adminBadge}>
+                          <Text style={styles.adminBadgeText}>
+                            {item.count > 99 ? '99+' : item.count}
+                          </Text>
+                        </View>
+                      ) : (
+                        <Text style={styles.adminQueueEmpty}>0</Text>
+                      )}
+                      <FontAwesome name="chevron-right" size={12} color={colors.textMuted} />
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
           ) : null}
         </View>
 
@@ -1157,7 +1249,11 @@ export default function ProfilScreen() {
 
       <AdminModerationModal
         visible={moderationVisible}
-        onClose={() => setModerationVisible(false)}
+        initialTab={moderationTab}
+        onClose={() => {
+          setModerationVisible(false);
+          void refreshAdminCounts();
+        }}
       />
 
       <AddTravelHistoryModal
@@ -1440,6 +1536,95 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+  },
+  adminSection: {
+    marginTop: 14,
+    borderRadius: 14,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    padding: 12,
+  },
+  adminSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  adminSectionTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  adminSectionHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginBottom: 10,
+    lineHeight: 16,
+  },
+  adminQueueList: {
+    borderRadius: 12,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    overflow: 'hidden',
+  },
+  adminQueueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  adminQueueRowBorder: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderSoft,
+  },
+  adminQueueLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
+  adminQueueIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+                    backgroundColor: colors.dangerSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  adminQueueLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  adminQueueRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  adminQueueEmpty: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textMuted,
+    minWidth: 18,
+    textAlign: 'right',
+  },
+  adminBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    backgroundColor: colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  adminBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '800',
   },
   telegramButton: {
     width: '100%',
