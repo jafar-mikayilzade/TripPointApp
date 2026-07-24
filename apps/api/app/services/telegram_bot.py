@@ -27,17 +27,21 @@ from app.services.telegram_notify import (
 
 logger = logging.getLogger(__name__)
 
-# chat_id -> session / last plan text. MVP — not shared across workers.
 _SESSIONS: dict[str, dict[str, Any]] = {}
 _LAST_PLANS: dict[str, str] = {}
 
 MAX_MANUAL_STOPS = 8
+POI_PAGE_SIZE = 8
+LISTINGS_LIMIT = 12
+FAVORITES_LIMIT = 15
 
 BTN_AI = "🤖 AI marşrut"
 BTN_MANUAL = "🗺️ Manual marşrut"
 BTN_LAST = "📄 Son marşrut"
 BTN_HELP = "ℹ️ Kömək"
 BTN_LINK_APP = "🔗 App hesabı bağla"
+BTN_ICMA = "👥 İcma"
+BTN_FAVS = "⭐ Sevimlilər"
 BTN_CANCEL = "❌ Ləğv et"
 BTN_DONE = "✅ Hazır"
 BTN_SKIP_LOC = "❌ Keç"
@@ -52,70 +56,10 @@ INTERESTS: list[tuple[str, str]] = [
     ("photo", "📷 Foto"),
 ]
 
-PRESETS: list[dict[str, Any]] = [
-    {
-        "id": "0",
-        "label": "🏔 Quba · 1 gün · Orta · 👨‍👩‍👧",
-        "region": "quba",
-        "days": 1,
-        "budget": "mid",
-        "interests": ["family"],
-        "group_type": "family",
-    },
-    {
-        "id": "1",
-        "label": "🏔 Quba · 2 gün · Orta · 🌿",
-        "region": "quba",
-        "days": 2,
-        "budget": "mid",
-        "interests": ["nature"],
-        "group_type": "solo",
-    },
-    {
-        "id": "2",
-        "label": "🏛 Şəki · 2 gün · Orta · 🏛",
-        "region": "seki",
-        "days": 2,
-        "budget": "mid",
-        "interests": ["history"],
-        "group_type": "solo",
-    },
-    {
-        "id": "3",
-        "label": "🌲 Qəbələ · 1 gün · Orta · 🌿",
-        "region": "qabala",
-        "days": 1,
-        "budget": "mid",
-        "interests": ["nature"],
-        "group_type": "solo",
-    },
-    {
-        "id": "4",
-        "label": "🏙 Bakı · 1 gün · Orta · 🍽",
-        "region": "baku",
-        "days": 1,
-        "budget": "mid",
-        "interests": ["food", "history"],
-        "group_type": "solo",
-    },
-    {
-        "id": "5",
-        "label": "🌿 Lerik · 2 gün · Qənaət · 🌿",
-        "region": "lerik",
-        "days": 2,
-        "budget": "budget",
-        "interests": ["nature", "active"],
-        "group_type": "solo",
-    },
-]
-
-MAIN_KEYBOARD: dict[str, Any] = {
-    "keyboard": [
-        [{"text": BTN_AI}, {"text": BTN_MANUAL}],
-        [{"text": BTN_LAST}, {"text": BTN_HELP}],
-        [{"text": BTN_LINK_APP}],
-    ],
-    "resize_keyboard": True,
+LISTING_TYPE_EMOJI: dict[str, str] = {
+    "tour": "🏕",
+    "carpool": "🚗",
+    "local_service": "🛎",
 }
 
 FLOW_KEYBOARD: dict[str, Any] = {
@@ -143,7 +87,7 @@ def _ik(rows: list[list[dict[str, str]]]) -> dict[str, Any]:
 
 
 def _btn(text: str, data: str) -> dict[str, str]:
-    return {"text": text, "callback_data": data[:64]}
+    return {"text": text[:64], "callback_data": data[:64]}
 
 
 def _chat_key(chat_id: str | int) -> str:
@@ -187,6 +131,19 @@ def _save_last(chat_id: str | int, text: str) -> None:
     _LAST_PLANS[_chat_key(chat_id)] = text
 
 
+def _main_keyboard(chat_id: str | int) -> dict[str, Any]:
+    linked = bool(_lookup_user_id(chat_id))
+    rows: list[list[dict[str, str]]] = [
+        [{"text": BTN_AI}, {"text": BTN_MANUAL}],
+        [{"text": BTN_LAST}, {"text": BTN_HELP}],
+    ]
+    if linked:
+        rows.append([{"text": BTN_ICMA}, {"text": BTN_FAVS}])
+    else:
+        rows.append([{"text": BTN_LINK_APP}])
+    return {"keyboard": rows, "resize_keyboard": True}
+
+
 def _ai_result_keyboard() -> dict[str, Any]:
     return _ik(
         [
@@ -197,15 +154,6 @@ def _ai_result_keyboard() -> dict[str, Any]:
             ]
         ]
     )
-
-
-def _preset_keyboard() -> dict[str, Any]:
-    rows: list[list[dict[str, str]]] = []
-    for p in PRESETS:
-        rows.append([_btn(p["label"], f"ai:p:{p['id']}")])
-    rows.append([_btn("🛠 Özüm seçim", "ai:custom")])
-    rows.append([_btn("🏠 Menyu", "menu")])
-    return _ik(rows)
 
 
 def _region_inline(prefix: str) -> dict[str, Any]:
@@ -267,6 +215,27 @@ def _from_origin_inline() -> dict[str, Any]:
             [_btn("🏠 Menyu", "menu")],
         ]
     )
+
+
+def _manual_poi_keyboard(
+    choices: list[dict[str, Any]],
+    *,
+    offset: int,
+    has_more: bool,
+) -> dict[str, Any]:
+    rows: list[list[dict[str, str]]] = []
+    for i, poi in enumerate(choices):
+        name = str(poi.get("name") or "Məkan")[:40]
+        rows.append([_btn(f"➕ {name}", f"man:a:{offset + i}")])
+    nav: list[dict[str, str]] = []
+    if offset > 0:
+        nav.append(_btn("⬅️ Əvvəl", f"man:p:{max(0, offset - POI_PAGE_SIZE)}"))
+    if has_more:
+        nav.append(_btn("➡️ Daha", f"man:p:{offset + POI_PAGE_SIZE}"))
+    if nav:
+        rows.append(nav)
+    rows.append([_btn("✅ Hazır", "man:done"), _btn("🏠 Menyu", "menu")])
+    return _ik(rows)
 
 
 def _ensure_telegram_user(
@@ -395,20 +364,27 @@ def _link_account(chat_id: str | int, code: str) -> tuple[bool, str]:
         return False, "Bağlama alınmadı."
 
 
-def _help_text() -> str:
-    return (
-        "TripPoint bot (app lazım deyil)\n\n"
-        f"{BTN_AI} — hazır paket və ya öz seçim (düymələrlə)\n"
-        f"{BTN_MANUAL} — stop siyahısı\n"
-        f"{BTN_LAST} — son AI marşrut\n"
-        "Cari məkandan: AI seçimində «Bəli» → lokasiya paylaş\n"
-        f"{BTN_LINK_APP} — opsional app birləşdirmə"
-    )
+def _help_text(chat_id: str | int) -> str:
+    linked = bool(_lookup_user_id(chat_id))
+    lines = [
+        "TripPoint bot (app lazım deyil)",
+        "",
+        f"{BTN_AI} — region/gün/büdcə/maraq (düymələrlə)",
+        f"{BTN_MANUAL} — rayondan məkan seçib marşrut",
+        f"{BTN_LAST} — son marşrut",
+        "Cari məkandan: AI-də «Bəli» → lokasiya paylaş",
+    ]
+    if linked:
+        lines.append(f"{BTN_ICMA} — aktiv elanlar")
+        lines.append(f"{BTN_FAVS} — sevimliləriniz")
+    else:
+        lines.append(f"{BTN_LINK_APP} — opsional app birləşdirmə")
+    return "\n".join(lines)
 
 
 def _show_main_menu(chat_id: str | int, preface: str | None = None) -> None:
     text = (preface + "\n\n" if preface else "") + "Nə etmək istəyirsiniz?"
-    _reply(chat_id, text, reply_markup=MAIN_KEYBOARD)
+    _reply(chat_id, text, reply_markup=_main_keyboard(chat_id))
 
 
 def _show_ai_home(
@@ -416,16 +392,22 @@ def _show_ai_home(
     *,
     message_id: int | None = None,
 ) -> None:
-    _SESSIONS[_chat_key(chat_id)] = {"mode": "ai", "step": "pick", "data": {}}
-    text = (
-        "🤖 AI marşrut\n\n"
-        "Hazır paket seçin (1 toxunuş) və ya «Özüm seçim»:"
+    """AI starts directly with region select (no preset templates)."""
+    _SESSIONS[_chat_key(chat_id)] = {
+        "mode": "ai",
+        "step": "region",
+        "data": {"interests": [], "group_type": "solo"},
+    }
+    _edit_or_reply(
+        chat_id,
+        "🤖 AI marşrut — region seçin:",
+        message_id=message_id,
+        reply_markup=_region_inline("ai:r"),
     )
-    _edit_or_reply(chat_id, text, message_id=message_id, reply_markup=_preset_keyboard())
 
 
 def _run_and_send_plan(chat_id: str | int, data: dict[str, Any]) -> None:
-    _reply(chat_id, "⏳ Marşrut hazırlanır…", reply_markup=MAIN_KEYBOARD)
+    _reply(chat_id, "⏳ Marşrut hazırlanır…", reply_markup=_main_keyboard(chat_id))
     try:
         plan = run_plan_route(
             region=str(data["region"]),
@@ -443,14 +425,14 @@ def _run_and_send_plan(chat_id: str | int, data: dict[str, Any]) -> None:
         _reply(chat_id, text, reply_markup=_ai_result_keyboard())
     except ValueError as exc:
         _clear_session(chat_id)
-        _reply(chat_id, f"Xəta: {exc}", reply_markup=MAIN_KEYBOARD)
+        _reply(chat_id, f"Xəta: {exc}", reply_markup=_main_keyboard(chat_id))
     except Exception:
         logger.exception("AI plan failed")
         _clear_session(chat_id)
         _reply(
             chat_id,
             "Marşrut hazırlanmadı. Bir az sonra yenidən yoxlayın.",
-            reply_markup=MAIN_KEYBOARD,
+            reply_markup=_main_keyboard(chat_id),
         )
 
 
@@ -477,37 +459,80 @@ def _request_location(chat_id: str | int) -> None:
     )
 
 
-def _start_custom_wizard(chat_id: str | int, message_id: int | None) -> None:
-    _SESSIONS[_chat_key(chat_id)] = {
-        "mode": "ai",
-        "step": "region",
-        "data": {"interests": [], "group_type": "solo"},
-    }
-    _edit_or_reply(
-        chat_id,
-        "Region seçin:",
-        message_id=message_id,
-        reply_markup=_region_inline("ai:r"),
-    )
-
-
-def _search_pois(region_key: str, query: str) -> list[dict[str, Any]]:
+def _list_region_pois(
+    region_key: str,
+    *,
+    offset: int = 0,
+    limit: int = POI_PAGE_SIZE,
+    query: str = "",
+) -> tuple[list[dict[str, Any]], bool]:
     db_region = REGION_DB_ID.get(region_key, region_key)
     q = (query or "").strip()
     try:
-        query_builder = (
+        qb = (
             supabase.table("pois")
             .select("id, name, region, category")
             .eq("region", db_region)
             .eq("status", "approved")
+            .order("name")
         )
         if q:
-            query_builder = query_builder.ilike("name", f"%{q}%")
-        res = query_builder.limit(8).execute()
-        return list(res.data or [])
+            qb = qb.ilike("name", f"%{q}%")
+        # fetch one extra to know if more pages
+        res = qb.range(offset, offset + limit).execute()
+        rows = list(res.data or [])
+        has_more = len(rows) > limit
+        return rows[:limit], has_more
     except Exception:
-        logger.exception("POI search failed")
-        return []
+        logger.exception("list region pois failed")
+        return [], False
+
+
+def _show_manual_poi_page(
+    chat_id: str | int,
+    *,
+    message_id: int | None,
+    offset: int = 0,
+) -> None:
+    session = _get_session(chat_id)
+    data = session.setdefault("data", {})
+    region = str(data.get("region") or "")
+    stops: list[str] = list(data.get("stops") or [])
+    pois, has_more = _list_region_pois(region, offset=offset)
+    data["poi_page"] = pois
+    data["poi_offset"] = offset
+    label = REGION_LABELS.get(region, region)
+    stop_line = f"Seçilib: {len(stops)}/{MAX_MANUAL_STOPS}"
+    if stops:
+        stop_line += " — " + ", ".join(stops[-3:])
+    if not pois:
+        text = (
+            f"🗺️ {label}\n{stop_line}\n\n"
+            "Bu rayonda təsdiqlənmiş məkan tapılmadı.\n"
+            "Ad yazıb əlavə edə və ya «Hazır» basın."
+        )
+        _edit_or_reply(
+            chat_id,
+            text,
+            message_id=message_id,
+            reply_markup=_ik(
+                [[_btn("✅ Hazır", "man:done"), _btn("🏠 Menyu", "menu")]]
+            ),
+        )
+        return
+
+    text = (
+        f"🗺️ {label} — məkan seçin\n{stop_line}\n\n"
+        "Düyməyə basın. Ad da yaza bilərsiniz. Bitirəndə ✅ Hazır."
+    )
+    _edit_or_reply(
+        chat_id,
+        text,
+        message_id=message_id,
+        reply_markup=_manual_poi_keyboard(pois, offset=offset, has_more=has_more),
+    )
+    if message_id is None:
+        _reply(chat_id, "Ad yazmaq / ✅ Hazır:", reply_markup=MANUAL_KEYBOARD)
 
 
 def _start_manual(chat_id: str | int, message_id: int | None = None) -> None:
@@ -522,6 +547,133 @@ def _start_manual(chat_id: str | int, message_id: int | None = None) -> None:
         message_id=message_id,
         reply_markup=_region_inline("man:r"),
     )
+
+
+def _finish_manual(chat_id: str | int) -> None:
+    session = _get_session(chat_id)
+    data = session.get("data") or {}
+    stops: list[str] = list(data.get("stops") or [])
+    if not stops:
+        _reply(
+            chat_id,
+            "Ən azı bir məkan seçin.",
+            reply_markup=MANUAL_KEYBOARD,
+        )
+        return
+    region = data.get("region") or ""
+    label = REGION_LABELS.get(str(region), region)
+    lines = [f"🗺️ Manual marşrut — {label}", ""]
+    for i, name in enumerate(stops, start=1):
+        lines.append(f"{i}. {name}")
+    lines.append("\nXəritə: trippoint://ai-komekci")
+    text_out = "\n".join(lines)
+    _save_last(chat_id, text_out)
+    _clear_session(chat_id)
+    _reply(chat_id, text_out, reply_markup=_main_keyboard(chat_id))
+
+
+def _show_icma(chat_id: str | int) -> None:
+    try:
+        res = (
+            supabase.table("listings")
+            .select("id, title, type, region, departure_at, price")
+            .eq("status", "active")
+            .order("created_at", desc=True)
+            .limit(LISTINGS_LIMIT)
+            .execute()
+        )
+        rows = list(res.data or [])
+    except Exception:
+        logger.exception("icma listings failed")
+        _reply(
+            chat_id,
+            "İcma elanları indi yüklənmədi.",
+            reply_markup=_main_keyboard(chat_id),
+        )
+        return
+
+    if not rows:
+        _reply(chat_id, "Aktiv elan yoxdur.", reply_markup=_main_keyboard(chat_id))
+        return
+
+    lines = ["👥 İcma — aktiv elanlar", ""]
+    for row in rows:
+        emoji = LISTING_TYPE_EMOJI.get(str(row.get("type") or ""), "📌")
+        title = str(row.get("title") or "Elan").strip()
+        region = str(row.get("region") or "").strip()
+        price = row.get("price")
+        extra = []
+        if region:
+            extra.append(region)
+        if price is not None:
+            extra.append(f"{price}₼")
+        suffix = f" ({', '.join(extra)})" if extra else ""
+        lines.append(f"{emoji} {title}{suffix}")
+    lines.append("\nƏtraflı: app → İcma")
+    _reply(chat_id, "\n".join(lines), reply_markup=_main_keyboard(chat_id))
+
+
+def _show_favorites(chat_id: str | int) -> None:
+    user_id = _lookup_user_id(chat_id)
+    if not user_id:
+        _reply(
+            chat_id,
+            "Sevimlilər üçün app hesabını bağlayın (Profil → Telegram bağla).",
+            reply_markup=_main_keyboard(chat_id),
+        )
+        return
+    try:
+        res = (
+            supabase.table("favorites")
+            .select("target_type, target_id")
+            .eq("user_id", user_id)
+            .limit(FAVORITES_LIMIT)
+            .execute()
+        )
+        favs = list(res.data or [])
+    except Exception:
+        logger.exception("favorites fetch failed")
+        _reply(chat_id, "Sevimlilər yüklənmədi.", reply_markup=_main_keyboard(chat_id))
+        return
+
+    if not favs:
+        _reply(chat_id, "Sevimli yoxdur.", reply_markup=_main_keyboard(chat_id))
+        return
+
+    poi_ids = [str(f["target_id"]) for f in favs if f.get("target_type") == "poi"]
+    listing_ids = [
+        str(f["target_id"]) for f in favs if f.get("target_type") == "listing"
+    ]
+    names: dict[str, str] = {}
+    try:
+        if poi_ids:
+            pr = (
+                supabase.table("pois")
+                .select("id, name")
+                .in_("id", poi_ids)
+                .execute()
+            )
+            for p in pr.data or []:
+                names[str(p["id"])] = f"📍 {p.get('name') or 'Məkan'}"
+        if listing_ids:
+            lr = (
+                supabase.table("listings")
+                .select("id, title, type")
+                .in_("id", listing_ids)
+                .execute()
+            )
+            for L in lr.data or []:
+                emoji = LISTING_TYPE_EMOJI.get(str(L.get("type") or ""), "📌")
+                names[str(L["id"])] = f"{emoji} {L.get('title') or 'Elan'}"
+    except Exception:
+        logger.exception("favorite names failed")
+
+    lines = ["⭐ Sevimlilər", ""]
+    for f in favs:
+        tid = str(f.get("target_id") or "")
+        lines.append(names.get(tid) or f"• {tid[:8]}…")
+    lines.append("\nApp → Sevimlilər")
+    _reply(chat_id, "\n".join(lines), reply_markup=_main_keyboard(chat_id))
 
 
 def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
@@ -550,30 +702,6 @@ def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
 
     if data == "ai:again" or data == "ai:edit":
         _show_ai_home(chat_id, message_id=message_id)
-        return {"ok": True}
-
-    if data == "ai:custom":
-        _start_custom_wizard(chat_id, message_id)
-        return {"ok": True}
-
-    if data.startswith("ai:p:"):
-        preset_id = data.split(":")[-1]
-        preset = next((p for p in PRESETS if p["id"] == preset_id), None)
-        if not preset:
-            _reply(chat_id, "Paket tapılmadı.", reply_markup=MAIN_KEYBOARD)
-            return {"ok": True}
-        _SESSIONS[_chat_key(chat_id)] = {
-            "mode": "ai",
-            "step": "from_origin",
-            "data": {
-                "region": preset["region"],
-                "days": preset["days"],
-                "budget": preset["budget"],
-                "interests": list(preset["interests"]),
-                "group_type": preset.get("group_type") or "solo",
-            },
-        }
-        _ask_from_origin(chat_id, message_id)
         return {"ok": True}
 
     if data.startswith("ai:r:"):
@@ -630,9 +758,8 @@ def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
         selected: list[str] = list(session["data"].get("interests") or [])
         if interest in selected:
             selected = [x for x in selected if x != interest]
-        else:
-            if interest in {k for k, _ in INTERESTS}:
-                selected.append(interest)
+        elif interest in {k for k, _ in INTERESTS}:
+            selected.append(interest)
         session["data"]["interests"] = selected
         if "family" in selected:
             session["data"]["group_type"] = "family"
@@ -680,19 +807,46 @@ def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
         session["mode"] = "manual"
         session["data"] = {"stops": [], "region": region}
         session["step"] = "stops"
-        sample = _search_pois(region, "")
-        hint = ""
-        if sample:
-            hint = "\nNümunələr:\n" + "\n".join(
-                f"• {p.get('name')}" for p in sample[:5]
+        _show_manual_poi_page(chat_id, message_id=message_id, offset=0)
+        return {"ok": True}
+
+    if data.startswith("man:p:"):
+        raw = data.split(":")[-1]
+        offset = int(raw) if raw.isdigit() else 0
+        _show_manual_poi_page(chat_id, message_id=message_id, offset=offset)
+        return {"ok": True}
+
+    if data.startswith("man:a:"):
+        raw = data.split(":")[-1]
+        if not raw.isdigit():
+            return {"ok": True}
+        idx = int(raw)
+        session = _get_session(chat_id)
+        data_s = session.setdefault("data", {})
+        stops: list[str] = list(data_s.get("stops") or [])
+        page: list[dict[str, Any]] = list(data_s.get("poi_page") or [])
+        page_off = int(data_s.get("poi_offset") or 0)
+        local_i = idx - page_off
+        if local_i < 0 or local_i >= len(page):
+            return {"ok": True}
+        if len(stops) >= MAX_MANUAL_STOPS:
+            _reply(
+                chat_id,
+                f"Maksimum {MAX_MANUAL_STOPS}. ✅ Hazır basın.",
+                reply_markup=MANUAL_KEYBOARD,
             )
-        label = REGION_LABELS.get(region, region)
-        _reply(
-            chat_id,
-            f"Region: {label}\nStop adı yazın (max {MAX_MANUAL_STOPS})."
-            f"\nBitirəndə «{BTN_DONE}».{hint}",
-            reply_markup=MANUAL_KEYBOARD,
+            return {"ok": True}
+        name = str(page[local_i].get("name") or "Məkan")
+        if name not in stops:
+            stops.append(name)
+            data_s["stops"] = stops
+        _show_manual_poi_page(
+            chat_id, message_id=message_id, offset=page_off
         )
+        return {"ok": True}
+
+    if data == "man:done":
+        _finish_manual(chat_id)
         return {"ok": True}
 
     return {"ok": True}
@@ -703,47 +857,38 @@ def _handle_manual_text(chat_id: str | int, text: str, session: dict[str, Any]) 
     stops: list[str] = list(data.get("stops") or [])
     step = session.get("step")
 
-    if step == "stops":
-        if text.strip() == BTN_DONE or text.strip().lower() in {"hazır", "hazir", "done"}:
-            if not stops:
-                _reply(chat_id, "Ən azı bir stop əlavə edin.", reply_markup=MANUAL_KEYBOARD)
-                return
-            region = data.get("region") or ""
-            label = REGION_LABELS.get(str(region), region)
-            lines = [f"🗺️ Manual marşrut — {label}", ""]
-            for i, name in enumerate(stops, start=1):
-                lines.append(f"{i}. {name}")
-            lines.append("\nXəritə: trippoint://ai-komekci")
-            text_out = "\n".join(lines)
-            _save_last(chat_id, text_out)
-            _clear_session(chat_id)
-            _reply(chat_id, text_out, reply_markup=MAIN_KEYBOARD)
-            return
+    if step != "stops":
+        return
 
-        if len(stops) >= MAX_MANUAL_STOPS:
-            _reply(
-                chat_id,
-                f"Maksimum {MAX_MANUAL_STOPS}. «{BTN_DONE}» basın.",
-                reply_markup=MANUAL_KEYBOARD,
-            )
-            return
+    if text.strip() == BTN_DONE or text.strip().lower() in {"hazır", "hazir", "done"}:
+        _finish_manual(chat_id)
+        return
 
-        region = str(data.get("region") or "")
-        found = _search_pois(region, text)
-        name = text.strip()
-        if found:
-            name = str(found[0].get("name") or name)
-        if len(name) < 2:
-            _reply(chat_id, "Daha uzun ad yazın.", reply_markup=MANUAL_KEYBOARD)
-            return
-        stops.append(name)
-        data["stops"] = stops
+    if len(stops) >= MAX_MANUAL_STOPS:
         _reply(
             chat_id,
-            f"Əlavə olundu ({len(stops)}/{MAX_MANUAL_STOPS}): {name}\n"
-            f"Növbəti və ya «{BTN_DONE}».",
+            f"Maksimum {MAX_MANUAL_STOPS}. «{BTN_DONE}» basın.",
             reply_markup=MANUAL_KEYBOARD,
         )
+        return
+
+    region = str(data.get("region") or "")
+    found, _ = _list_region_pois(region, offset=0, limit=5, query=text)
+    name = text.strip()
+    if found:
+        name = str(found[0].get("name") or name)
+    if len(name) < 2:
+        _reply(chat_id, "Daha uzun ad yazın və ya düymədən seçin.", reply_markup=MANUAL_KEYBOARD)
+        return
+    if name not in stops:
+        stops.append(name)
+        data["stops"] = stops
+    _reply(
+        chat_id,
+        f"Əlavə olundu ({len(stops)}/{MAX_MANUAL_STOPS}): {name}\n"
+        f"Düymədən seçin, ad yazın və ya «{BTN_DONE}».",
+        reply_markup=MANUAL_KEYBOARD,
+    )
 
 
 def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
@@ -767,7 +912,6 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
             username=str(from_user["username"]) if from_user.get("username") else None,
         )
 
-        # Location for fromOrigin flow
         loc = message.get("location")
         if isinstance(loc, dict) and loc.get("latitude") is not None:
             session = _get_session(chat_id)
@@ -797,7 +941,7 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
                 return {"ok": True, "linked": ok}
             _show_main_menu(
                 chat_id,
-                "Xoş gəldiniz! App lazım deyil — paket və ya öz seçimlə AI marşrut.",
+                "Xoş gəldiniz! AI və ya Manual marşrut seçin.",
             )
             return {"ok": True, "guest": True}
 
@@ -817,21 +961,20 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
                 _reply(
                     chat_id,
                     "Lokasiya olmadan davam (cari məkan nəzərə alınmadı).",
-                    reply_markup=MAIN_KEYBOARD,
+                    reply_markup=_main_keyboard(chat_id),
                 )
                 _run_and_send_plan(chat_id, data)
                 return {"ok": True}
 
         if text == BTN_HELP or text.lower() in {"kömək", "komek", "/help", "help"}:
-            _reply(chat_id, _help_text(), reply_markup=MAIN_KEYBOARD)
+            _reply(chat_id, _help_text(chat_id), reply_markup=_main_keyboard(chat_id))
             return {"ok": True}
 
         if text == BTN_LINK_APP or text.lower() in {"bağla", "bagla", "link"}:
             if _lookup_user_id(chat_id):
-                _reply(
+                _show_main_menu(
                     chat_id,
-                    "Bu Telegram artıq app hesabına bağlıdır ✅",
-                    reply_markup=MAIN_KEYBOARD,
+                    "Artıq bağlısınız — İcma və Sevimlilər menyudadır.",
                 )
             else:
                 _reply(
@@ -840,8 +983,23 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
                     "1) TripPoint → Profil → Telegram bağla\n"
                     "2) Botda Start\n\n"
                     "App yoxdursa da AI/manual işləyir.",
-                    reply_markup=MAIN_KEYBOARD,
+                    reply_markup=_main_keyboard(chat_id),
                 )
+            return {"ok": True}
+
+        if text == BTN_ICMA:
+            if not _lookup_user_id(chat_id):
+                _reply(
+                    chat_id,
+                    "İcma üçün app hesabını bağlayın.",
+                    reply_markup=_main_keyboard(chat_id),
+                )
+                return {"ok": True}
+            _show_icma(chat_id)
+            return {"ok": True}
+
+        if text == BTN_FAVS:
+            _show_favorites(chat_id)
             return {"ok": True}
 
         if text == BTN_LAST or text.lower() in {"/last", "son"}:
@@ -852,7 +1010,7 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
                 _reply(
                     chat_id,
                     "Hələ son marşrut yoxdur. AI və ya Manual seçin.",
-                    reply_markup=MAIN_KEYBOARD,
+                    reply_markup=_main_keyboard(chat_id),
                 )
             return {"ok": True}
 
