@@ -572,45 +572,109 @@ def _finish_manual(chat_id: str | int) -> None:
     _reply(chat_id, text_out, reply_markup=_main_keyboard(chat_id))
 
 
-def _show_icma(chat_id: str | int) -> None:
+def _icma_menu_keyboard() -> dict[str, Any]:
+    return _ik(
+        [
+            [
+                _btn("🏕 Tur", "icma:tour"),
+                _btn("🚗 Carpool", "icma:carpool"),
+            ],
+            [_btn("🛎 Yerli xidmət", "icma:local_service")],
+            [_btn("🏠 Menyu", "menu")],
+        ]
+    )
+
+
+def _show_icma(chat_id: str | int, *, message_id: int | None = None) -> None:
+    _edit_or_reply(
+        chat_id,
+        "👥 İcma — hansı elan növünə baxmaq istəyirsiniz?",
+        message_id=message_id,
+        reply_markup=_icma_menu_keyboard(),
+    )
+
+
+def _format_listing_row(row: dict[str, Any]) -> str:
+    emoji = LISTING_TYPE_EMOJI.get(str(row.get("type") or ""), "📌")
+    title = str(row.get("title") or "Elan").strip()
+    region = str(row.get("region") or "").strip()
+    price = row.get("price")
+    extra: list[str] = []
+    if region:
+        extra.append(region)
+    if price is not None:
+        extra.append(f"{price}₼")
+    suffix = f" ({', '.join(extra)})" if extra else ""
+    return f"{emoji} {title}{suffix}"
+
+
+def _show_icma_by_type(
+    chat_id: str | int,
+    listing_type: str,
+    *,
+    message_id: int | None,
+) -> None:
+    titles = {
+        "tour": "🏕 Turlar",
+        "carpool": "🚗 Carpool",
+        "local_service": "🛎 Yerli xidmət",
+    }
+    heading = titles.get(listing_type, "Elanlar")
     try:
         res = (
             supabase.table("listings")
             .select("id, title, type, region, departure_at, price")
             .eq("status", "active")
+            .eq("type", listing_type)
             .order("created_at", desc=True)
             .limit(LISTINGS_LIMIT)
             .execute()
         )
         rows = list(res.data or [])
     except Exception:
-        logger.exception("icma listings failed")
-        _reply(
+        logger.exception("icma listings by type failed")
+        _edit_or_reply(
             chat_id,
-            "İcma elanları indi yüklənmədi.",
-            reply_markup=_main_keyboard(chat_id),
+            f"{heading} indi yüklənmədi.",
+            message_id=message_id,
+            reply_markup=_icma_menu_keyboard(),
         )
         return
 
     if not rows:
-        _reply(chat_id, "Aktiv elan yoxdur.", reply_markup=_main_keyboard(chat_id))
+        _edit_or_reply(
+            chat_id,
+            f"{heading}\n\nAktiv elan yoxdur.",
+            message_id=message_id,
+            reply_markup=_icma_menu_keyboard(),
+        )
         return
 
-    lines = ["👥 İcma — aktiv elanlar", ""]
+    lines = [heading, ""]
     for row in rows:
-        emoji = LISTING_TYPE_EMOJI.get(str(row.get("type") or ""), "📌")
-        title = str(row.get("title") or "Elan").strip()
-        region = str(row.get("region") or "").strip()
-        price = row.get("price")
-        extra = []
-        if region:
-            extra.append(region)
-        if price is not None:
-            extra.append(f"{price}₼")
-        suffix = f" ({', '.join(extra)})" if extra else ""
-        lines.append(f"{emoji} {title}{suffix}")
+        lines.append(_format_listing_row(row))
     lines.append("\nƏtraflı: app → İcma")
-    _reply(chat_id, "\n".join(lines), reply_markup=_main_keyboard(chat_id))
+    _edit_or_reply(
+        chat_id,
+        "\n".join(lines),
+        message_id=message_id,
+        reply_markup=_icma_menu_keyboard(),
+    )
+
+
+def _handle_icma_callback(
+    chat_id: str | int, data: str, *, message_id: int | None
+) -> bool:
+    if not data.startswith("icma:"):
+        return False
+    section = data.split(":", 1)[1]
+    if section == "menu":
+        _show_icma(chat_id, message_id=message_id)
+        return True
+    if section in {"tour", "carpool", "local_service"}:
+        _show_icma_by_type(chat_id, section, message_id=message_id)
+        return True
+    return False
 
 
 def _favorites_menu_keyboard() -> dict[str, Any]:
@@ -1005,6 +1069,9 @@ def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
         return {"ok": True}
 
     if _handle_fav_callback(chat_id, data, message_id=message_id):
+        return {"ok": True}
+
+    if _handle_icma_callback(chat_id, data, message_id=message_id):
         return {"ok": True}
 
     if data == "ai:again" or data == "ai:edit":
