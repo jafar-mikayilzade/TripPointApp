@@ -8,11 +8,35 @@ export type WeatherAdvice = {
   region?: string;
   prefer_indoor: boolean;
   summary_az: string;
+  /** UI: "18° · açıq hava" */
+  display_az?: string;
+  temp_c?: number | null;
+  feels_like?: number | null;
+  condition_az?: string;
   exclude_categories: string[];
   prefer_categories: string[];
   cached?: boolean;
   error?: string;
 };
+
+/** Qısa hava mətni — banner / chip üçün. */
+export function formatWeatherLabel(weather: WeatherAdvice | null | undefined): string | null {
+  if (!weather?.ok) {
+    return null;
+  }
+  const display = weather.display_az?.trim();
+  if (display) {
+    return display;
+  }
+  if (typeof weather.temp_c === 'number' && weather.condition_az) {
+    return `${Math.round(weather.temp_c)}° · ${weather.condition_az}`;
+  }
+  if (typeof weather.temp_c === 'number') {
+    return `${Math.round(weather.temp_c)}°`;
+  }
+  const summary = weather.summary_az?.trim();
+  return summary || null;
+}
 
 const MEMORY_TTL_MS = 10 * 60_000;
 const memory = new Map<string, { at: number; data: WeatherAdvice }>();
@@ -32,16 +56,15 @@ export async function fetchRegionWeather(
     return null;
   }
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 9000);
   try {
     const url = `${base}/api/weather?region=${encodeURIComponent(region.toLowerCase())}&days=${days}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 9000);
     const res = await fetch(url, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     });
-    clearTimeout(timer);
 
     if (!res.ok) {
       return null;
@@ -56,6 +79,8 @@ export async function fetchRegionWeather(
     return data;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

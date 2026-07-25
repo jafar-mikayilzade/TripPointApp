@@ -1,5 +1,5 @@
 import type { ErrorBoundaryProps } from 'expo-router';
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
@@ -12,6 +12,12 @@ import {
 import { ensureProfile, validateAuthUser } from '../lib/ensureProfile';
 import { getErrorMessage } from '../lib/errors';
 import { configureGoogleSignIn, signOutEverywhere } from '../lib/googleAuth';
+import {
+  hydratePasswordRecovery,
+  isPasswordRecoveryPending,
+  setPasswordRecoveryPending,
+  subscribePasswordRecovery,
+} from '../lib/passwordRecovery';
 import { supabase } from '../lib/supabase';
 
 import { InfoToastProvider } from '../components/InfoToastProvider';
@@ -34,9 +40,14 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
 export default function RootLayout() {
   const [isLoading, setIsLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
+  const [passwordRecovery, setPasswordRecovery] = useState(isPasswordRecoveryPending());
 
   useEffect(() => {
     configureGoogleSignIn();
+  }, []);
+
+  useEffect(() => {
+    return subscribePasswordRecovery(setPasswordRecovery);
   }, []);
 
   useEffect(() => {
@@ -53,6 +64,7 @@ export default function RootLayout() {
       if (!nextSession) {
         if (isActive) {
           setSession(null);
+          setPasswordRecoveryPending(false);
         }
         return;
       }
@@ -69,6 +81,15 @@ export default function RootLayout() {
       const ensured = await ensureProfile(user);
       if (ensured.error) {
         console.warn('[auth] ensureProfile', ensured.error);
+      }
+
+      // Recovery sessiyası: tabs-a buraxma, şifrə dəyişənə qədər auth-da qal
+      if (isPasswordRecoveryPending()) {
+        if (isActive) {
+          setSession(nextSession);
+          setPasswordRecovery(true);
+        }
+        return;
       }
 
       const verifiedAt =
@@ -97,6 +118,12 @@ export default function RootLayout() {
 
     async function checkSession() {
       try {
+        // Recovery lock cold-start-dan əvvəl bərpa olunsun
+        const recovery = await hydratePasswordRecovery();
+        if (isActive && recovery) {
+          setPasswordRecovery(true);
+        }
+
         const result = await Promise.race([
           supabase.auth.getSession(),
           new Promise<null>((resolve) => {
@@ -109,6 +136,22 @@ export default function RootLayout() {
         }
 
         if (result && 'data' in result) {
+          // Köhnə recovery sessiyası qalıbsa — tabs-a buraxma
+          if (recovery && result.data.session) {
+            setSession(result.data.session);
+            setPasswordRecovery(true);
+            try {
+              router.replace('/auth/reset-password');
+            } catch {
+              // navigator may not be ready yet
+            }
+            return;
+          }
+          // Flag qalıb, sessiya yoxdur — orphan lock-u təmizlə
+          if (recovery && !result.data.session) {
+            setPasswordRecoveryPending(false);
+            setPasswordRecovery(false);
+          }
           await applySession(result.data.session);
         } else {
           setSession(null);
@@ -129,6 +172,41 @@ export default function RootLayout() {
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (event, nextSession) => {
         if (!isActive) {
+          return;
+        }
+
+        if (event === 'PASSWORD_RECOVERY') {
+          setPasswordRecoveryPending(true);
+          setPasswordRecovery(true);
+          if (nextSession) {
+            setSession(nextSession);
+          }
+          setIsLoading(false);
+          try {
+            router.replace('/auth/reset-password');
+          } catch {
+            // navigator may not be ready yet
+          }
+          return;
+        }
+
+        // PKCE recovery bəzən PASSWORD_RECOVERY əvəzinə SIGNED_IN göndərir
+        if (
+          (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') &&
+          isPasswordRecoveryPending()
+        ) {
+          setPasswordRecovery(true);
+          if (nextSession) {
+            setSession(nextSession);
+          }
+          setIsLoading(false);
+          if (event === 'SIGNED_IN') {
+            try {
+              router.replace('/auth/reset-password');
+            } catch {
+              // navigator may not be ready yet
+            }
+          }
           return;
         }
 
@@ -162,18 +240,21 @@ export default function RootLayout() {
     );
   }
 
+  const showApp = !!session && !passwordRecovery;
+  const showAuth = !session || passwordRecovery;
+
   return (
     <InfoToastProvider>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" />
 
-        <Stack.Protected guard={!!session}>
+        <Stack.Protected guard={showApp}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="split-bill" />
           <Stack.Screen name="feed" />
         </Stack.Protected>
 
-        <Stack.Protected guard={!session}>
+        <Stack.Protected guard={showAuth}>
           <Stack.Screen name="auth" />
         </Stack.Protected>
       </Stack>

@@ -186,6 +186,8 @@ export type Listing = {
   service_category: LocalServiceCategory | null;
   /** Full route: app POIs + map/custom places */
   route_stops: unknown;
+  /** 16 rəqəmli kart — elan sahibi paylaşır, üzvlər görür */
+  payment_card?: string | null;
   created_at: string;
   updated_at: string;
 };

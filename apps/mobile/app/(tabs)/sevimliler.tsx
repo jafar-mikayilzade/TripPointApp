@@ -20,9 +20,11 @@ import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { SavedRouteDetailModal } from '../../components/SavedRouteDetailModal';
 import { ShareAsTourModal } from '../../components/ShareAsTourModal';
 import { SubscribeMenuButton } from '../../components/SubscribeMenuButton';
+import { ScreenHeader } from '../../components/ScreenHeader';
 import { useInfoToast } from '../../components/InfoToastProvider';
 import { REGIONS } from '../../constants/regions';
 import { colors } from '../../constants/theme';
+import { useResponsiveLayout } from '../../lib/layout';
 
 import { getCategoryLabel } from '../../lib/categoryUtils';
 import { getErrorMessage } from '../../lib/errors';
@@ -90,6 +92,7 @@ export default function SevimlilerScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { showInfo } = useInfoToast();
+  const { padH, isCompact } = useResponsiveLayout();
 
   const [tab, setTab] = useState<TabId>('listings');
   const [listings, setListings] = useState<ListingWithCreator[]>([]);
@@ -300,26 +303,40 @@ export default function SevimlilerScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <View style={styles.titleBlock}>
-          <Text style={styles.title}>sevimlilər</Text>
-          <Text style={styles.subtitle}>Bookmark · marşrut · abunə</Text>
-        </View>
-        <ProfileCornerButton />
-      </View>
+      <ScreenHeader
+        title="sevimlilər"
+        subtitle="Bookmark · marşrut · abunə"
+        style={{ paddingHorizontal: padH }}
+        right={<ProfileCornerButton />}
+      />
 
-      <View style={styles.tabRow}>
+      <View style={[styles.tabRow, { paddingHorizontal: padH }]}>
         {TABS.map((item) => {
           const selected = tab === item.id;
           const count = tabCount(item.id);
+          const labelBase = isCompact
+            ? (
+                {
+                  listings: 'Elan',
+                  pois: 'Yer',
+                  routes: 'Marşrut',
+                  subscriptions: 'Abunə',
+                  notifications: 'Bildiriş',
+                } as const
+              )[item.id]
+            : item.label;
+          const label = `${labelBase} (${count})`;
           return (
             <Pressable
               key={item.id}
               style={[styles.tabChip, selected && styles.tabChipSelected]}
               onPress={() => setTab(item.id)}
             >
-              <Text style={[styles.tabText, selected && styles.tabTextSelected]}>
-                {item.label} ({count})
+              <Text
+                style={[styles.tabText, selected && styles.tabTextSelected]}
+                numberOfLines={1}
+              >
+                {label}
               </Text>
             </Pressable>
           );

@@ -49,12 +49,8 @@ BTN_SKIP_LOC = "❌ Keç"
 BTN_SHARE_LOC = "📍 Lokasiyamı göndər"
 
 INTERESTS: list[tuple[str, str]] = [
-    ("nature", "🌿 Təbiət"),
-    ("history", "🏛 Tarix"),
-    ("food", "🍽 Yemək"),
-    ("family", "👨‍👩‍👧 Ailə"),
-    ("active", "🏃 Aktiv"),
-    ("photo", "📷 Foto"),
+    ("nature", "Təbiət"),
+    ("history", "Tarixi"),
 ]
 
 LISTING_TYPE_EMOJI: dict[str, str] = {
@@ -204,9 +200,9 @@ def _budget_inline() -> dict[str, Any]:
     return _ik(
         [
             [
-                _btn("💸 Qənaətcil", "ai:b:budget"),
-                _btn("⚖️ Orta", "ai:b:mid"),
-                _btn("✨ Premium", "ai:b:premium"),
+                _btn("Ekonom", "ai:b:budget"),
+                _btn("Orta", "ai:b:mid"),
+                _btn("Premium", "ai:b:premium"),
             ],
             [_btn("🏠 Menyu", "menu")],
         ]

@@ -1,14 +1,16 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Linking,
   Modal,
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -17,7 +19,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getErrorMessage } from '../lib/errors';
-import { calculateSettlements, sumExpenses } from '../lib/splitBill';
+import {
+  calculateMemberBalances,
+  calculateSettlements,
+  formatCardNumber,
+  normalizeCardNumber,
+  sumExpenses,
+} from '../lib/splitBill';
 import { supabase } from '../lib/supabase';
 import {
   confirmDelete,
@@ -108,6 +116,10 @@ export default function SplitBillScreen() {
   const [savingExpense, setSavingExpense] = useState(false);
   const [expenseError, setExpenseError] = useState<string | null>(null);
   const [settling, setSettling] = useState(false);
+  const [paymentCard, setPaymentCard] = useState<string | null>(null);
+  const [cardDraft, setCardDraft] = useState('');
+  const [savingCard, setSavingCard] = useState(false);
+  const [cardEditVisible, setCardEditVisible] = useState(false);
 
   const loadGroups = useCallback(async () => {
     setLoading(true);
@@ -205,7 +217,10 @@ export default function SplitBillScreen() {
     setLoading(false);
   }, []);
 
+  const loadGroupDetailGen = useRef(0);
+
   const loadGroupDetail = useCallback(async (groupId: string) => {
+    const gen = ++loadGroupDetailGen.current;
     setDetailLoading(true);
     setErrorMessage(null);
 
@@ -214,6 +229,10 @@ export default function SplitBillScreen() {
       .select('*')
       .eq('id', groupId)
       .maybeSingle();
+
+    if (gen !== loadGroupDetailGen.current) {
+      return;
+    }
 
     if (groupError || !groupData) {
       setErrorMessage(groupError ? getErrorMessage(groupError) : 'Qrup tapılmadı.');
@@ -226,10 +245,30 @@ export default function SplitBillScreen() {
 
     setGroup(groupData);
 
+    // Elana bağlı kart nömrəsi
+    if (groupData.listing_id) {
+      const { data: listingRow } = await supabase
+        .from('listings')
+        .select('payment_card')
+        .eq('id', groupData.listing_id)
+        .maybeSingle();
+      if (gen !== loadGroupDetailGen.current) {
+        return;
+      }
+      const card = listingRow?.payment_card?.replace(/\D/g, '') || null;
+      setPaymentCard(card && card.length >= 12 ? card : null);
+    } else {
+      setPaymentCard(null);
+    }
+
     const { data: memberRows, error: membersError } = await supabase
       .from('expense_group_members')
       .select('user_id')
       .eq('group_id', groupId);
+
+    if (gen !== loadGroupDetailGen.current) {
+      return;
+    }
 
     if (membersError) {
       setErrorMessage(getErrorMessage(membersError));
@@ -246,6 +285,10 @@ export default function SplitBillScreen() {
         .select('id, full_name, phone')
         .in('id', userIds);
 
+      if (gen !== loadGroupDetailGen.current) {
+        return;
+      }
+
       if (profilesError) {
         setErrorMessage(getErrorMessage(profilesError));
       } else {
@@ -260,6 +303,10 @@ export default function SplitBillScreen() {
       .select('*')
       .eq('group_id', groupId)
       .order('created_at', { ascending: false });
+
+    if (gen !== loadGroupDetailGen.current) {
+      return;
+    }
 
     if (expensesError) {
       setErrorMessage(getErrorMessage(expensesError));
@@ -301,21 +348,37 @@ export default function SplitBillScreen() {
     }, [loadGroupDetail, selectedGroupId])
   );
 
-  const settlements = useMemo(() => {
-    return calculateSettlements(
+  const splitMembers = useMemo(
+    () =>
       members.map((member) => ({
         id: member.id,
         name: member.full_name?.trim() || 'İstifadəçi',
         phone: member.phone,
       })),
+    [members]
+  );
+
+  const splitExpenses = useMemo(
+    () =>
       expenses.map((expense) => ({
         paid_by: expense.paid_by,
         amount: expense.amount,
-      }))
-    );
-  }, [expenses, members]);
+      })),
+    [expenses]
+  );
+
+  const settlements = useMemo(
+    () => calculateSettlements(splitMembers, splitExpenses),
+    [splitMembers, splitExpenses]
+  );
+
+  const { fairShare, balances } = useMemo(
+    () => calculateMemberBalances(splitMembers, splitExpenses),
+    [splitMembers, splitExpenses]
+  );
 
   const totalAmount = useMemo(() => sumExpenses(expenses), [expenses]);
+  const isGroupOwner = Boolean(authUserId && group?.created_by === authUserId);
 
   async function openCreateModal() {
     setCreateError(null);
@@ -383,10 +446,28 @@ export default function SplitBillScreen() {
       return;
     }
 
-    const { error: membersError } = await supabase.from('expense_group_members').insert({
-      group_id: created.id,
-      user_id: user.id,
-    });
+    const memberIds = new Set<string>([user.id]);
+
+    // Elana bağlı qrup: təsdiqlənmiş iştirakçıları avtomatik əlavə et
+    if (selectedListingId) {
+      const { data: participants } = await supabase
+        .from('listing_participants')
+        .select('user_id')
+        .eq('listing_id', selectedListingId)
+        .eq('status', 'approved');
+      for (const row of participants ?? []) {
+        if (row.user_id) {
+          memberIds.add(row.user_id);
+        }
+      }
+    }
+
+    const { error: membersError } = await supabase.from('expense_group_members').insert(
+      [...memberIds].map((userId) => ({
+        group_id: created.id,
+        user_id: userId,
+      }))
+    );
     if (membersError) {
       setCreateError(`Qrup yaradıldı, amma üzv yazılmadı: ${getErrorMessage(membersError)}`);
       setCreating(false);
@@ -400,6 +481,53 @@ export default function SplitBillScreen() {
     setCreateVisible(false);
     await loadGroups();
     setSelectedGroupId(created.id);
+  }
+
+  async function copyPaymentCard() {
+    if (!paymentCard) {
+      return;
+    }
+    try {
+      // expo-clipboard native rebuild tələb edir — Share ilə kopyalama/paylaşım
+      await Share.share({
+        message: paymentCard,
+        title: 'Kart nömrəsi',
+      });
+    } catch (err) {
+      // İstifadəçi ləğv edibsə səssiz keç
+      const message = getErrorMessage(err);
+      if (!/dismiss|cancel|ləğv/i.test(message)) {
+        setErrorMessage(message);
+      }
+    }
+  }
+
+  async function savePaymentCard() {
+    if (!group?.listing_id || !isGroupOwner) {
+      return;
+    }
+    const digits = normalizeCardNumber(cardDraft);
+    if (digits.length > 0 && digits.length !== 16) {
+      Alert.alert('Kart', 'Kart nömrəsi 16 rəqəm olmalıdır (və ya boş saxlayın).');
+      return;
+    }
+
+    setSavingCard(true);
+    const { error } = await supabase
+      .from('listings')
+      .update({ payment_card: digits.length === 16 ? digits : null })
+      .eq('id', group.listing_id)
+      .eq('created_by', authUserId ?? '');
+
+    setSavingCard(false);
+
+    if (error) {
+      setErrorMessage(getErrorMessage(error));
+      return;
+    }
+
+    setPaymentCard(digits.length === 16 ? digits : null);
+    setCardEditVisible(false);
   }
 
   function openExpenseModal() {
@@ -544,6 +672,9 @@ export default function SplitBillScreen() {
             onPress={() => {
               setSelectedGroupId(null);
               setGroup(null);
+              setPaymentCard(null);
+              setMembers([]);
+              setExpenses([]);
             }}
             hitSlop={8}
           >
@@ -558,7 +689,9 @@ export default function SplitBillScreen() {
           </View>
         ) : (
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <Text style={styles.title}>{group.name}</Text>
+            <Text style={styles.title} numberOfLines={2}>
+              {group.name}
+            </Text>
             <Text style={styles.totalText}>Ümumi: {formatMoney(totalAmount)}</Text>
             <View
               style={[
@@ -596,20 +729,57 @@ export default function SplitBillScreen() {
                   <Text style={styles.metaLine}>👤 {item.payerName}</Text>
                   <Text style={styles.metaLine}>💰 {formatMoney(item.amount)}</Text>
                   <Text style={styles.metaLine}>📅 {formatDate(item.created_at)}</Text>
-                  {authUserId && item.paid_by === authUserId ? (
+                  {authUserId &&
+                  (item.paid_by === authUserId || isGroupOwner) ? (
                     <Pressable
                       style={styles.deleteTextButton}
-                      onPress={() => handleDeleteExpense(item.id)}
+                      onPress={() => {
+                        void handleDeleteExpense(item.id);
+                      }}
                       hitSlop={8}
                     >
-                      <Text style={styles.deleteText}>Sil</Text>
+                      <Text style={styles.deleteText}>Xərci sil</Text>
                     </Pressable>
                   ) : null}
                 </View>
               ))
             )}
 
-            <Text style={styles.sectionTitle}>Kim kimə nə qədər borcludur?</Text>
+            <Text style={styles.sectionTitle}>Adambaşı hesab</Text>
+            <Text style={styles.metaLine}>
+              Ümumi {formatMoney(totalAmount)} · {members.length} nəfər · adambaşı{' '}
+              {formatMoney(fairShare)}
+            </Text>
+            {balances.length === 0 ? (
+              <Text style={styles.emptyText}>Üzv yoxdur</Text>
+            ) : (
+              balances.map((row) => (
+                <View key={row.id} style={styles.balanceCard}>
+                  <Text style={styles.cardTitle} numberOfLines={1}>
+                    {row.name}
+                  </Text>
+                  <Text style={styles.metaLine}>Ödəyib: {formatMoney(row.paid)}</Text>
+                  <Text
+                    style={[
+                      styles.balanceLine,
+                      row.balance > 0.009
+                        ? styles.balanceCredit
+                        : row.balance < -0.009
+                          ? styles.balanceDebt
+                          : styles.balanceEven,
+                    ]}
+                  >
+                    {row.balance > 0.009
+                      ? `Alacağı: ${formatMoney(row.balance)}`
+                      : row.balance < -0.009
+                        ? `Verəcəyi: ${formatMoney(Math.abs(row.balance))}`
+                        : 'Bərabər'}
+                  </Text>
+                </View>
+              ))
+            )}
+
+            <Text style={styles.sectionTitle}>Kim kimə ödəsin?</Text>
             {settlements.length === 0 ? (
               <Text style={styles.emptyText}>Hamı bərabərdir — borc yoxdur</Text>
             ) : (
@@ -631,6 +801,48 @@ export default function SplitBillScreen() {
               ))
             )}
 
+            {group.listing_id ? (
+              <>
+                <Text style={styles.sectionTitle}>Ödəniş kartı</Text>
+                {paymentCard ? (
+                  <View style={styles.cardBox}>
+                    <Text style={styles.cardHint}>
+                      Uzun basıb kopyalaya bilərsiniz və ya düymə ilə paylaşın
+                    </Text>
+                    <TextInput
+                      style={styles.cardNumberInput}
+                      value={formatCardNumber(paymentCard)}
+                      editable={false}
+                      selectTextOnFocus
+                    />
+                    <Pressable style={styles.copyButton} onPress={() => void copyPaymentCard()}>
+                      <FontAwesome name="share" size={13} color={colors.textOnAccent} />
+                      <Text style={styles.copyButtonText}>Paylaş / Kopyala</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <Text style={styles.emptyText}>
+                    {isGroupOwner
+                      ? 'Kart hələ əlavə olunmayıb.'
+                      : 'Elan sahibi kart paylaşmayıb.'}
+                  </Text>
+                )}
+                {isGroupOwner ? (
+                  <Pressable
+                    style={styles.secondaryButton}
+                    onPress={() => {
+                      setCardDraft(paymentCard ? formatCardNumber(paymentCard) : '');
+                      setCardEditVisible(true);
+                    }}
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      {paymentCard ? 'Kartı dəyiş' : 'Kart əlavə et'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </>
+            ) : null}
+
             {group.status === 'active' ? (
               <Pressable
                 style={[styles.settleButton, settling && styles.disabled]}
@@ -645,17 +857,69 @@ export default function SplitBillScreen() {
               </Pressable>
             ) : null}
 
-            {authUserId && group.created_by === authUserId ? (
+            {isGroupOwner ? (
               <Pressable
-                style={styles.deleteTextButton}
-                onPress={() => handleDeleteGroup(group.id)}
+                style={styles.deleteGroupButton}
+                onPress={() => {
+                  void handleDeleteGroup(group.id);
+                }}
                 hitSlop={8}
               >
-                <Text style={styles.deleteText}>Sil</Text>
+                <Text style={styles.deleteText}>Qrupu sil</Text>
               </Pressable>
             ) : null}
           </ScrollView>
         )}
+
+        <Modal
+          visible={cardEditVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setCardEditVisible(false)}
+        >
+          <KeyboardAvoidingView
+            style={styles.modalOverlay}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            <View style={styles.modalSheet}>
+              <Text style={styles.modalTitle}>Ödəniş kartı</Text>
+              <Text style={styles.metaLine}>
+                16 rəqəm — elanın üzvləri görüb kopyalaya bilər.
+              </Text>
+              <TextInput
+                style={styles.input}
+                value={cardDraft}
+                onChangeText={(text) => setCardDraft(formatCardNumber(text))}
+                placeholder="ACCT-000003"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="number-pad"
+                maxLength={19}
+              />
+              <View style={styles.modalActions}>
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => setCardEditVisible(false)}
+                  disabled={savingCard}
+                >
+                  <Text style={styles.secondaryButtonText}>Ləğv et</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.primaryButton, styles.flexOne, savingCard && styles.disabled]}
+                  onPress={() => {
+                    void savePaymentCard();
+                  }}
+                  disabled={savingCard}
+                >
+                  {savingCard ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>Yadda saxla</Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
         <Modal
           visible={expenseVisible}
@@ -769,32 +1033,29 @@ export default function SplitBillScreen() {
             <Text style={styles.emptyText}>Hələ qrup yoxdur. Yeni qrup yaradın.</Text>
           ) : (
             groups.map((item) => (
-              <Pressable
-                key={item.id}
-                style={styles.card}
-                onPress={() => setSelectedGroupId(item.id)}
-              >
-                <Text style={styles.cardTitle} numberOfLines={2} ellipsizeMode="tail">
-                  {item.name}
-                </Text>
-                <Text style={styles.metaLine}>👥 {item.memberCount} üzv</Text>
-                <Text style={styles.metaLine}>💰 {formatMoney(item.totalAmount)}</Text>
-                <Text style={styles.metaLine}>
-                  {item.status === 'settled' ? '✅ Hesablanıb' : '🔵 Aktiv'}
-                </Text>
+              <View key={item.id} style={styles.card}>
+                <Pressable onPress={() => setSelectedGroupId(item.id)}>
+                  <Text style={styles.cardTitle} numberOfLines={2} ellipsizeMode="tail">
+                    {item.name}
+                  </Text>
+                  <Text style={styles.metaLine}>👥 {item.memberCount} üzv</Text>
+                  <Text style={styles.metaLine}>💰 {formatMoney(item.totalAmount)}</Text>
+                  <Text style={styles.metaLine}>
+                    {item.status === 'settled' ? '✅ Hesablanıb' : '🔵 Aktiv'}
+                  </Text>
+                </Pressable>
                 {authUserId && item.created_by === authUserId ? (
                   <Pressable
-                    style={styles.deleteTextButton}
-                    onPress={(event) => {
-                      event.stopPropagation?.();
-                      handleDeleteGroup(item.id);
+                    style={styles.deleteGroupButton}
+                    onPress={() => {
+                      void handleDeleteGroup(item.id);
                     }}
                     hitSlop={8}
                   >
-                    <Text style={styles.deleteText}>Sil</Text>
+                    <Text style={styles.deleteText}>Qrupu sil</Text>
                   </Pressable>
                 ) : null}
-              </Pressable>
+              </View>
             ))
           )}
         </ScrollView>
@@ -942,6 +1203,8 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
     color: colors.text,
+    flexShrink: 1,
+    minWidth: 0,
   },
   totalText: {
     marginTop: 6,
@@ -1153,8 +1416,76 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingVertical: 4,
   },
+  deleteGroupButton: {
+    alignSelf: 'flex-start',
+    marginTop: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
   deleteText: {
     color: colors.danger,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  balanceCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    padding: 12,
+    marginBottom: 8,
+  },
+  balanceLine: {
+    marginTop: 4,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  balanceCredit: {
+    color: colors.success,
+  },
+  balanceDebt: {
+    color: colors.danger,
+  },
+  balanceEven: {
+    color: colors.textSecondary,
+  },
+  cardBox: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 8,
+    gap: 10,
+  },
+  cardNumber: {
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    color: colors.text,
+  },
+  cardNumberInput: {
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    color: colors.text,
+    paddingVertical: 4,
+  },
+  cardHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginBottom: 2,
+  },
+  copyButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.accent,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  copyButtonText: {
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 13,
   },

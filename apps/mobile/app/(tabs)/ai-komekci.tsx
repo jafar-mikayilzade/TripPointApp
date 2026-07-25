@@ -27,6 +27,7 @@ import { CategoryIcon } from '../../components/CategoryIcon';
 import { DropdownButton } from '../../components/DropdownButton';
 import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
+import { useResponsiveLayout } from '../../lib/layout';
 import { ShareAsTourModal } from '../../components/ShareAsTourModal';
 import { useInfoToast } from '../../components/InfoToastProvider';
 import { REGIONS } from '../../constants/regions';
@@ -86,6 +87,7 @@ const REGION_OPTIONS = REGIONS.map((r) => ({ label: r.label, value: r.id }));
 export default function AiKomekciScreen() {
   const mapRef = useRef<MapRef | null>(null);
   const { showInfo } = useInfoToast();
+  const responsive = useResponsiveLayout();
   /** Google POI klikindən sonra onPress də gələ bilər — ikiqat əlavənin qarşısı. */
   const lastPoiClickAt = useRef(0);
   const viewportFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -595,9 +597,17 @@ export default function AiKomekciScreen() {
     routeStops.length >= 2 || (fromOrigin && !!userLocation && routeStops.length >= 1);
 
   const listHeader = (
-    <View style={styles.headerBlock}>
-      <Text style={styles.title}>Marşrut qur</Text>
-      <Text style={styles.subtitle}>
+    <View style={[styles.headerBlock, { paddingHorizontal: responsive.padH }]}>
+      <Text
+        style={[styles.title, { fontSize: responsive.titleSize }]}
+        numberOfLines={2}
+      >
+        Marşrut qur
+      </Text>
+      <Text
+        style={[styles.subtitle, { fontSize: responsive.subtitleSize }]}
+        numberOfLines={2}
+      >
         Region seç → axtar, siyahıdan və ya xəritədə yerə toxun
       </Text>
 
@@ -1143,11 +1153,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
     letterSpacing: -0.3,
+    flexShrink: 1,
+    minWidth: 0,
   },
   subtitle: {
     fontSize: 12,
     color: colors.textMuted,
     marginTop: -4,
+    flexShrink: 1,
+    minWidth: 0,
   },
   errorText: {
     fontSize: 12,

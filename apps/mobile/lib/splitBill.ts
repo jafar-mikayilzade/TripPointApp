@@ -18,8 +18,65 @@ export type SettlementTransfer = {
   amount: number;
 };
 
+/** Müsbət = alacağı var, mənfi = verəcəyi var */
+export type MemberBalance = {
+  id: string;
+  name: string;
+  paid: number;
+  fairShare: number;
+  balance: number;
+};
+
 function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+export function calculateMemberBalances(
+  members: SplitMember[],
+  expenses: SplitExpense[]
+): { total: number; fairShare: number; balances: MemberBalance[] } {
+  if (members.length === 0) {
+    return { total: 0, fairShare: 0, balances: [] };
+  }
+
+  const paidMap = new Map<string, number>();
+  for (const member of members) {
+    paidMap.set(member.id, 0);
+  }
+
+  let total = 0;
+  for (const expense of expenses) {
+    const amount = Number(expense.amount) || 0;
+    total += amount;
+    if (paidMap.has(expense.paid_by)) {
+      paidMap.set(expense.paid_by, (paidMap.get(expense.paid_by) ?? 0) + amount);
+    }
+  }
+
+  total = roundMoney(total);
+  const fairShare = roundMoney(total / members.length);
+  const balances = members.map((member) => {
+    const paid = roundMoney(paidMap.get(member.id) ?? 0);
+    return {
+      id: member.id,
+      name: member.name,
+      paid,
+      fairShare,
+      balance: roundMoney(paid - fairShare),
+    };
+  });
+
+  return { total, fairShare, balances };
+}
+
+/** 16 rəqəmi 4-lük qruplarla göstər */
+export function formatCardNumber(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 16);
+  return digits.replace(/(\d{4})(?=\d)/g, '$1 ').trim();
+}
+
+export function normalizeCardNumber(raw: string): string {
+  return raw.replace(/\D/g, '').slice(0, 16);
 }
 
 /**
@@ -37,26 +94,15 @@ export function calculateSettlements(
     return [];
   }
 
-  const paidMap = new Map<string, number>();
-  for (const member of members) {
-    paidMap.set(member.id, 0);
-  }
+  // Eyni yuvarlaqlaşdırma — Adambaşı və köçürmələr uyğun olsun
+  const { balances: memberBalances } = calculateMemberBalances(members, expenses);
+  const phoneById = new Map(members.map((m) => [m.id, m.phone ?? null]));
 
-  let total = 0;
-  for (const expense of expenses) {
-    const amount = Number(expense.amount) || 0;
-    total += amount;
-    if (paidMap.has(expense.paid_by)) {
-      paidMap.set(expense.paid_by, (paidMap.get(expense.paid_by) ?? 0) + amount);
-    }
-  }
-
-  const fairShare = total / members.length;
-  const balances = members.map((member) => ({
-    id: member.id,
-    name: member.name,
-    phone: member.phone ?? null,
-    balance: roundMoney((paidMap.get(member.id) ?? 0) - fairShare),
+  const balances = memberBalances.map((row) => ({
+    id: row.id,
+    name: row.name,
+    phone: phoneById.get(row.id) ?? null,
+    balance: row.balance,
   }));
 
   const debtors = balances

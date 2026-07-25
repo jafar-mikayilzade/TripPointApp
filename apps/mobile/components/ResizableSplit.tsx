@@ -159,6 +159,11 @@ export function ResizableSplit({
   const bottomHeight = containerHeight > 0 ? containerHeight * (1 - topRatio) : undefined;
   const handleTop =
     topHeight != null ? Math.max(0, topHeight - HANDLE_HIT / 2) : undefined;
+  // Collapsed map (ratio≈0) — hide blue pill so it doesn't sit on the form title
+  const showHandle =
+    topRatio > 0.04 &&
+    topRatio < 0.96 &&
+    (topHeight == null || topHeight >= HANDLE_HIT);
 
   return (
     <View style={[styles.root, style]} onLayout={handleLayout}>
@@ -175,15 +180,17 @@ export function ResizableSplit({
         {bottom}
       </View>
 
-      <View
-        style={[styles.handle, handleTop != null ? { top: handleTop } : styles.handleFallback]}
-        {...panResponder.panHandlers}
-        accessibilityRole="adjustable"
-        accessibilityLabel="Xəritə və siyahı arasındakı bölücü"
-        accessibilityHint="Yuxarı və ya aşağı sürüşdürərək ölçünü dəyişin"
-      >
-        <View style={styles.handlePill} />
-      </View>
+      {showHandle ? (
+        <View
+          style={[styles.handle, handleTop != null ? { top: handleTop } : styles.handleFallback]}
+          {...panResponder.panHandlers}
+          accessibilityRole="adjustable"
+          accessibilityLabel="Xəritə və siyahı arasındakı bölücü"
+          accessibilityHint="Yuxarı və ya aşağı sürüşdürərək ölçünü dəyişin"
+        >
+          <View style={styles.handlePill} />
+        </View>
+      ) : null}
     </View>
   );
 }

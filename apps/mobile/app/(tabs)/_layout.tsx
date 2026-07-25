@@ -5,6 +5,7 @@ import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, shadows } from '../../constants/theme';
+import { useResponsiveLayout } from '../../lib/layout';
 
 /** Ana səhifə: nazik dairə + mərkəz nöqtə (referans navbar) */
 function HomeTabIcon({ color, size }: { color: string; size: number }) {
@@ -36,6 +37,7 @@ function HomeTabIcon({ color, size }: { color: string; size: number }) {
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const { isCompact } = useResponsiveLayout();
   const bottomPad = Math.max(insets.bottom, 10);
   const tabBarHeight = 52 + bottomPad;
 
@@ -53,15 +55,17 @@ export default function TabLayout() {
           ...shadows.bar,
         },
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: isCompact ? 10 : 11,
           fontWeight: '600',
         },
+        tabBarAllowFontScaling: false,
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: 'Ana səhifə',
+          tabBarLabel: isCompact ? 'Ana' : 'Ana səhifə',
           tabBarIcon: ({ color, size }) => <HomeTabIcon color={color} size={size} />,
         }}
       />
@@ -79,6 +83,7 @@ export default function TabLayout() {
         name="marsrut"
         options={{
           title: 'Marşrut',
+          tabBarLabel: isCompact ? 'AI' : 'Marşrut',
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="map-marker-path" size={size + 1} color={color} />
           ),
@@ -97,6 +102,7 @@ export default function TabLayout() {
         name="sevimliler"
         options={{
           title: 'Sevimlilər',
+          tabBarLabel: isCompact ? 'Sevimli' : 'Sevimlilər',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="bookmark-outline" size={size} color={color} />
           ),

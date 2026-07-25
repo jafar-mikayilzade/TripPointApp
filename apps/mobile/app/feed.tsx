@@ -491,7 +491,9 @@ export default function FeedScreen() {
             </View>
           )}
           <View style={styles.authorInfo}>
-            <Text style={styles.authorName}>{authorName}</Text>
+            <Text style={styles.authorName} numberOfLines={1}>
+              {authorName}
+            </Text>
             <Text style={styles.dateText}>{formatDate(item.created_at)}</Text>
           </View>
           {isOwner ? (
@@ -871,11 +873,13 @@ const styles = StyleSheet.create({
   },
   authorInfo: {
     flex: 1,
+    minWidth: 0,
   },
   authorName: {
     fontSize: 15,
     fontWeight: '700',
     color: colors.text,
+    flexShrink: 1,
   },
   dateText: {
     fontSize: 12,

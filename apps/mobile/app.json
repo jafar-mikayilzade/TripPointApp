@@ -45,6 +45,20 @@
           "data": [
             {
               "scheme": "trippoint",
+              "host": "auth",
+              "pathPrefix": "/reset-password"
+            }
+          ]
+        },
+        {
+          "action": "VIEW",
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "trippoint",
               "host": "listing",
               "pathPrefix": "/"
             }

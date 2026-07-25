@@ -1,3 +1,19 @@
+import { CreateListingModal } from '../../components/CreateListingModal';
+import {
+  ListingDetailModal,
+  type ListingWithCreator,
+} from '../../components/ListingDetailModal';
+import { SubscribeMenuButton } from '../../components/SubscribeMenuButton';
+import { ProfileCornerButton } from '../../components/ProfileCornerButton';
+import { ScreenHeader } from '../../components/ScreenHeader';
+import { REGIONS } from '../../constants/regions';
+import { getErrorMessage } from '../../lib/errors';
+import { listMySubscriptionTargetIds } from '../../lib/subscriptions';
+import { useResponsiveLayout } from '../../lib/layout';
+import { supabase } from '../../lib/supabase';
+import type { Listing, ListingType, Profile } from '../../types/database';
+
+import { colors } from '../../constants/theme';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { memo, useCallback, useEffect, useState } from 'react';
 import {
@@ -12,21 +28,6 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-import { CreateListingModal } from '../../components/CreateListingModal';
-import {
-  ListingDetailModal,
-  type ListingWithCreator,
-} from '../../components/ListingDetailModal';
-import { SubscribeMenuButton } from '../../components/SubscribeMenuButton';
-import { ProfileCornerButton } from '../../components/ProfileCornerButton';
-import { REGIONS } from '../../constants/regions';
-import { getErrorMessage } from '../../lib/errors';
-import { listMySubscriptionTargetIds } from '../../lib/subscriptions';
-import { supabase } from '../../lib/supabase';
-import type { Listing, ListingType, Profile } from '../../types/database';
-
-import { colors } from '../../constants/theme';
 
 type ListingFilter = 'all' | ListingType;
 
@@ -86,6 +87,7 @@ function getRegionLabel(region: string | null): string {
 
 export default function IcmaScreen() {
   const insets = useSafeAreaInsets();
+  const { padH } = useResponsiveLayout();
 
   const [filter, setFilter] = useState<ListingFilter>('all');
   const [listings, setListings] = useState<ListingWithCreator[]>([]);
@@ -182,24 +184,25 @@ export default function IcmaScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
     >
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <View style={styles.titleBlock}>
-          <Text style={styles.title}>icma</Text>
-          <Text style={styles.subtitle}>Sakitcə planla · yoldaş tap</Text>
-        </View>
-        <View style={styles.headerActions}>
-          <Pressable style={styles.addButton} onPress={() => setCreateVisible(true)} hitSlop={8}>
-            <FontAwesome name="plus" size={14} color={colors.textOnAccent} />
-          </Pressable>
-          <ProfileCornerButton />
-        </View>
-      </View>
+      <ScreenHeader
+        title="icma"
+        subtitle="Sakitcə planla · yoldaş tap"
+        style={{ paddingHorizontal: padH }}
+        right={
+          <View style={styles.headerActions}>
+            <Pressable style={styles.addButton} onPress={() => setCreateVisible(true)} hitSlop={8}>
+              <FontAwesome name="plus" size={14} color={colors.textOnAccent} />
+            </Pressable>
+            <ProfileCornerButton />
+          </View>
+        }
+      />
 
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.filterScroll}
-        contentContainerStyle={styles.filterRow}
+        contentContainerStyle={[styles.filterRow, { paddingHorizontal: padH }]}
       >
         {FILTERS.map((item) => {
           const selected = item.id === filter;

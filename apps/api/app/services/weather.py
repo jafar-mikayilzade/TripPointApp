@@ -114,6 +114,10 @@ def fetch_region_weather(region_key: str, days: int = 3) -> dict[str, Any]:
             "region": key,
             "prefer_indoor": False,
             "summary_az": "Hava məlumatı konfiqurasiya olunmayıb.",
+            "display_az": None,
+            "temp_c": None,
+            "feels_like": None,
+            "condition_az": "",
             "exclude_categories": [],
             "prefer_categories": [],
             "available": False,
@@ -148,11 +152,45 @@ def fetch_region_weather(region_key: str, days: int = 3) -> dict[str, Any]:
 
     slots = data.get("list") or []
     analysis = analyze_forecast(slots, days)
+
+    temp_c: float | None = None
+    feels_like: float | None = None
+    condition_az = ""
+    if slots:
+        first = slots[0] or {}
+        main = first.get("main") or {}
+        weather0 = (first.get("weather") or [{}])[0] or {}
+        try:
+            if main.get("temp") is not None:
+                temp_c = round(float(main["temp"]), 1)
+        except (TypeError, ValueError):
+            temp_c = None
+        try:
+            if main.get("feels_like") is not None:
+                feels_like = round(float(main["feels_like"]), 1)
+        except (TypeError, ValueError):
+            feels_like = None
+        condition_az = str(weather0.get("description") or weather0.get("main") or "").strip()
+
+    # UI üçün qısa sətir (AI summary_az ayrıca qalır)
+    if temp_c is not None and condition_az:
+        display_az = f"{temp_c:.0f}° · {condition_az}"
+    elif temp_c is not None:
+        display_az = f"{temp_c:.0f}°"
+    elif condition_az:
+        display_az = condition_az
+    else:
+        display_az = analysis.get("summary_az") or "Hava məlumatı"
+
     payload = {
         "ok": True,
         "available": True,
         "region": key,
         "cached": False,
+        "temp_c": temp_c,
+        "feels_like": feels_like,
+        "condition_az": condition_az,
+        "display_az": display_az,
         **analysis,
     }
     _cache_set(cache_key, payload)

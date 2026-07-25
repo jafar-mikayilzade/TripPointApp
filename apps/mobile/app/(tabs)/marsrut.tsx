@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -39,6 +39,7 @@ import { useInfoToast } from '../../components/InfoToastProvider';
 import {
   applyWeatherPoiFilter,
   fetchRegionWeather,
+  formatWeatherLabel,
   type WeatherAdvice,
 } from '../../lib/weather';
 import {
@@ -49,7 +50,7 @@ import {
 
 type DayOption = 1 | 2 | 3 | 4;
 type BudgetOption = 'budget' | 'mid' | 'premium';
-type InterestId = 'nature' | 'history' | 'food' | 'family' | 'active' | 'photo';
+type InterestId = 'nature' | 'history';
 type GroupOption = 'solo' | 'couple' | 'family' | 'group';
 
 type PlanStop = {
@@ -160,28 +161,30 @@ const DAY_OPTIONS: { value: DayOption; label: string }[] = [
 ];
 
 const BUDGET_OPTIONS: { value: BudgetOption; label: string }[] = [
-  { value: 'budget', label: 'Qənaətcil (0-50₼)' },
-  { value: 'mid', label: 'Orta (50-150₼)' },
-  { value: 'premium', label: 'Premium (150₼+)' },
+  { value: 'budget', label: 'Ekonom' },
+  { value: 'mid', label: 'Orta' },
+  { value: 'premium', label: 'Premium' },
 ];
 
 const INTEREST_OPTIONS: { id: InterestId; label: string }[] = [
-  { id: 'nature', label: '🌿 Təbiət' },
-  { id: 'history', label: '🏛 Tarix' },
-  { id: 'food', label: '🍽 Qastronomiya' },
-  { id: 'family', label: '👨‍👩‍👧 Ailəvi' },
-  { id: 'active', label: '🏃 Aktiv' },
-  { id: 'photo', label: '📸 Fotoqrafiya' },
+  { id: 'nature', label: 'Təbiət' },
+  { id: 'history', label: 'Tarixi' },
 ];
 
 const INTEREST_ATTRACTION_CATS: Record<InterestId, string[]> = {
   nature: ['nature', 'waterfall', 'mountain', 'lake'],
   history: ['historical', 'monument'],
-  food: [],
-  family: ['historical', 'nature', 'lake', 'other', 'monument'],
-  active: ['mountain', 'nature', 'waterfall'],
-  photo: ['nature', 'waterfall', 'historical', 'monument', 'lake'],
 };
+
+const AI_LOADING_MESSAGES = [
+  'Region üzrə yerlər yığılır...',
+  'Maraqlarınıza uyğun dayanacaqlar seçilir...',
+  'Günlər üzrə marşrut düzülür...',
+  'Məsafə və vaxtlar hesablanır...',
+  'AI ən yaxşı ardıcıllığı axtarır...',
+  'Son toxunuşlar edilir...',
+  'Demək olar hazırdır...',
+];
 
 function preferAttractionsForInterests<T extends { category: string }>(
   attractions: T[],
@@ -270,6 +273,7 @@ export default function MarsrutScreen() {
   const [group, setGroup] = useState<GroupOption | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState(AI_LOADING_MESSAGES[0]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [plan, setPlan] = useState<GeneratedPlan | null>(null);
   const [weatherAdvice, setWeatherAdvice] = useState<WeatherAdvice | null>(null);
@@ -294,6 +298,38 @@ export default function MarsrutScreen() {
     () => REGIONS.find((r) => r.id === regionId) ?? REGIONS[0],
     [regionId]
   );
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingMessage(AI_LOADING_MESSAGES[0]);
+      return;
+    }
+
+    let index = 0;
+    setLoadingMessage(AI_LOADING_MESSAGES[0]);
+    const timer = setInterval(() => {
+      index = (index + 1) % AI_LOADING_MESSAGES.length;
+      setLoadingMessage(AI_LOADING_MESSAGES[index]);
+    }, 2200);
+
+    return () => clearInterval(timer);
+  }, [loading]);
+
+  // Seçilmiş rayon üçün hava — forma açıq olanda
+  useEffect(() => {
+    if (plan) {
+      return;
+    }
+    let cancelled = false;
+    void fetchRegionWeather(regionId, days).then((data) => {
+      if (!cancelled) {
+        setWeatherAdvice(data);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [regionId, days, plan]);
 
   function toggleInterest(id: InterestId) {
     setInterests((current) =>
@@ -1011,6 +1047,17 @@ export default function MarsrutScreen() {
                     })}
                   </ScrollView>
 
+                  {formatWeatherLabel(weatherAdvice) ? (
+                    <View style={styles.weatherChip}>
+                      <Text style={styles.weatherChipText} numberOfLines={2}>
+                        Hava · {regionMeta.label}: {formatWeatherLabel(weatherAdvice)}
+                        {weatherAdvice?.prefer_indoor
+                          ? ' — açıq hava yerləri azaldılacaq'
+                          : ''}
+                      </Text>
+                    </View>
+                  ) : null}
+
                   <Text style={styles.label}>
                     Gün sayı <Text style={styles.required}>*</Text>
                   </Text>
@@ -1127,10 +1174,15 @@ export default function MarsrutScreen() {
                     disabled={!canSubmit || loading}
                   >
                     {loading ? (
-                      <View style={styles.loadingRow}>
-                        <ActivityIndicator color="#fff" />
-                        <Text style={styles.primaryButtonText}>
-                          AI marşrutunuzu hazırlayır...
+                      <View style={styles.loadingBlock}>
+                        <View style={styles.loadingRow}>
+                          <ActivityIndicator color="#fff" />
+                          <Text style={styles.primaryButtonText} numberOfLines={2}>
+                            {loadingMessage}
+                          </Text>
+                        </View>
+                        <Text style={styles.loadingHint}>
+                          Bir neçə saniyə çəkə bilər — rahat gözləyin
                         </Text>
                       </View>
                     ) : (
@@ -1675,13 +1727,24 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     flexShrink: 1,
   },
+  loadingBlock: {
+    alignItems: 'center',
+    gap: 6,
+    maxWidth: '100%',
+    paddingHorizontal: 4,
+  },
   loadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     maxWidth: '100%',
-    paddingHorizontal: 4,
+  },
+  loadingHint: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 11,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   secondaryButton: {
     marginTop: 12,
@@ -1724,6 +1787,22 @@ const styles = StyleSheet.create({
   },
   weatherNote: {
     fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 17,
+  },
+  weatherChip: {
+    marginTop: 2,
+    marginBottom: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  weatherChipText: {
+    fontSize: 12,
+    fontWeight: '600',
     color: colors.textSecondary,
     lineHeight: 17,
   },

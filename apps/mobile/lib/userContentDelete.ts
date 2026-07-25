@@ -99,9 +99,21 @@ export async function deletePost(id: string): Promise<DeleteResult> {
 
 export async function deleteExpense(id: string): Promise<DeleteResult> {
   try {
-    const { error } = await supabase.from('expenses').delete().eq('id', id);
+    const { data, error } = await supabase
+      .from('expenses')
+      .delete()
+      .eq('id', id)
+      .select('id')
+      .maybeSingle();
+
     if (error) {
       return { error: getErrorMessage(error) };
+    }
+    if (!data) {
+      return {
+        error:
+          'Xərc silinmədi. İcazə yoxdur (yalnız ödəyən və ya qrup sahibi silə bilər).',
+      };
     }
     return { error: null };
   } catch (err) {
@@ -124,9 +136,20 @@ export async function deleteExpenseGroup(id: string): Promise<DeleteResult> {
       return { error: getErrorMessage(membersError) };
     }
 
-    const { error } = await supabase.from('expense_groups').delete().eq('id', id);
+    const { data, error } = await supabase
+      .from('expense_groups')
+      .delete()
+      .eq('id', id)
+      .select('id')
+      .maybeSingle();
+
     if (error) {
       return { error: getErrorMessage(error) };
+    }
+    if (!data) {
+      return {
+        error: 'Qrup silinmədi. Yalnız qrupu yaradan şəxs silə bilər.',
+      };
     }
     return { error: null };
   } catch (err) {

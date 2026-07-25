@@ -21,7 +21,6 @@ import {
 import MapView, {
   Marker,
   PROVIDER_GOOGLE,
-  type MarkerDragStartEndEvent,
   type PoiClickEvent,
   type Region as MapRegion,
 } from '../../components/ClusteredAppMap';
@@ -29,10 +28,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AdminPoiCategoryModal } from '../../components/AdminPoiCategoryModal';
 import { CategoryIcon } from '../../components/CategoryIcon';
+import { MapClusterMarker } from '../../components/MapClusterMarker';
+import {
+  PoiMarkerBubble,
+  shouldTrackMarkerViewChanges,
+} from '../../components/PoiMapMarker';
 import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
 import { useToast } from '../../components/Toast';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
+import { colors } from '../../constants/theme';
 import {
   insertApprovedPoiFromGoogle,
   updatePoiCoordinates,
@@ -45,6 +50,11 @@ import {
 } from '../../lib/categoryUtils';
 import { getErrorMessage } from '../../lib/errors';
 import {
+  fetchRegionWeather,
+  formatWeatherLabel,
+  type WeatherAdvice,
+} from '../../lib/weather';
+import {
   fetchLivePlaces,
   isDatabasePoiId,
   livePlaceToPoi,
@@ -55,8 +65,6 @@ import {
 import { supabase } from '../../lib/supabase';
 import { useIsAdmin } from '../../lib/useIsAdmin';
 import type { Poi, PoiCategory, PoiPhoto } from '../../types/database';
-
-import { colors } from '../../constants/theme';
 
 type PoiListItem = Poi & {
   photoUrl: string | null;
@@ -140,8 +148,6 @@ export default function HomeScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [highlightedPoiId, setHighlightedPoiId] = useState<string | null>(null);
   const [selectedPoi, setSelectedPoi] = useState<Poi | null>(null);
-  /** Custom marker redraw (tracksViewChanges) — seçim dəyişəndə qısa müddət. */
-  const [markerTracksId, setMarkerTracksId] = useState<string | null>(null);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [pendingGooglePoi, setPendingGooglePoi] = useState<GoogleMapPoiPayload | null>(null);
@@ -151,8 +157,18 @@ export default function HomeScreen() {
     latitude: number;
     longitude: number;
   } | null>(null);
+  const [regionWeather, setRegionWeather] = useState<WeatherAdvice | null>(null);
+  const [splitRatio, setSplitRatio] = useState(0.5);
+  const splitBeforeFocusRef = useRef(0.5);
+  /** Cari kamera — seçim dəyişəndə zoom-u saxlamaq üçün */
+  const lastMapRegionRef = useRef<MapRegion | null>(null);
+  const fetchPoisGen = useRef(0);
+  /** Android custom marker — qısa pulse, daimi tracksViewChanges yox */
+  const [tracksMarkers, setTracksMarkers] = useState(Platform.OS === 'android');
 
   const selectedCategory = categoryFilter === 'all' ? null : categoryFilter;
+  const weatherLabel = formatWeatherLabel(regionWeather);
+  const focusPoiId = selectedPoi?.id ?? highlightedPoiId;
 
   const selectedRegion = useMemo(
     () => (selectedRegionId ? REGIONS.find((region) => region.id === selectedRegionId) : null),
@@ -300,6 +316,7 @@ export default function HomeScreen() {
 
   const fetchPois = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent === true;
+    const gen = ++fetchPoisGen.current;
     try {
       if (!silent) {
         setLoading(true);
@@ -315,6 +332,10 @@ export default function HomeScreen() {
           limit: 60,
         });
 
+        if (gen !== fetchPoisGen.current) {
+          return;
+        }
+
         if (live && live.places.length > 0) {
           const mapped = mapLiveToListItems(live.places, selectedRegionId);
           if (__DEV__) {
@@ -326,11 +347,17 @@ export default function HomeScreen() {
       }
 
       const mapped = await fetchPoisFromDb();
+      if (gen !== fetchPoisGen.current) {
+        return;
+      }
       if (__DEV__) {
         console.log('POI sayı (DB):', mapped.length);
       }
       setPois(mapped);
     } catch (err: unknown) {
+      if (gen !== fetchPoisGen.current) {
+        return;
+      }
       if (__DEV__) {
         console.log('Catch xətası:', err);
       }
@@ -339,7 +366,7 @@ export default function HomeScreen() {
         setErrorMessage('Xəta: ' + message);
       }
     } finally {
-      if (!silent) {
+      if (gen === fetchPoisGen.current && !silent) {
         setLoading(false);
       }
     }
@@ -436,15 +463,33 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    if (!markerTracksId) return;
-    const t = setTimeout(() => setMarkerTracksId(null), 700);
-    return () => clearTimeout(t);
-  }, [markerTracksId]);
-
-  useEffect(() => {
     fetchPois();
   }, [fetchPois]);
 
+  // Custom marker bitmap — qısa pulse (daimi Android tracksViewChanges CPU yeyir)
+  useEffect(() => {
+    setTracksMarkers(true);
+    const t = setTimeout(() => setTracksMarkers(false), 700);
+    return () => clearTimeout(t);
+  }, [pois.length, selectedRegionId, categoryFilter, focusPoiId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedRegionId) {
+      setRegionWeather(null);
+      return;
+    }
+    void fetchRegionWeather(selectedRegionId, 1).then((data) => {
+      if (!cancelled) {
+        setRegionWeather(data);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRegionId]);
+
+  // Yalnız rayon dəyişəndə ümumi görüntü — seçimdən çıxanda buranı tetikləmə
   useEffect(() => {
     if (!selectedRegion) {
       return;
@@ -464,6 +509,7 @@ export default function HomeScreen() {
     setSelectedRegionId(value);
     setShowLocationPicker(false);
     setSelectedPoi(null);
+    setHighlightedPoiId(null);
   }
 
   function handleSelectCategory(value: string | null) {
@@ -540,18 +586,46 @@ export default function HomeScreen() {
     }
   };
 
+  /** İlk siyahı seçimi — rahat yaxınlıq, ətrafdakılar da görünsün */
   function centerMapOnPoi(poi: { id: string; lat: number; lng: number }) {
-    setMarkerTracksId(poi.id);
-    mapRef.current?.animateToRegion(
-      {
-        latitude: poi.lat,
-        longitude: poi.lng,
-        // Cluster açılması + marker mərkəzdə oxunaqlı olsun
-        latitudeDelta: 0.008,
-        longitudeDelta: 0.008,
-      },
-      450
-    );
+    const next = {
+      latitude: poi.lat,
+      longitude: poi.lng,
+      latitudeDelta: 0.02,
+      longitudeDelta: 0.02,
+    };
+    lastMapRegionRef.current = next;
+    mapRef.current?.animateToRegion(next, 320);
+  }
+
+  /** Zoom eyni qalsın — yalnız lazımdırsa mərkəzi sürüşdür */
+  function ensurePoiVisibleKeepZoom(poi: { lat: number; lng: number }) {
+    const current = lastMapRegionRef.current;
+    if (!current) {
+      centerMapOnPoi(poi);
+      return;
+    }
+
+    const padLat = current.latitudeDelta * 0.28;
+    const padLng = current.longitudeDelta * 0.28;
+    const inView =
+      poi.lat < current.latitude + current.latitudeDelta / 2 - padLat &&
+      poi.lat > current.latitude - current.latitudeDelta / 2 + padLat &&
+      poi.lng < current.longitude + current.longitudeDelta / 2 - padLng &&
+      poi.lng > current.longitude - current.longitudeDelta / 2 + padLng;
+
+    if (inView) {
+      return;
+    }
+
+    const next = {
+      latitude: poi.lat,
+      longitude: poi.lng,
+      latitudeDelta: current.latitudeDelta,
+      longitudeDelta: current.longitudeDelta,
+    };
+    lastMapRegionRef.current = next;
+    mapRef.current?.animateToRegion(next, 220);
   }
 
   function scrollListToPoi(poiId: string) {
@@ -570,13 +644,32 @@ export default function HomeScreen() {
     });
   }
 
-  function selectPoi(poi: Poi) {
+  /**
+   * map: kamera toxunulmur (pin artıq görünür).
+   * list: ilk dəfə yumşaq yaxınlaş; növbəti seçimdə zoom saxlanılır.
+   */
+  function selectPoi(poi: Poi, source: 'map' | 'list') {
+    const hadSelection = Boolean(selectedPoi);
+
+    if (!hadSelection) {
+      splitBeforeFocusRef.current = splitRatio;
+    }
+
     setSelectedPoi(poi);
     setHighlightedPoiId(poi.id);
-    centerMapOnPoi(poi);
     scrollListToPoi(poi.id);
 
-    // Google place — Place Details ilə ad / kateqoriya / rating yenilə
+    if (source === 'list') {
+      if (!hadSelection) {
+        // Cluster içində gizlənməsin deyə seçilmiş pin ayrıca göstərilir + kamera
+        requestAnimationFrame(() => centerMapOnPoi(poi));
+      } else {
+        ensurePoiVisibleKeepZoom(poi);
+      }
+    }
+    // source === 'map' && hadSelection → yalnız highlight dəyişir
+
+    // Yalnız ad/rating yenilə — kateqoriyanı Google ilə əvəz etmə
     const placeId = poi.place_id || (!isDatabasePoiId(poi.id) ? poi.id : null);
     if (!placeId) {
       return;
@@ -589,7 +682,6 @@ export default function HomeScreen() {
         return {
           ...current,
           name: details.name?.trim() || current.name,
-          category: details.suggestedCategory ?? current.category,
           rating: details.rating ?? current.rating,
           rating_count: details.ratingCount ?? current.rating_count,
         };
@@ -604,7 +696,6 @@ export default function HomeScreen() {
           return {
             ...row,
             name: details.name?.trim() || row.name,
-            category: details.suggestedCategory ?? row.category,
             rating,
             rating_count: ratingCount,
             averageRating:
@@ -622,35 +713,26 @@ export default function HomeScreen() {
   function clearSelectedPoi() {
     setSelectedPoi(null);
     setHighlightedPoiId(null);
-    setMarkerTracksId(null);
+    setSplitRatio(splitBeforeFocusRef.current || 0.5);
 
-    if (selectedRegion) {
-      mapRef.current?.animateToRegion(
-        {
-          latitude: selectedRegion.latitude,
-          longitude: selectedRegion.longitude,
-          latitudeDelta: selectedRegion.latitudeDelta,
-          longitudeDelta: selectedRegion.longitudeDelta,
-        },
-        600
-      );
-      return;
-    }
+    // Qismən geriyə — tam Quba overview-ə tullama (istifadəçi özü uzaqlaşdıra bilər)
+    const current = lastMapRegionRef.current;
+    const nextDelta = current
+      ? Math.min(Math.max(current.latitudeDelta * 2.4, 0.04), 0.12)
+      : 0.06;
+    const centerLat = current?.latitude ?? selectedRegion?.latitude ?? mapRegion.latitude;
+    const centerLng = current?.longitude ?? selectedRegion?.longitude ?? mapRegion.longitude;
+    const target = {
+      latitude: centerLat,
+      longitude: centerLng,
+      latitudeDelta: nextDelta,
+      longitudeDelta: nextDelta,
+    };
 
-    if (userLocation) {
-      mapRef.current?.animateToRegion(
-        {
-          latitude: userLocation.latitude,
-          longitude: userLocation.longitude,
-          latitudeDelta: 0.12,
-          longitudeDelta: 0.12,
-        },
-        600
-      );
-      return;
-    }
-
-    mapRef.current?.animateToRegion(mapRegion, 600);
+    lastMapRegionRef.current = target;
+    requestAnimationFrame(() => {
+      mapRef.current?.animateToRegion(target, 380);
+    });
   }
 
   function handleMarkerPress(poi: PoiListItem) {
@@ -658,19 +740,22 @@ export default function HomeScreen() {
       clearSelectedPoi();
       return;
     }
-    selectPoi(poi);
+    selectPoi(poi, 'map');
   }
 
   function handleCardPress(poi: PoiListItem) {
-    selectPoi(poi);
+    selectPoi(poi, 'list');
   }
 
-  async function handleAdminMarkerDragEnd(poiId: string, event: MarkerDragStartEndEvent) {
+  async function handleAdminMarkerDragEnd(
+    poiId: string,
+    latitude: number,
+    longitude: number
+  ) {
     if (!isAdmin || !isDatabasePoiId(poiId)) {
       return;
     }
 
-    const { latitude, longitude } = event.nativeEvent.coordinate;
     const previous = pois.find((p) => p.id === poiId);
 
     // Dərhal state + marker key yenilənir — köhnə yerdə ghost qalmır
@@ -824,7 +909,7 @@ export default function HomeScreen() {
         return next;
       });
       setPendingGooglePoi(null);
-      selectPoi(listItem);
+      selectPoi(listItem, 'map');
       showToast(`Əlavə olundu: ${data.name}`);
     } catch (err) {
       showToast(getErrorMessage(err));
@@ -843,6 +928,8 @@ export default function HomeScreen() {
         <ResizableSplit
           storageKey="home-map-split-ratio"
           initialTopRatio={0.5}
+          topRatio={splitRatio}
+          onTopRatioChange={setSplitRatio}
           minTopRatio={0.22}
           maxTopRatio={0.78}
           top={
@@ -854,16 +941,31 @@ export default function HomeScreen() {
                 initialRegion={mapRegion}
                 showsUserLocation={false}
                 showsMyLocationButton={false}
-                radius={48}
-                minPoints={3}
+                clusteringEnabled
+                radius={22}
+                minPoints={4}
+                maxZoom={13}
+                extent={512}
                 animationEnabled={false}
-                onRegionChangeComplete={
-                  selectedRegionId
-                    ? (region) => {
-                        fetchViewportPlaces(region);
-                      }
-                    : undefined
-                }
+                spiralEnabled={false}
+                clusterColor={colors.accent}
+                clusterTextColor={colors.textOnAccent}
+                tracksViewChanges={tracksMarkers}
+                renderCluster={(cluster) => (
+                  <MapClusterMarker
+                    key={`c-${cluster.geometry.coordinates[0]}-${cluster.geometry.coordinates[1]}-${cluster.properties.point_count}`}
+                    geometry={cluster.geometry}
+                    properties={cluster.properties}
+                    onPress={cluster.onPress}
+                    tracksViewChanges={tracksMarkers}
+                  />
+                )}
+                onRegionChangeComplete={(region) => {
+                  lastMapRegionRef.current = region;
+                  if (selectedRegionId) {
+                    fetchViewportPlaces(region);
+                  }
+                }}
                 onPoiClick={isAdmin ? handleGooglePoiClick : undefined}
                 onPress={isAdmin && Platform.OS === 'web' ? handleAdminMapPress : undefined}
               >
@@ -871,79 +973,75 @@ export default function HomeScreen() {
                   <Marker
                     coordinate={userLocation}
                     title="Siz buradasınız"
-                    pinColor={colors.accent}
-                    cluster={false}
+                    anchor={{ x: 0.5, y: 0.5 }}
+                    tracksViewChanges={false}
+                    {...({ cluster: false } as object)}
                   >
-                    <View style={styles.userMarker}>
-                      <View style={styles.userMarkerDot} />
-                      <Text style={styles.userMarkerLabel}>Siz buradasınız</Text>
+                    <View collapsable={false} style={styles.userMarker}>
+                      <View collapsable={false} style={styles.userMarkerDot} />
                     </View>
                   </Marker>
                 ) : null}
 
                 {pois.map((poi) => {
-                  const isSelected =
-                    selectedPoi?.id === poi.id || highlightedPoiId === poi.id;
-                  const hasSelection = selectedPoi != null || highlightedPoiId != null;
-                  const isDimmed = hasSelection && !isSelected;
-
-                  return (
-                  <Marker
-                    key={poi.id}
-                    coordinate={{ latitude: poi.lat, longitude: poi.lng }}
-                    title={poi.name}
-                    description={getCategoryLabel(poi.category)}
-                    pinColor={
-                      isAdmin
-                        ? isSelected
-                          ? colors.accent
-                          : isDimmed
-                            ? '#C8C8CC'
-                            : colors.success
-                        : undefined
-                    }
-                    zIndex={isSelected ? 1000 : isDimmed ? 1 : 10}
-                    opacity={isDimmed && !isAdmin ? 0.45 : 1}
-                    onPress={() => handleMarkerPress(poi)}
-                    draggable={isAdmin && isDatabasePoiId(poi.id)}
-                    onDragStart={
-                      isAdmin && isDatabasePoiId(poi.id)
-                        ? () => {
-                            setDraggingPoiId(poi.id);
-                          }
-                        : undefined
-                    }
-                    onDragEnd={
-                      isAdmin && isDatabasePoiId(poi.id)
-                        ? (event) => {
-                            void handleAdminMarkerDragEnd(poi.id, event);
-                          }
-                        : undefined
-                    }
-                    tracksViewChanges={
-                      draggingPoiId === poi.id || markerTracksId != null
-                    }
-                  >
-                    {/* Admin sürüşdürmədə custom child ghost marker yaradır — yalnız pin */}
-                    {isAdmin ? null : (
-                      <View
-                        style={[
-                          styles.poiMarkerBubble,
-                          isSelected && styles.poiMarkerBubbleHighlighted,
-                          isDimmed && styles.poiMarkerBubbleDimmed,
-                        ]}
+                    const selected = focusPoiId === poi.id;
+                    const canDrag = isAdmin && isDatabasePoiId(poi.id);
+                    return (
+                      <Marker
+                        key={poi.id}
+                        coordinate={{ latitude: poi.lat, longitude: poi.lng }}
+                        title={poi.name}
+                        description={getCategoryLabel(poi.category)}
+                        anchor={{ x: 0.5, y: 0.5 }}
+                        zIndex={selected ? 1000 : 10}
+                        tracksViewChanges={shouldTrackMarkerViewChanges({
+                          pulse: tracksMarkers,
+                          forceTrack: draggingPoiId === poi.id,
+                          draggable: canDrag && draggingPoiId === poi.id,
+                          selected,
+                        })}
+                        draggable={canDrag}
+                        // Seçilmiş pin cluster rəqəminin içində gizlənməsin
+                        {...(selected ? ({ cluster: false } as object) : {})}
+                        onPress={() => handleMarkerPress(poi)}
+                        onDragStart={
+                          canDrag ? () => setDraggingPoiId(poi.id) : undefined
+                        }
+                        onDragEnd={
+                          canDrag
+                            ? (event) => {
+                                const { latitude, longitude } =
+                                  event.nativeEvent.coordinate;
+                                void handleAdminMarkerDragEnd(
+                                  poi.id,
+                                  latitude,
+                                  longitude
+                                );
+                              }
+                            : undefined
+                        }
                       >
-                        <CategoryIcon
+                        <PoiMarkerBubble
                           category={poi.category}
-                          size={isSelected ? 14 : 12}
-                          color={isSelected ? colors.accentPressed : colors.text}
+                          selected={selected}
                         />
-                      </View>
-                    )}
-                  </Marker>
-                  );
-                })}
+                      </Marker>
+                    );
+                  })}
               </MapView>
+
+              {selectedRegionId && weatherLabel ? (
+                <View style={styles.weatherBanner} pointerEvents="none">
+                  <Ionicons
+                    name={regionWeather?.prefer_indoor ? 'rainy-outline' : 'partly-sunny-outline'}
+                    size={14}
+                    color={colors.text}
+                  />
+                  <Text style={styles.weatherBannerText} numberOfLines={1}>
+                    {selectedRegion?.label}: {weatherLabel}
+                  </Text>
+                </View>
+              ) : null}
 
               {isAdmin ? (
                 <View style={styles.adminBadge} pointerEvents="none">
@@ -1008,11 +1106,21 @@ export default function HomeScreen() {
               ) : (
                 <>
                   <View style={styles.listHeader}>
-                    <Text style={styles.listTitle}>{loading ? 'Yüklənir...' : listTitle}</Text>
+                    <View style={styles.listHeaderTextWrap}>
+                      <Text style={styles.listTitle} numberOfLines={2}>
+                        {loading ? 'Yüklənir...' : listTitle}
+                      </Text>
+                      {selectedRegionId && weatherLabel ? (
+                        <Text style={styles.listWeather} numberOfLines={1}>
+                          {weatherLabel}
+                        </Text>
+                      ) : null}
+                    </View>
                     <TouchableOpacity
                       onPress={() => router.push('/feed' as never)}
                       hitSlop={8}
                       accessibilityLabel="Paylaş"
+                      style={styles.shareHeaderHit}
                     >
                       <Text style={styles.shareHeaderButton}>Paylaş</Text>
                     </TouchableOpacity>
@@ -1318,17 +1426,21 @@ function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
         <TouchableOpacity onPress={onBack} hitSlop={8} style={styles.backButton}>
           <Text style={styles.backButtonText}>← Geri</Text>
         </TouchableOpacity>
-        <View style={styles.categoryBadge}>
+        <View style={[styles.categoryBadge, { maxWidth: '70%' }]}>
           <CategoryIcon
             category={poi.category}
             size={12}
             color={colors.accentPressed}
           />
-          <Text style={styles.categoryBadgeText}>{getCategoryLabel(poi.category)}</Text>
+          <Text style={styles.categoryBadgeText} numberOfLines={1}>
+            {getCategoryLabel(poi.category)}
+          </Text>
         </View>
       </View>
 
-      <Text style={styles.detailName}>{poi.name}</Text>
+      <Text style={styles.detailName} numberOfLines={2}>
+        {poi.name}
+      </Text>
 
       <View style={styles.detailMetaRow}>
         <Text style={styles.detailMeta}>📍 {regionLabel}</Text>
@@ -1565,18 +1677,45 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     overflow: 'hidden',
   },
+  weatherBanner: {
+    position: 'absolute',
+    left: 10,
+    right: 54,
+    bottom: 10,
+    zIndex: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  weatherBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text,
+  },
   poiMarkerBubble: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: colors.surface,
-    borderRadius: 14,
-    padding: 3,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   poiMarkerBubbleHighlighted: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderColor: colors.accent,
     borderWidth: 2,
     backgroundColor: colors.accentSoft,
-    transform: [{ scale: 1.2 }],
   },
   poiMarkerBubbleDimmed: {
     opacity: 0.4,
@@ -1643,12 +1782,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: colors.accentPressed,
+    flexShrink: 1,
   },
   detailName: {
     fontSize: 16,
     fontWeight: '700',
     color: colors.text,
     marginBottom: 6,
+    flexShrink: 1,
+    minWidth: 0,
   },
   detailMetaRow: {
     flexDirection: 'row',
@@ -1743,13 +1885,25 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 12,
     marginBottom: 4,
+    gap: 8,
+  },
+  listHeaderTextWrap: {
+    flex: 1,
+    minWidth: 0,
   },
   listTitle: {
-    flex: 1,
     fontSize: 13,
     fontWeight: '700',
     color: colors.text,
-    marginRight: 8,
+  },
+  listWeather: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  shareHeaderHit: {
+    flexShrink: 0,
   },
   listContent: {
     paddingHorizontal: 10,
@@ -1788,6 +1942,7 @@ const styles = StyleSheet.create({
   },
   cardBody: {
     flex: 1,
+    minWidth: 0,
     marginLeft: 8,
     justifyContent: 'center',
   },
@@ -1799,12 +1954,14 @@ const styles = StyleSheet.create({
   },
   cardName: {
     flex: 1,
+    minWidth: 0,
     fontSize: 13,
     fontWeight: '600',
     color: colors.text,
   },
   cardMetaRight: {
     alignItems: 'flex-end',
+    flexShrink: 0,
   },
   ratingRow: {
     flexDirection: 'row',

@@ -243,6 +243,15 @@ export default function LoginScreen() {
         />
 
         <Pressable
+          style={styles.forgotLink}
+          onPress={() => router.push('/auth/forgot-password')}
+          disabled={loading || googleLoading}
+          hitSlop={8}
+        >
+          <Text style={styles.forgotLinkText}>Şifrəni unutdum?</Text>
+        </Pressable>
+
+        <Pressable
           style={[styles.button, (loading || googleLoading) && styles.buttonDisabled]}
           onPress={handleLogin}
           disabled={loading || googleLoading}
@@ -337,6 +346,17 @@ const styles = StyleSheet.create({
     color: '#065F46',
     fontSize: 13,
     fontWeight: '600',
+  },
+  forgotLink: {
+    alignSelf: 'flex-end',
+    marginTop: 4,
+    marginBottom: 4,
+    paddingVertical: 4,
+  },
+  forgotLinkText: {
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: '700',
   },
   button: {
     backgroundColor: colors.accent,

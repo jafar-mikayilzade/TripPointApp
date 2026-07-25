@@ -18,5 +18,8 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    // Mobile: implicit flow puts tokens in URL hash (#access_token) — Android
+    // strips fragments from deep links. PKCE uses ?code= which survives.
+    flowType: 'pkce',
   },
 });
