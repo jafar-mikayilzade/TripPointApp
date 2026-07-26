@@ -29,6 +29,17 @@ initSentry();
 
 const SESSION_TIMEOUT_MS = 8000;
 
+/** Avoid "state update on unmounted" from expo-router useLinking during cold start / HMR. */
+function safeReplace(href: string) {
+  setTimeout(() => {
+    try {
+      router.replace(href as never);
+    } catch {
+      // navigator may not be ready yet
+    }
+  }, 0);
+}
+
 export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   return (
     <View style={styles.loader}>
@@ -145,11 +156,7 @@ export default function RootLayout() {
           if (recovery && result.data.session) {
             setSession(result.data.session);
             setPasswordRecovery(true);
-            try {
-              router.replace('/auth/reset-password');
-            } catch {
-              // navigator may not be ready yet
-            }
+            safeReplace('/auth/reset-password');
             return;
           }
           // Flag qalıb, sessiya yoxdur — orphan lock-u təmizlə
@@ -187,11 +194,7 @@ export default function RootLayout() {
             setSession(nextSession);
           }
           setIsLoading(false);
-          try {
-            router.replace('/auth/reset-password');
-          } catch {
-            // navigator may not be ready yet
-          }
+          safeReplace('/auth/reset-password');
           return;
         }
 
@@ -206,11 +209,7 @@ export default function RootLayout() {
           }
           setIsLoading(false);
           if (event === 'SIGNED_IN') {
-            try {
-              router.replace('/auth/reset-password');
-            } catch {
-              // navigator may not be ready yet
-            }
+            safeReplace('/auth/reset-password');
           }
           return;
         }

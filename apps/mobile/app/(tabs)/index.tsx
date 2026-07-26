@@ -812,16 +812,26 @@ export default function HomeScreen() {
       return;
     }
 
-    const base: GoogleMapPoiPayload = {
-      placeId: placeId ?? '',
-      name: name?.trim() || '',
-      latitude: coordinate.latitude,
-      longitude: coordinate.longitude,
-      rating: null,
-      ratingCount: null,
-      suggestedCategory: null,
-    };
-    setPendingGooglePoi(base);
+    const nextName = name?.trim() || '';
+    setPendingGooglePoi((current) => {
+      if (current?.placeId && placeId && current.placeId === placeId) {
+        return {
+          ...current,
+          name: nextName || current.name,
+          latitude: coordinate.latitude,
+          longitude: coordinate.longitude,
+        };
+      }
+      return {
+        placeId: placeId ?? '',
+        name: nextName,
+        latitude: coordinate.latitude,
+        longitude: coordinate.longitude,
+        rating: null,
+        ratingCount: null,
+        suggestedCategory: null,
+      };
+    });
 
     if (!placeId) {
       return;
@@ -835,9 +845,9 @@ export default function HomeScreen() {
         return {
           ...current,
           name: details.name?.trim() || current.name,
-          rating: details.rating,
-          ratingCount: details.ratingCount,
-          suggestedCategory: details.suggestedCategory,
+          rating: details.rating ?? current.rating,
+          ratingCount: details.ratingCount ?? current.ratingCount,
+          suggestedCategory: details.suggestedCategory ?? current.suggestedCategory,
         };
       });
     });
@@ -950,11 +960,17 @@ export default function HomeScreen() {
               <MapView
                 ref={mapRef as never}
                 style={styles.map}
-                provider={Platform.OS === 'web' ? undefined : PROVIDER_GOOGLE}
+                provider={PROVIDER_GOOGLE}
+                {...(Platform.OS === 'web'
+                  ? {
+                      googleMapsApiKey:
+                        process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY || undefined,
+                    }
+                  : {})}
                 initialRegion={mapRegion}
                 showsUserLocation={false}
                 showsMyLocationButton={false}
-                clusteringEnabled
+                clusteringEnabled={Platform.OS !== 'web'}
                 radius={22}
                 minPoints={4}
                 maxZoom={13}
@@ -1663,7 +1679,9 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   map: {
-    ...StyleSheet.absoluteFill,
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
   },
   mapFilterStack: {
     position: 'absolute',

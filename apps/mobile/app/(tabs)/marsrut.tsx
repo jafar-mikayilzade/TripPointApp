@@ -134,23 +134,31 @@ function isTravelStop(stop: {
   return cat === 'travel' || daypart.startsWith('travel');
 }
 
+/** Hotel/travel legs create false zigzags on the map — keep them off polylines. */
+function isMapPathStop(stop: {
+  category?: string | null;
+  daypart?: string | null;
+}): boolean {
+  if (isTravelStop(stop)) {
+    return false;
+  }
+  const cat = String(stop.category || '').toLowerCase();
+  const daypart = String(stop.daypart || '').toLowerCase();
+  if (daypart === 'hotel') {
+    return false;
+  }
+  if (cat === 'hotel' || cat === 'hostel' || cat === 'guesthouse') {
+    return false;
+  }
+  return true;
+}
+
 const DAY_COLORS = [
   colors.accent,
   colors.success,
   colors.warning,
   colors.accentPressed,
   colors.danger,
-];
-
-const SEGMENT_COLORS = [
-  '#E85D04',
-  '#9B5DE5',
-  '#00A8E8',
-  '#F15BB5',
-  '#2EC4B6',
-  '#EF233C',
-  '#4361EE',
-  '#F77F00',
 ];
 
 const DAY_OPTIONS: { value: DayOption; label: string }[] = [
@@ -288,6 +296,28 @@ export default function MarsrutScreen() {
   /** Forma: xəritə gizli; plan: ~yarı yarı — istifadəçi yenə sürükləyə bilər */
   const [splitRatio, setSplitRatio] = useState(MARSRUT_FORM_SPLIT);
   const [savingRoute, setSavingRoute] = useState(false);
+  /**
+   * Android: custom Marker children often invisible unless tracksViewChanges
+   * is true during first paint. Split resize remounts the map — re-pulse.
+   */
+  const [tracksMarkers, setTracksMarkers] = useState(true);
+
+  useEffect(() => {
+    if (!plan) {
+      return;
+    }
+    let alive = true;
+    setTracksMarkers(true);
+    const t = setTimeout(() => {
+      if (alive) {
+        setTracksMarkers(false);
+      }
+    }, 2200);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+  }, [plan, mapSize?.width, mapSize?.height, routeSegments.length]);
 
   const canSubmit = useMemo(
     () => Boolean(regionId && days && budget && interests.length > 0),
@@ -298,6 +328,145 @@ export default function MarsrutScreen() {
     () => REGIONS.find((r) => r.id === regionId) ?? REGIONS[0],
     [regionId]
   );
+
+  /** Flat map markers for every day — jitter stacked coords so day-1 isn't hidden under day-2. */
+  const planMapMarkers = useMemo(() => {
+    if (!plan?.days?.length) {
+      return [] as Array<{
+        key: string;
+        dayIdx: number;
+        lat: number;
+        lng: number;
+        travel: boolean;
+        title: string;
+        description: string;
+        label: string;
+        isFirstVisit: boolean;
+        isLastVisit: boolean;
+        zIndex: number;
+      }>;
+    }
+
+    const totalDays = plan.days.length;
+    const isSingleDay = totalDays <= 1;
+    const lastDayIdx = totalDays - 1;
+    const lastDayVisitIdx = (plan.days[lastDayIdx]?.stops || [])
+      .map((s, i) => (isTravelStop(s) ? -1 : i))
+      .filter((i) => i >= 0)
+      .pop();
+
+    const coordCount = new Map<string, number>();
+    const out: Array<{
+      key: string;
+      dayIdx: number;
+      lat: number;
+      lng: number;
+      travel: boolean;
+      title: string;
+      description: string;
+      label: string;
+      isFirstVisit: boolean;
+      isLastVisit: boolean;
+      zIndex: number;
+    }> = [];
+
+    plan.days.forEach((day, dayIdx) => {
+      const visitStops = (day.stops || []).filter((s) => !isTravelStop(s));
+      (day.stops || []).forEach((stop, stopIdx) => {
+        let lat = Number(stop.lat);
+        let lng = Number(stop.lng);
+        if (
+          !Number.isFinite(lat) ||
+          !Number.isFinite(lng) ||
+          (Math.abs(lat) < 0.01 && Math.abs(lng) < 0.01)
+        ) {
+          return;
+        }
+
+        // Separate pins that share the same GPS (common for nearby cafes)
+        const slot = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+        const n = coordCount.get(slot) ?? 0;
+        coordCount.set(slot, n + 1);
+        if (n > 0) {
+          lat += n * 0.00022;
+          lng += n * 0.00016;
+        }
+
+        const travel = isTravelStop(stop);
+        if (travel) {
+          out.push({
+            key: `d${dayIdx}-s${stopIdx}-travel`,
+            dayIdx,
+            lat,
+            lng,
+            travel: true,
+            title: stop.name || 'Yol',
+            description: stop.duration || 'Transfer',
+            label: '',
+            isFirstVisit: false,
+            isLastVisit: false,
+            zIndex: 50 + dayIdx,
+          });
+          return;
+        }
+
+        const visitIndex =
+          visitStops.findIndex(
+            (s) =>
+              s === stop ||
+              (Boolean(s.poi_id) &&
+                s.poi_id === stop.poi_id &&
+                s.time === stop.time)
+          ) + 1;
+        const sequenceNumber =
+          stop.sequence_order != null && stop.sequence_order > 0
+            ? stop.sequence_order
+            : visitIndex > 0
+              ? visitIndex
+              : stopIdx + 1;
+        const isFirstVisit = dayIdx === 0 && sequenceNumber === 1;
+        const isLastVisit = dayIdx === lastDayIdx && stopIdx === lastDayVisitIdx;
+        const label = isSingleDay
+          ? String(sequenceNumber)
+          : `${dayIdx + 1}.${sequenceNumber}`;
+
+        out.push({
+          key: `d${dayIdx}-s${stopIdx}-v${sequenceNumber}-${stop.poi_id || stopIdx}`,
+          dayIdx,
+          lat,
+          lng,
+          travel: false,
+          title: stop.name || 'Yer',
+          description: `${stop.arrival_time || stop.visiting_time || stop.time || ''} — ${stop.duration || ''}`,
+          label,
+          isFirstVisit,
+          isLastVisit: Boolean(isLastVisit),
+          // Day 1 on top of later days when overlapping
+          zIndex: isFirstVisit ? 1000 : 200 - dayIdx * 10 + sequenceNumber,
+        });
+      });
+    });
+
+    return out;
+  }, [plan]);
+
+  // After plan + map layout: fit every day's pins (day-1 included)
+  useEffect(() => {
+    if (!plan || !mapSize || planMapMarkers.length === 0) {
+      return;
+    }
+    const coords = planMapMarkers.map((m) => ({
+      latitude: m.lat,
+      longitude: m.lng,
+    }));
+    const t = setTimeout(() => {
+      mapRef.current?.fitToCoordinates(coords, {
+        edgePadding: { top: 72, right: 48, bottom: 48, left: 48 },
+        animated: true,
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [plan, mapSize, planMapMarkers]);
 
   useEffect(() => {
     if (!loading) {
@@ -418,10 +587,15 @@ export default function MarsrutScreen() {
       (planData.days ?? []).forEach((day) => {
         const stops: Array<{ lat: number; lng: number; name: string }> = [];
         (day.stops ?? []).forEach((stop) => {
-          if (stop.lat && stop.lng) {
+          if (!isMapPathStop(stop)) {
+            return;
+          }
+          const lat = Number(stop.lat);
+          const lng = Number(stop.lng);
+          if (Number.isFinite(lat) && Number.isFinite(lng) && (Math.abs(lat) > 0.01 || Math.abs(lng) > 0.01)) {
             stops.push({
-              lat: Number(stop.lat),
-              lng: Number(stop.lng),
+              lat,
+              lng,
               name: String(stop.name ?? ''),
             });
           }
@@ -437,17 +611,16 @@ export default function MarsrutScreen() {
 
       if (!GOOGLE_MAPS_KEY) {
         const segments: RouteSegment[] = [];
-        let colorIdx = 0;
-        dayStopLists.forEach((stops) => {
+        dayStopLists.forEach((stops, dayIdx) => {
+          const color = DAY_COLORS[dayIdx % DAY_COLORS.length];
           for (let i = 0; i < stops.length - 1; i++) {
             segments.push({
               coordinates: [
                 { latitude: stops[i].lat, longitude: stops[i].lng },
                 { latitude: stops[i + 1].lat, longitude: stops[i + 1].lng },
               ],
-              color: SEGMENT_COLORS[colorIdx % SEGMENT_COLORS.length],
+              color,
             });
-            colorIdx += 1;
           }
         });
         setRouteSegments(segments);
@@ -463,10 +636,10 @@ export default function MarsrutScreen() {
       const segments: RouteSegment[] = [];
       const durations: Record<string, StopDuration> = {};
       const allCoords: LatLng[] = [];
-      let colorIdx = 0;
 
       for (let dayIdx = 0; dayIdx < dayStopLists.length; dayIdx++) {
         const stops = dayStopLists[dayIdx];
+        const color = DAY_COLORS[dayIdx % DAY_COLORS.length];
         for (let i = 0; i < stops.length - 1; i++) {
           const origin = stops[i];
           const dest = stops[i + 1];
@@ -479,8 +652,6 @@ export default function MarsrutScreen() {
 
           const response = await fetch(url);
           const data = await response.json();
-          const color = SEGMENT_COLORS[colorIdx % SEGMENT_COLORS.length];
-          colorIdx += 1;
 
           if (data.status === 'OK' && data.routes?.[0]) {
             const route = data.routes[0];
@@ -511,12 +682,16 @@ export default function MarsrutScreen() {
       setRouteSegments(segments);
       setStopDurations(durations);
 
-      const toFit = allCoords.length > 0 ? allCoords : fitCoords;
+      // Always fit ALL day stop pins (not only polyline samples) so day-1 stays in view
+      const toFit = fitCoords.length > 0 ? fitCoords : allCoords;
       if (toFit.length > 0 && mapRef.current) {
-        mapRef.current.fitToCoordinates(toFit, {
-          edgePadding: { top: 60, right: 40, bottom: 40, left: 40 },
-          animated: true,
-        });
+        // Defer until split layout settles
+        setTimeout(() => {
+          mapRef.current?.fitToCoordinates(toFit, {
+            edgePadding: { top: 72, right: 48, bottom: 48, left: 48 },
+            animated: true,
+          });
+        }, 350);
       }
     } catch (err) {
       console.log('Route fetch xətası:', err);
@@ -713,7 +888,12 @@ export default function MarsrutScreen() {
                   visiting_time: String(stop.time ?? ''),
                 };
               })
-              .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng)),
+              .filter(
+                (s) =>
+                  Number.isFinite(s.lat) &&
+                  Number.isFinite(s.lng) &&
+                  !(Math.abs(s.lat) < 0.01 && Math.abs(s.lng) < 0.01)
+              ),
           };
         }
 
@@ -726,7 +906,12 @@ export default function MarsrutScreen() {
             category: String(stop.category ?? 'other'),
             duration_hours: parseDurationHours(stop.duration),
           }))
-          .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+          .filter(
+            (p) =>
+              Number.isFinite(p.lat) &&
+              Number.isFinite(p.lng) &&
+              !(Math.abs(p.lat) < 0.01 && Math.abs(p.lng) < 0.01)
+          );
 
         const optimized = optimizeRouteAndTimeline(pois, startLat, startLng, '09:00');
 
@@ -775,19 +960,7 @@ export default function MarsrutScreen() {
 
       setPlan(planData);
       setSplitRatio(MARSRUT_PLAN_SPLIT);
-
-      if (mapRef.current) {
-        mapRef.current.animateToRegion(
-          {
-            latitude: regionMeta.latitude,
-            longitude: regionMeta.longitude,
-            latitudeDelta: 0.3,
-            longitudeDelta: 0.3,
-          },
-          800
-        );
-      }
-
+      // Fit all days after layout; do not animateToRegion (hides day-1 cluster)
       await fetchRouteFromGoogle(planData);
     } catch (err) {
       setErrorMessage(getErrorMessage(err));
@@ -820,10 +993,16 @@ export default function MarsrutScreen() {
           >
             {mapSize ? (
               <MapView
-                key={`marsrut-map-${mapSize.width}x${mapSize.height}`}
+                key={plan ? `marsrut-plan-${plan.regionLabel}-${plan.daysCount}` : 'marsrut-form'}
                 ref={mapRef as never}
                 style={{ width: mapSize.width, height: mapSize.height }}
-                provider={Platform.OS === 'web' ? undefined : PROVIDER_GOOGLE}
+                provider={PROVIDER_GOOGLE}
+                {...(Platform.OS === 'web'
+                  ? {
+                      googleMapsApiKey:
+                        process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY || undefined,
+                    }
+                  : {})}
                 initialRegion={{
                   latitude: regionMeta.latitude,
                   longitude: regionMeta.longitude,
@@ -837,7 +1016,7 @@ export default function MarsrutScreen() {
                     <Marker
                       coordinate={userLocation}
                       title="Mənim yerim"
-                      tracksViewChanges={false}
+                      tracksViewChanges={tracksMarkers}
                     >
                       <View style={styles.meMarker}>
                         <View style={styles.meMarkerDot} />
@@ -845,85 +1024,58 @@ export default function MarsrutScreen() {
                     </Marker>
                   ) : null}
 
-                  {plan?.days?.map((day, dayIdx) => {
-                    const totalDays = plan.days?.length ?? 1;
-                    const isSingleDay = totalDays <= 1;
-                    const lastDayIdx = totalDays - 1;
-                    const lastDayVisitIdx = (plan.days?.[lastDayIdx]?.stops || [])
-                      .map((s, i) => (isTravelStop(s) ? -1 : i))
-                      .filter((i) => i >= 0)
-                      .pop();
-
-                    return (day.stops || []).map((stop, stopIdx) => {
-                      const lat = Number(stop.lat);
-                      const lng = Number(stop.lng);
-                      if (!lat || !lng || Number.isNaN(lat) || Number.isNaN(lng)) {
-                        return null;
-                      }
-
-                      const travel = isTravelStop(stop);
-                      if (travel) {
-                        return (
-                          <Marker
-                            key={`${dayIdx}-${stopIdx}-travel-${stop.name || stopIdx}`}
-                            coordinate={{ latitude: lat, longitude: lng }}
-                            title={stop.name || 'Yol'}
-                            description={stop.duration || 'Transfer'}
-                            tracksViewChanges={false}
-                          >
-                            <View style={styles.travelMarker}>
-                              <FontAwesome name="car" size={11} color="#fff" />
-                            </View>
-                          </Marker>
-                        );
-                      }
-
-                      const sequenceNumber = stop.sequence_order;
-                      if (sequenceNumber == null) return null;
-
-                      const isFirstVisit = dayIdx === 0 && sequenceNumber === 1;
-                      const isLastVisit =
-                        dayIdx === lastDayIdx && stopIdx === lastDayVisitIdx;
-
-                      const label = isSingleDay
-                        ? String(sequenceNumber)
-                        : `${dayIdx + 1}.${sequenceNumber}`;
-
+                  {planMapMarkers.map((m) => {
+                    if (m.travel) {
                       return (
                         <Marker
-                          key={`${dayIdx}-${stopIdx}-${stop.poi_id || stopIdx}`}
-                          coordinate={{ latitude: lat, longitude: lng }}
-                          title={stop.name || 'Yer'}
-                          description={`${stop.arrival_time || stop.visiting_time || stop.time || ''} — ${stop.duration || ''}`}
-                          tracksViewChanges={false}
+                          key={m.key}
+                          coordinate={{ latitude: m.lat, longitude: m.lng }}
+                          title={m.title}
+                          description={m.description}
+                          tracksViewChanges={tracksMarkers}
+                          zIndex={m.zIndex}
                         >
-                          <View
-                            style={[
-                              styles.markerBubble,
-                              isFirstVisit && styles.markerBubbleStart,
-                              isLastVisit && !isFirstVisit && styles.markerBubbleFinish,
-                              !isFirstVisit &&
-                                !isLastVisit && {
-                                  backgroundColor: DAY_COLORS[dayIdx % DAY_COLORS.length],
-                                },
-                            ]}
-                          >
-                            {isFirstVisit || isLastVisit ? (
-                              <View style={styles.markerInner}>
-                                <FontAwesome
-                                  name={isFirstVisit ? 'flag' : 'flag-checkered'}
-                                  size={10}
-                                  color="#fff"
-                                />
-                                <Text style={styles.markerText}>{label}</Text>
-                              </View>
-                            ) : (
-                              <Text style={styles.markerText}>{label}</Text>
-                            )}
+                          <View style={styles.travelMarker}>
+                            <FontAwesome name="car" size={11} color="#fff" />
                           </View>
                         </Marker>
                       );
-                    });
+                    }
+                    return (
+                      <Marker
+                        key={m.key}
+                        coordinate={{ latitude: m.lat, longitude: m.lng }}
+                        title={m.title}
+                        description={m.description}
+                        tracksViewChanges={tracksMarkers}
+                        zIndex={m.zIndex}
+                      >
+                        <View
+                          style={[
+                            styles.markerBubble,
+                            m.isFirstVisit && styles.markerBubbleStart,
+                            m.isLastVisit && !m.isFirstVisit && styles.markerBubbleFinish,
+                            !m.isFirstVisit &&
+                              !m.isLastVisit && {
+                                backgroundColor: DAY_COLORS[m.dayIdx % DAY_COLORS.length],
+                              },
+                          ]}
+                        >
+                          {m.isFirstVisit || m.isLastVisit ? (
+                            <View style={styles.markerInner}>
+                              <FontAwesome
+                                name={m.isFirstVisit ? 'flag' : 'flag-checkered'}
+                                size={10}
+                                color="#fff"
+                              />
+                              <Text style={styles.markerText}>{m.label}</Text>
+                            </View>
+                          ) : (
+                            <Text style={styles.markerText}>{m.label}</Text>
+                          )}
+                        </View>
+                      </Marker>
+                    );
                   })}
 
                   {routeSegments.map((segment, idx) =>
@@ -950,6 +1102,13 @@ export default function MarsrutScreen() {
                     Yenidən planla
                   </Text>
                 </TouchableOpacity>
+              ) : null}
+              {plan && formatWeatherLabel(weatherAdvice) ? (
+                <View style={styles.mapWeatherBadge} pointerEvents="none">
+                  <Text style={styles.mapWeatherBadgeText} numberOfLines={1}>
+                    {formatWeatherLabel(weatherAdvice)}
+                  </Text>
+                </View>
               ) : null}
               {plan ? <ProfileCornerButton style={styles.profileCorner} /> : null}
             </View>
@@ -1048,12 +1207,9 @@ export default function MarsrutScreen() {
                   </ScrollView>
 
                   {formatWeatherLabel(weatherAdvice) ? (
-                    <View style={styles.weatherChip}>
-                      <Text style={styles.weatherChipText} numberOfLines={2}>
-                        Hava · {regionMeta.label}: {formatWeatherLabel(weatherAdvice)}
-                        {weatherAdvice?.prefer_indoor
-                          ? ' — açıq hava yerləri azaldılacaq'
-                          : ''}
+                    <View style={[styles.weatherChip, { marginBottom: 10, maxWidth: '100%' }]}>
+                      <Text style={styles.weatherChipText} numberOfLines={1}>
+                        Hava · {formatWeatherLabel(weatherAdvice)}
                       </Text>
                     </View>
                   ) : null}
@@ -1197,37 +1353,34 @@ export default function MarsrutScreen() {
                   showsVerticalScrollIndicator={false}
                 >
                   <View style={styles.summaryCard}>
-                    <Text style={styles.summaryText}>{plan.summary}</Text>
-                    {weatherAdvice?.summary_az ? (
-                      <Text style={styles.weatherNote}>{weatherAdvice.summary_az}</Text>
-                    ) : null}
-                    <View style={styles.summaryMetaRow}>
-                      {plan.total_cost ? (
-                        <Text style={styles.summaryMeta} numberOfLines={1}>
-                          💰 {plan.total_cost}
-                        </Text>
-                      ) : null}
-                      {plan.best_time ? (
-                        <Text style={styles.summaryMeta} numberOfLines={1}>
-                          ⏱ {plan.best_time}
-                        </Text>
+                    <View style={styles.summaryTitleRow}>
+                      <Text style={styles.summaryText} numberOfLines={1}>
+                        {plan.regionLabel} · {plan.daysCount} gün
+                      </Text>
+                      {formatWeatherLabel(weatherAdvice) ? (
+                        <View style={styles.weatherChip}>
+                          <Text style={styles.weatherChipText} numberOfLines={1}>
+                            {formatWeatherLabel(weatherAdvice)}
+                          </Text>
+                        </View>
                       ) : null}
                     </View>
+                    {plan.total_cost ? (
+                      <View style={styles.summaryMetaRow}>
+                        <Text style={styles.summaryMeta} numberOfLines={1}>
+                          {plan.total_cost}
+                        </Text>
+                      </View>
+                    ) : null}
                     {plan.travel?.from_origin ? (
                       <Text style={styles.travelNote}>
-                        Cari məkandan ~{Math.round(plan.travel.outbound_minutes ?? 0)} dəq
+                        Yola ~{Math.round(plan.travel.outbound_minutes ?? 0)} dəq
                         {plan.travel.distance_km
                           ? ` · ${plan.travel.distance_km.toFixed(0)} km`
                           : ''}
                         {plan.travel.depart_origin_at
-                          ? ` · çıxış ${plan.travel.depart_origin_at}`
+                          ? ` · ${plan.travel.depart_origin_at}`
                           : ''}
-                      </Text>
-                    ) : null}
-                    {plan.lodging?.name ? (
-                      <Text style={styles.lodgingNote}>
-                        Gecələmə bazası: {plan.lodging.name}
-                        {plan.daysCount > 1 ? ' · bütün gecələr eyni otel' : ''}
                       </Text>
                     ) : null}
                     <View style={styles.shareRow}>
@@ -1246,7 +1399,7 @@ export default function MarsrutScreen() {
                           void shareRouteText(
                             plan,
                             plan.regionLabel,
-                            weatherAdvice?.summary_az
+                            formatWeatherLabel(weatherAdvice) ?? undefined
                           ).catch((err) =>
                             Alert.alert('Paylaşım', getErrorMessage(err))
                           )
@@ -1398,8 +1551,13 @@ export default function MarsrutScreen() {
                                   {stop.duration ? (
                                     <Text style={styles.stopDuration}>{stop.duration}</Text>
                                   ) : null}
-                                  {stop.tip ? (
-                                    <Text style={styles.stopTip}>{stop.tip}</Text>
+                                  {stop.tip?.trim() &&
+                                  !/səhər yemə|nahar üçün|istirahət və gecələ/i.test(
+                                    stop.tip
+                                  ) ? (
+                                    <Text style={styles.stopTip} numberOfLines={2}>
+                                      {stop.tip.trim()}
+                                    </Text>
                                   ) : null}
                                   {leg ? (
                                     <View style={styles.stopLegBox}>
@@ -1418,8 +1576,10 @@ export default function MarsrutScreen() {
                         );
                       })}
 
-                      {day.notes ? (
-                        <Text style={styles.dayNotes}>{day.notes}</Text>
+                      {day.notes?.trim() &&
+                      !day.notes.includes('Səhər →') &&
+                      !day.notes.startsWith('Gecələmə:') ? (
+                        <Text style={styles.dayNotes}>{day.notes.trim()}</Text>
                       ) : null}
                     </View>
                   ))}
@@ -1779,11 +1939,19 @@ const styles = StyleSheet.create({
     borderColor: colors.borderSoft,
     gap: 8,
   },
+  summaryTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
   summaryText: {
-    fontSize: 14,
-    fontWeight: '600',
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
     color: colors.text,
     lineHeight: 20,
+    minWidth: 0,
   },
   weatherNote: {
     fontSize: 12,
@@ -1791,20 +1959,37 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   weatherChip: {
-    marginTop: 2,
-    marginBottom: 10,
+    flexShrink: 0,
     paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: colors.surfaceMuted,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: colors.accentSoft,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
+    borderColor: colors.accent,
+    maxWidth: '46%',
   },
   weatherChipText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    lineHeight: 17,
+    fontWeight: '700',
+    color: colors.accentPressed,
+    lineHeight: 16,
+  },
+  mapWeatherBadge: {
+    position: 'absolute',
+    top: 10,
+    right: 52,
+    zIndex: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  mapWeatherBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.text,
   },
   summaryMetaRow: {
     flexDirection: 'row',

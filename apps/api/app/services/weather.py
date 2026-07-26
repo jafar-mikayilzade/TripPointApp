@@ -78,12 +78,9 @@ def analyze_forecast(slots: list[dict[str, Any]], days: int) -> dict[str, Any]:
     prefer_indoor = heavy_slots >= 2 or max_mm >= RAIN_MM_HEAVY or max_pop >= 0.7
 
     if prefer_indoor:
-        summary_az = (
-            "Güclü yağış riski var — açıq hava / dağ marşrutları azaldılır, "
-            "muzey, restoran və qapalı məkanlar üstün tutulur."
-        )
+        summary_az = "Yağış riski — qapalı məkanlar üstün."
     else:
-        summary_az = "Hava ümumən uyğundur — açıq və qapalı məkanlar qarışıq planlana bilər."
+        summary_az = "Hava uyğundur."
 
     return {
         "prefer_indoor": prefer_indoor,

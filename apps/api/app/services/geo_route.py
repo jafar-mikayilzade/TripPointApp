@@ -547,10 +547,11 @@ def rebalance_clusters(
     clusters: list[list[dict[str, Any]]],
     *,
     min_size: int = 2,
+    max_steal_km: float = 12.0,
 ) -> list[list[dict[str, Any]]]:
     """
-    Steal from rich days into thin ones so middle days are not left with 1 POI.
-    Donor must stay above min_size after the move.
+    Steal from rich days into thin ones — only when the POI is geographically
+    nearer the needy cluster than the donor (no cross-town transplants).
     """
     if not clusters:
         return clusters
@@ -559,37 +560,109 @@ def rebalance_clusters(
     def size(i: int) -> int:
         return len(clusters[i])
 
-    # Multiple passes — keep filling until no donor can give
     for _ in range(max(8, len(clusters) * 3)):
         needy = [i for i in range(len(clusters)) if size(i) < min_size]
         if not needy:
             break
         progressed = False
         for i in needy:
-            donor = max(range(len(clusters)), key=size)
-            if donor == i or size(donor) <= min_size:
-                continue
-            donor_c = cluster_centroid(clusters[donor])
-            if not donor_c or not clusters[donor]:
-                continue
-            scored: list[tuple[float, int]] = []
-            for j, poi in enumerate(clusters[donor]):
-                coord = _coord(poi)
-                if coord is None:
+            needy_c = cluster_centroid(clusters[i])
+            # Thin/empty: aim toward a point far from the richest donor later
+            best_move: tuple[float, int, int] | None = None  # (dist_to_needy, donor, idx)
+            for donor in range(len(clusters)):
+                if donor == i or size(donor) <= min_size:
                     continue
-                d = haversine_km(donor_c[0], donor_c[1], coord[0], coord[1])
-                scored.append((d, j))
-            if not scored:
+                donor_c = cluster_centroid(clusters[donor])
+                if not donor_c or not clusters[donor]:
+                    continue
+                for j, poi in enumerate(clusters[donor]):
+                    coord = _coord(poi)
+                    if coord is None:
+                        continue
+                    d_donor = haversine_km(donor_c[0], donor_c[1], coord[0], coord[1])
+                    if needy_c is None:
+                        # Empty needy: only peel a fringe point far from donor core
+                        if d_donor < 3.0:
+                            continue
+                        score = -d_donor
+                        cand = (score, donor, j)
+                    else:
+                        d_needy = haversine_km(
+                            needy_c[0], needy_c[1], coord[0], coord[1]
+                        )
+                        if d_needy > max_steal_km:
+                            continue
+                        # Must be closer to needy than to donor centroid
+                        if d_needy + 0.5 >= d_donor:
+                            continue
+                        cand = (d_needy, donor, j)
+                    if best_move is None or cand[0] < best_move[0]:
+                        best_move = cand
+            if best_move is None:
                 continue
-            scored.sort(key=lambda t: t[0])
-            # Prefer a mid-distance point (not the farthest outlier)
-            move_i = scored[len(scored) // 2][1]
+            _, donor, move_i = best_move
             clusters[i].append(clusters[donor].pop(move_i))
             progressed = True
         if not progressed:
             break
 
     return clusters
+
+
+def min_km_to_coords(
+    poi: dict[str, Any],
+    coords: Sequence[tuple[float, float]],
+) -> float:
+    """Haversine distance from POI to nearest coordinate in coords."""
+    if not coords:
+        return float("inf")
+    coord = _coord(poi)
+    if coord is None:
+        return float("inf")
+    return min(haversine_km(coord[0], coord[1], c[0], c[1]) for c in coords)
+
+
+def filter_pois_clear_of(
+    pois: Sequence[dict[str, Any]],
+    footprint: Sequence[tuple[float, float]],
+    *,
+    min_clearance_km: float,
+    soft_fallback: bool = True,
+) -> list[dict[str, Any]]:
+    """
+    Prefer POIs at least min_clearance_km from any footprint point.
+    If too few remain, keep the farthest half so a thin region still plans.
+    """
+    usable = [p for p in pois if _coord(p) is not None]
+    if not usable or not footprint:
+        return list(usable)
+
+    clear = [
+        p for p in usable if min_km_to_coords(p, footprint) >= min_clearance_km
+    ]
+    if len(clear) >= 2 or not soft_fallback:
+        return clear if clear else list(usable)
+
+    ranked = sorted(
+        usable,
+        key=lambda p: min_km_to_coords(p, footprint),
+        reverse=True,
+    )
+    keep_n = max(2, (len(ranked) + 1) // 2)
+    return ranked[:keep_n]
+
+
+def cluster_member_ids(clusters: Sequence[Sequence[dict[str, Any]]]) -> list[set[str]]:
+    """Stable id sets per day cluster (empty id skipped)."""
+    out: list[set[str]] = []
+    for cluster in clusters:
+        ids: set[str] = set()
+        for p in cluster:
+            pid = str(p.get("id") or "")
+            if pid:
+                ids.add(pid)
+        out.append(ids)
+    return out
 
 
 def order_clusters_from_origin(
@@ -611,6 +684,67 @@ def order_clusters_from_origin(
     return [t[2] for t in indexed]
 
 
+def farthest_point_sample(
+    pois: Sequence[dict[str, Any]],
+    *,
+    k: int,
+    origin_lat: float,
+    origin_lng: float,
+) -> list[dict[str, Any]]:
+    """Cover the region with k POIs (first near origin, then max-min distance)."""
+    return farthest_point_seeds(
+        pois, k=k, origin_lat=origin_lat, origin_lng=origin_lng
+    )
+
+
+def split_tour_at_largest_gaps(
+    tour: Sequence[dict[str, Any]],
+    days: int,
+) -> list[list[dict[str, Any]]]:
+    """
+    Split an ordered open tour into `days` contiguous segments at the largest
+    geographic gaps. Contiguity guarantees day N never jumps back into day N-1's
+    stretch of the tour (the main multi-day zigzag failure mode).
+    """
+    days_n = max(1, days)
+    tour_list = [p for p in tour if _coord(p) is not None]
+    n = len(tour_list)
+    if days_n <= 1:
+        return [tour_list]
+    if n == 0:
+        return [[] for _ in range(days_n)]
+    if n <= days_n:
+        out: list[list[dict[str, Any]]] = [[tour_list[i]] for i in range(n)]
+        while len(out) < days_n:
+            out.append([])
+        return out
+
+    gap_after: list[float] = []
+    for i in range(n - 1):
+        ca = _coord(tour_list[i])
+        cb = _coord(tour_list[i + 1])
+        if ca and cb:
+            gap_after.append(haversine_km(ca[0], ca[1], cb[0], cb[1]))
+        else:
+            gap_after.append(0.0)
+
+    # (days-1) largest gaps → cut after those indices; sort to keep tour order
+    cut_idxs = sorted(
+        sorted(range(n - 1), key=lambda i: gap_after[i], reverse=True)[: days_n - 1]
+    )
+
+    clusters: list[list[dict[str, Any]]] = []
+    start = 0
+    for cut in cut_idxs:
+        clusters.append(tour_list[start : cut + 1])
+        start = cut + 1
+    clusters.append(tour_list[start:])
+
+    while len(clusters) < days_n:
+        clusters.append([])
+    return clusters[:days_n]
+
+
 def build_day_clusters(
     attractions: Sequence[dict[str, Any]],
     *,
@@ -619,39 +753,53 @@ def build_day_clusters(
     origin_lng: float,
 ) -> list[list[dict[str, Any]]]:
     """
-    Farthest-point seeds + nearest assignment + rebalance + near→far day order.
-    Returns up to `days` non-empty clusters when possible.
+    Multi-day partition via global open tour + gap cuts.
+
+    1) Sample a geographically spread POI pool
+    2) Order as one short open TSP (NN + 2-opt)
+    3) Cut the tour at the largest gaps into contiguous day segments
+
+    Day order follows the tour from the region (arrival) outward — not a
+    reshuffle by centroid that can interleave neighbourhoods.
     """
+    days_n = max(1, days)
     usable = [p for p in attractions if _coord(p) is not None]
     if not usable:
-        return [[] for _ in range(max(1, days))]
+        return [[] for _ in range(days_n)]
 
-    k = max(1, min(days, len(usable)))
-    seeds = farthest_point_seeds(
-        usable, k=k, origin_lat=origin_lat, origin_lng=origin_lng
-    )
-    if not seeds:
-        return [list(usable)]
+    # Enough POIs for full days, capped so 2-opt stays cheap
+    pool_limit = min(len(usable), max(days_n * 8, 10))
+    if len(usable) > pool_limit:
+        # Spread sample, then fill remaining slots with best-rated leftovers nearby
+        seeds = farthest_point_sample(
+            usable,
+            k=min(pool_limit, len(usable)),
+            origin_lat=origin_lat,
+            origin_lng=origin_lng,
+        )
+        seed_ids = {str(p.get("id") or "") for p in seeds if p.get("id")}
+        rest = [
+            p
+            for p in usable
+            if str(p.get("id") or "") not in seed_ids
+        ]
+        rest.sort(
+            key=lambda p: (
+                -float(p.get("rating") or 0),
+                haversine_km(
+                    origin_lat,
+                    origin_lng,
+                    *(_coord(p) or (origin_lat, origin_lng)),
+                ),
+            )
+        )
+        pool = list(seeds)
+        for p in rest:
+            if len(pool) >= pool_limit:
+                break
+            pool.append(p)
+    else:
+        pool = list(usable)
 
-    clusters = assign_to_nearest_seed(usable, seeds)
-    # Ensure we have exactly len(seeds) clusters; pad if days > seeds (shouldn't)
-    while len(clusters) < days and len(usable) > len(clusters):
-        clusters.append([])
-
-    clusters = rebalance_clusters(clusters, min_size=2)
-    clusters = [
-        trim_cluster_diameter(c, max_diameter_km=25.0) if c else [] for c in clusters
-    ]
-    clusters = order_clusters_from_origin(
-        clusters, origin_lat=origin_lat, origin_lng=origin_lng
-    )
-
-    if len(clusters) > days:
-        kept = clusters[:days]
-        for extra in clusters[days:]:
-            kept[-1].extend(extra)
-        clusters = kept
-    while len(clusters) < days:
-        clusters.append([])
-
-    return clusters
+    tour = order_stops_geo(pool, start_lat=origin_lat, start_lng=origin_lng)
+    return split_tour_at_largest_gaps(tour, days_n)

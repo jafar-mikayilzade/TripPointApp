@@ -21,10 +21,13 @@ from app.services.attraction_classify import (
 from app.services.geo_route import (
     build_day_clusters,
     cluster_centroid,
+    cluster_member_ids,
+    filter_pois_clear_of,
     grow_compact_tour,
     haversine_km,
     insert_poi_at,
     insertion_detour_km,
+    min_km_to_coords,
     nearest_poi_to_point,
     order_stops_geo,
     pick_poi_min_insert,
@@ -45,19 +48,20 @@ from app.services.places_tourism_filter import (
 logger = logging.getLogger(__name__)
 
 DURATION_MINUTES: dict[str, int] = {
-    "restaurant": 75,
-    "home_restaurant": 75,
-    "cafe": 45,
-    "hotel": 30,
-    "hostel": 30,
-    "guesthouse": 30,
-    "nature": 120,
-    "waterfall": 90,
-    "mountain": 120,
-    "lake": 90,
-    "historical": 75,
-    "monument": 45,
-    "other": 60,
+    "restaurant": 60,
+    "home_restaurant": 60,
+    "cafe": 40,
+    "hotel": 25,
+    "hostel": 25,
+    "guesthouse": 25,
+    # Denser day packing — still realistic visit windows
+    "nature": 75,
+    "waterfall": 60,
+    "mountain": 75,
+    "lake": 60,
+    "historical": 55,
+    "monument": 35,
+    "other": 45,
 }
 
 FOOD_CATS = frozenset({"restaurant", "home_restaurant", "cafe"})
@@ -65,21 +69,23 @@ HOTEL_CATS = frozenset({"hotel", "hostel", "guesthouse"})
 NATURE_CATS = frozenset({"nature", "waterfall", "mountain", "lake"})
 HISTORICAL_CATS = frozenset({"historical", "monument"})
 
-MAX_RESTAURANT_KM = 8.0
-ATTRACTIONS_PER_DAY = 3
-# Full (middle) days pack denser; travel days stay a bit tighter
-ATTRACTIONS_PER_FULL_DAY = 4
-ATTRACTIONS_PER_TRAVEL_DAY = 3
-MAX_DAY_DIAMETER_KM = 8.0
-MAX_ADD_FROM_PATH_KM = 3.5
-# Looser corridor for full on-site days (rural POIs are often 5–12 km apart)
-FULL_DAY_DIAMETER_KM = 15.0
-FULL_DAY_ADD_FROM_PATH_KM = 6.5
+MAX_RESTAURANT_KM = 10.0
+ATTRACTIONS_PER_DAY = 5
+# Full (middle) days pack denser; travel days still aim for a full walk day
+ATTRACTIONS_PER_FULL_DAY = 6
+ATTRACTIONS_PER_TRAVEL_DAY = 5
+MAX_DAY_DIAMETER_KM = 12.0
+MAX_ADD_FROM_PATH_KM = 5.0
+# Compact day bubbles — multi-day must not sprawl into another day's zone
+FULL_DAY_DIAMETER_KM = 14.0
+FULL_DAY_ADD_FROM_PATH_KM = 5.0
 TRAVEL_DAY_DIAMETER_KM = 12.0
-TRAVEL_DAY_ADD_FROM_PATH_KM = 5.5
+TRAVEL_DAY_ADD_FROM_PATH_KM = 4.5
+# Later days stay clear of earlier days' visited area
+DAY_FOOTPRINT_CLEARANCE_KM = 4.0
 # Food/hotel only if they barely bend the path
-MAX_FOOD_DETOUR_KM = 1.2
-MAX_HOTEL_FROM_PATH_END_KM = 6.0
+MAX_FOOD_DETOUR_KM = 2.0
+MAX_HOTEL_FROM_PATH_END_KM = 8.0
 
 # Fixed daypart anchors (minutes from midnight) — overridden by travel window
 BREAKFAST_AT = 9 * 60  # 09:00
@@ -235,6 +241,69 @@ def _day_pack_params(day_i: int, days_n: int) -> tuple[int, float, float]:
     return ATTRACTIONS_PER_FULL_DAY, FULL_DAY_DIAMETER_KM, FULL_DAY_ADD_FROM_PATH_KM
 
 
+def _seed_away_from_footprint(
+    pool: list[dict[str, Any]],
+    footprint: list[tuple[float, float]],
+    *,
+    fallback_lat: float,
+    fallback_lng: float,
+) -> tuple[float, float]:
+    """Pick a grow origin far from earlier days; else cluster/region fallback."""
+    if pool and footprint:
+        best = max(pool, key=lambda p: min_km_to_coords(p, footprint))
+        coord = poi_coord(best)
+        if coord:
+            return coord
+    anchor = cluster_centroid(pool) if pool else None
+    if anchor:
+        return anchor
+    return fallback_lat, fallback_lng
+
+
+def _take_along_tour(
+    cluster: list[dict[str, Any]],
+    *,
+    used: set[str],
+    limit: int,
+    prefer_categories: set[str] | None,
+) -> list[dict[str, Any]]:
+    """
+    Keep tour-segment order (contiguous geography). Never cherry-pick
+    non-contiguous POIs from the segment — that recreates day zigzags.
+    """
+    available = [
+        p
+        for p in cluster
+        if poi_coord(p) is not None and str(p.get("id") or "") not in used
+    ]
+    if not available or limit <= 0:
+        return []
+
+    if prefer_categories:
+        chosen: list[dict[str, Any]] = []
+        for p in available:
+            if len(chosen) >= limit:
+                break
+            if str(p.get("category") or "") in prefer_categories:
+                chosen.append(p)
+        if len(chosen) < min(2, limit):
+            # Not enough interest hits — fall back to contiguous prefix
+            return available[:limit]
+        if len(chosen) < limit:
+            chosen_ids = {str(p.get("id") or "") for p in chosen}
+            for p in available:
+                if len(chosen) >= limit:
+                    break
+                pid = str(p.get("id") or "")
+                if pid not in chosen_ids:
+                    chosen.append(p)
+        order = {str(p.get("id") or ""): i for i, p in enumerate(available)}
+        chosen.sort(key=lambda p: order.get(str(p.get("id") or ""), 10**9))
+        return chosen
+
+    return available[:limit]
+
+
 def pick_day_pieces(
     *,
     cluster: list[dict[str, Any]],
@@ -248,13 +317,17 @@ def pick_day_pieces(
     max_diameter_km: float | None = None,
     max_add_from_path_km: float | None = None,
     global_pool: list[dict[str, Any]] | None = None,
+    avoid_coords: list[tuple[float, float]] | None = None,
 ) -> dict[str, Any]:
     """
-    Interest-aware compact open tour from the cluster.
+    Pack one day from its exclusive tour segment (contiguous order).
+
     Food is NOT picked here — only added later if detour is tiny.
-    If cluster is thin, top up from global_pool with the same day limits.
+    global_pool is a last-resort fill only when the segment is empty/thin,
+    and only for POIs clear of earlier days.
     """
     del restaurants  # lunch/breakfast deferred to assemble (detour-gated)
+    del rng
     limit = attraction_limit if attraction_limit is not None else ATTRACTIONS_PER_DAY
     diameter = max_diameter_km if max_diameter_km is not None else MAX_DAY_DIAMETER_KM
     add_km = (
@@ -262,56 +335,46 @@ def pick_day_pieces(
         if max_add_from_path_km is not None
         else MAX_ADD_FROM_PATH_KM
     )
+    footprint = list(avoid_coords or [])
 
-    cluster = trim_cluster_diameter(cluster, max_diameter_km=diameter)
-    if not cluster and not global_pool:
-        return {"attractions": []}
+    # Tour segments are already compact along a path — only trim extreme outliers
+    cluster = trim_cluster_diameter(cluster, max_diameter_km=max(diameter, 28.0))
 
-    anchor = cluster_centroid(cluster) if cluster else None
-    lat = anchor[0] if anchor else origin_lat
-    lng = anchor[1] if anchor else origin_lng
-
-    attractions: list[dict[str, Any]] = []
-    if cluster:
-        attractions = grow_compact_tour(
-            cluster,
-            origin_lat=lat,
-            origin_lng=lng,
-            used=used,
-            limit=limit,
-            max_diameter_km=diameter,
-            max_add_from_path_km=add_km,
-            prefer_categories=interest_cats or None,
-            rng=rng,
+    pool = list(global_pool or [])
+    if footprint and pool:
+        pool = filter_pois_clear_of(
+            pool, footprint, min_clearance_km=DAY_FOOTPRINT_CLEARANCE_KM
         )
 
-        if interest_cats and len(attractions) < min(2, limit):
-            already = {str(p.get("id") or "") for p in attractions}
-            fill_used = set(used) | already
-            extra = grow_compact_tour(
-                cluster,
-                origin_lat=lat,
-                origin_lng=lng,
-                used=fill_used,
-                limit=limit - len(attractions),
-                max_diameter_km=diameter,
-                max_add_from_path_km=add_km,
-                prefer_categories=None,
-                rng=rng,
-            )
-            attractions = attractions + extra
+    if not cluster and not pool:
+        return {"attractions": []}
 
-    # Thin cluster (common on day 2/3) — pull more from unused global POIs
-    if global_pool and len(attractions) < limit:
+    attractions = _take_along_tour(
+        cluster,
+        used=used,
+        limit=limit,
+        prefer_categories=interest_cats or None,
+    )
+    if interest_cats and len(attractions) < min(2, limit):
+        attractions = _take_along_tour(
+            cluster,
+            used=used,
+            limit=limit,
+            prefer_categories=None,
+        )
+
+    # Empty/thin segment only — never raid another day's neighbourhood
+    if pool and len(attractions) < min(2, limit):
         already = {str(p.get("id") or "") for p in attractions}
         fill_used = set(used) | already
-        seed_lat, seed_lng = lat, lng
-        if attractions:
-            last_c = poi_coord(attractions[-1])
-            if last_c:
-                seed_lat, seed_lng = last_c
+        seed_lat, seed_lng = _seed_away_from_footprint(
+            pool,
+            footprint,
+            fallback_lat=origin_lat,
+            fallback_lng=origin_lng,
+        )
         extra = grow_compact_tour(
-            global_pool,
+            pool,
             origin_lat=seed_lat,
             origin_lng=seed_lng,
             used=fill_used,
@@ -319,24 +382,9 @@ def pick_day_pieces(
             max_diameter_km=diameter,
             max_add_from_path_km=add_km,
             prefer_categories=interest_cats or None,
-            rng=rng,
+            rng=None,
         )
         attractions = attractions + extra
-        if interest_cats and len(attractions) < limit:
-            already = {str(p.get("id") or "") for p in attractions}
-            fill_used = set(used) | already
-            extra2 = grow_compact_tour(
-                global_pool,
-                origin_lat=seed_lat,
-                origin_lng=seed_lng,
-                used=fill_used,
-                limit=limit - len(attractions),
-                max_diameter_km=diameter,
-                max_add_from_path_km=add_km,
-                prefer_categories=None,
-                rng=rng,
-            )
-            attractions = attractions + extra2
 
     for poi in attractions:
         pid = str(poi.get("id") or "")
@@ -400,7 +448,7 @@ def assemble_day_stops(
     restaurants = restaurants or []
     used_ids = used if used is not None else set()
     start_anchor = window_start_min if window_start_min is not None else ATTRACTION_START
-    end_anchor = window_end_min if window_end_min is not None else 19 * 60
+    end_anchor = window_end_min if window_end_min is not None else 20 * 60 + 30
     lunch_anchor = max(LUNCH_AT, start_anchor + 90)
 
     path = order_stops_geo(attractions) if attractions else []
@@ -468,7 +516,8 @@ def assemble_day_stops(
             break
 
         stops.append(_stop_payload(poi, time_min=time_min, daypart=daypart))
-        t = time_min + dur + 25
+        # Short transfer buffer so more stops fit a normal day window
+        t = time_min + dur + 15
         last_poi = poi
 
     if allow_hotel and hotel is not None and last_poi is not None:
@@ -623,12 +672,31 @@ def build_skeleton(
 
     day_payloads: list[dict[str, Any]] = []
     last_day_end = int(travel.get("last_day_end_min") or travel.get("day_end_min") or 19 * 60)
+    # Exclusive Voronoi ownership — day B must not steal day A's leftover neighbours
+    cluster_ids = cluster_member_ids(clusters)
+    # Visited stop coords from earlier days (attractions only; keep days spatially apart)
+    day_footprints: list[tuple[float, float]] = []
 
     for day_i in range(1, days_n + 1):
         limit, diameter, add_km = _day_pack_params(day_i, days_n)
-        cluster = clusters[day_i - 1] if day_i - 1 < len(clusters) else []
+        cluster = list(clusters[day_i - 1]) if day_i - 1 < len(clusters) else []
+        foreign_ids: set[str] = set()
+        for j, ids in enumerate(cluster_ids):
+            if j != day_i - 1:
+                foreign_ids |= ids
+
         if not cluster:
-            leftovers = [p for p in attractions if str(p.get("id") or "") not in used]
+            leftovers = [
+                p
+                for p in attractions
+                if str(p.get("id") or "") not in used
+                and str(p.get("id") or "") not in foreign_ids
+            ]
+            leftovers = filter_pois_clear_of(
+                leftovers,
+                day_footprints,
+                min_clearance_km=DAY_FOOTPRINT_CLEARANCE_KM,
+            )
             if interest_cats:
                 pref = [
                     p
@@ -642,9 +710,36 @@ def build_skeleton(
                 ]
                 leftovers = pref + rest
             if leftovers:
-                cluster = leftovers[: max(limit, ATTRACTIONS_PER_DAY)]
+                # Grow a local bubble from the farthest leftover vs earlier days
+                seed_lat, seed_lng = _seed_away_from_footprint(
+                    leftovers,
+                    day_footprints,
+                    fallback_lat=start_lat,
+                    fallback_lng=start_lng,
+                )
+                cluster = grow_compact_tour(
+                    leftovers,
+                    origin_lat=seed_lat,
+                    origin_lng=seed_lng,
+                    used=used,
+                    limit=max(limit, ATTRACTIONS_PER_DAY),
+                    max_diameter_km=diameter,
+                    max_add_from_path_km=add_km,
+                    prefer_categories=interest_cats or None,
+                    rng=rng,
+                )
 
-        global_pool = [p for p in attractions if str(p.get("id") or "") not in used]
+        # Tour segments are exclusive — do not top up from other days' POIs.
+        # Only unassigned leftovers (not in any cluster) may fill a thin day.
+        owned_elsewhere = foreign_ids
+        unassigned = [
+            p
+            for p in attractions
+            if str(p.get("id") or "") not in used
+            and str(p.get("id") or "") not in owned_elsewhere
+            and str(p.get("id") or "")
+            not in (cluster_ids[day_i - 1] if day_i - 1 < len(cluster_ids) else set())
+        ]
         pieces = pick_day_pieces(
             cluster=cluster,
             restaurants=restaurants,
@@ -656,8 +751,25 @@ def build_skeleton(
             attraction_limit=limit,
             max_diameter_km=diameter,
             max_add_from_path_km=add_km,
-            global_pool=global_pool,
+            global_pool=unassigned if len(cluster) < 2 else [],
+            avoid_coords=day_footprints,
         )
+
+        for poi in pieces["attractions"]:
+            coord = poi_coord(poi)
+            if coord:
+                day_footprints.append(coord)
+        # Soft-claim unused neighbours of this day's stops so the next day
+        # cannot park 50m from yesterday's last café
+        if pieces["attractions"]:
+            for p in attractions:
+                pid = str(p.get("id") or "")
+                if not pid or pid in used:
+                    continue
+                if min_km_to_coords(p, day_footprints[-len(pieces["attractions"]) :]) < (
+                    DAY_FOOTPRINT_CLEARANCE_KM * 0.75
+                ):
+                    used.add(pid)
 
         # Time windows
         if day_i == 1:
@@ -667,7 +779,7 @@ def build_skeleton(
         if day_i == days_n:
             w_end = last_day_end
         else:
-            w_end = 20 * 60
+            w_end = 21 * 60
 
         hotel = (
             base_hotel
@@ -780,24 +892,8 @@ def build_skeleton(
 
     lodging = None
     if base_hotel is not None:
-        lodging = {
-            **public_poi_fields(base_hotel),
-            "note": "Ümumi gecələmə bazası (bütün gecələr eyni otel).",
-        }
-        # First overnight day note — clarify single hotel once
-        for day in day_payloads:
-            has_hotel_stop = any(
-                str(s.get("daypart") or "") == "hotel"
-                or str(s.get("category") or "") in HOTEL_CATS
-                for s in (day.get("stops") or [])
-            )
-            if has_hotel_stop:
-                hotel_name = str(base_hotel.get("name") or "Otel")
-                prefix = f"Gecələmə: {hotel_name}."
-                existing = str(day.get("notes") or "").strip()
-                if prefix.lower() not in existing.lower():
-                    day["notes"] = f"{prefix} {existing}".strip()
-                break
+        # Lodging appears as a stop in the day list — no duplicate banner notes
+        lodging = {**public_poi_fields(base_hotel)}
 
     return {
         "summary": "",
@@ -859,20 +955,13 @@ def _tip_for_stop(stop: dict[str, Any]) -> str:
     if daypart == "hotel" or cat in HOTEL_CATS:
         return f"{name} — axşam istirahət və gecələmə."
 
+    # Food / generic tips — empty (UI shows time + duration only)
     if cat in FOOD_CATS or daypart in {"breakfast", "lunch"}:
-        if daypart == "breakfast" or (
-            daypart != "lunch" and time_s.startswith("09")
-        ):
-            return f"{name} — səhər yeməyi üçün."
-        return f"{name} — nahar üçün uyğun seçim."
+        return ""
 
-    if cat in NATURE_CATS:
-        return f"{name} — təbiət mənzərəsi üçün qısa dayanacaq."
+    if cat in NATURE_CATS or cat in HISTORICAL_CATS:
+        return ""
 
-    if cat in HISTORICAL_CATS:
-        return f"{name} — tarixi məkana nəzər yetirin."
-
-    # other / unknown — better empty than misleading template
     return ""
 
 
@@ -912,33 +1001,38 @@ def _claude_tip_mismatch(stop: dict[str, Any], tip: str) -> bool:
 
 
 def template_enrich(plan: dict[str, Any], *, region_label: str, days: int) -> dict[str, Any]:
+    """Minimal copy — UI shows region/days/weather; avoid filler notes."""
     plan = dict(plan)
-    lodging = plan.get("lodging")
-    lodging_name = (
-        str((lodging or {}).get("name") or "").strip() if isinstance(lodging, dict) else ""
-    )
-    plan["summary"] = (
-        plan.get("summary") or f"{region_label} üçün {days} günlük marşrut hazırdır."
-    )
-    plan["best_time"] = plan.get("best_time") or "Səhər tezdən başlamaq rahatdır."
+    # Compact title only; mobile renders chips (no long "hazırdır" blurb)
+    plan["summary"] = f"{region_label} · {days} gün"
+    plan["best_time"] = ""
     new_days = []
     for day in plan.get("days") or []:
         day = dict(day)
-        default_notes = "Səhər → gəzinti → nahar → attraksiya."
-        if lodging_name and any(
-            str(s.get("daypart") or "") == "hotel"
-            or str(s.get("category") or "") in HOTEL_CATS
-            for s in (day.get("stops") or [])
+        # Keep only real travel timing notes from skeleton; drop template fluff
+        notes = str(day.get("notes") or "").strip()
+        if (
+            not notes
+            or "Səhər →" in notes
+            or notes.startswith("Gecələmə:")
+            or "gəzinti → nahar" in notes.lower()
         ):
-            default_notes = f"Gecələmə: {lodging_name}. {default_notes}"
-        day["notes"] = day.get("notes") or default_notes
+            # Preserve outbound/return timing if present
+            if "Çıxış" in notes or "Geri dönüş" in notes or "yola çıx" in notes.lower():
+                day["notes"] = notes
+            else:
+                day["notes"] = ""
+        else:
+            day["notes"] = notes
         stops = []
         for stop in day.get("stops") or []:
             stop = dict(stop)
             if _is_travel_stop(stop):
-                stop["tip"] = ""
+                # Keep short travel tip (arrive time); drop fluff
+                tip = str(stop.get("tip") or "").strip()
+                stop["tip"] = tip if tip.startswith("Çatış") or tip.startswith("Evə") else ""
             elif not (stop.get("tip") or "").strip():
-                stop["tip"] = sanitize_tip_text(_tip_for_stop(stop))
+                stop["tip"] = ""
             else:
                 stop["tip"] = sanitize_tip_text(str(stop.get("tip") or ""))
             stops.append(stop)
@@ -1018,15 +1112,15 @@ DAYPART / KATEQORİYA QAYDALARI (tip yazarkən MÜTLƏQ):
 FIXED_ITINERARY:
 {json.dumps(skeleton, ensure_ascii=False)}
 
-Cavab YALNIZ JSON:
+Cavab YALNIZ JSON (qısa — artıq mətn YAZMA):
 {{
-  "summary": "1-2 cümlə",
-  "best_time": "qısa",
+  "summary": "{region_label} · {days} gün",
+  "best_time": "",
   "days": [
     {{
       "day": 1,
-      "notes": "qısa qeyd",
-      "stops": [{{"poi_id": "…", "tip": "daypart/category-yə uyğun və ya boş"}}]
+      "notes": "",
+      "stops": [{{"poi_id": "…", "tip": "max 8 söz və ya boş"}}]
     }}
   ]
 }}"""
@@ -1071,10 +1165,9 @@ def _merge_tips(
     days: int,
 ) -> dict[str, Any]:
     plan = template_enrich(plan, region_label=region_label, days=days)
-    if tips.get("summary"):
-        plan["summary"] = str(tips["summary"]).strip()
-    if tips.get("best_time"):
-        plan["best_time"] = str(tips["best_time"]).strip()
+    # Keep compact title; ignore long Claude summary / best_time fluff
+    plan["summary"] = f"{region_label} · {days} gün"
+    plan["best_time"] = ""
 
     tip_days = {
         int(d.get("day")): d for d in (tips.get("days") or []) if d.get("day") is not None
@@ -1083,8 +1176,7 @@ def _merge_tips(
     for day in plan.get("days") or []:
         day = dict(day)
         tip_day = tip_days.get(int(day.get("day") or 0))
-        if tip_day and tip_day.get("notes"):
-            day["notes"] = str(tip_day["notes"]).strip()
+        # Do not replace skeleton travel notes with Claude filler
         tip_map = {
             str(s.get("poi_id")): str(s.get("tip") or "").strip()
             for s in (tip_day or {}).get("stops") or []
@@ -1094,17 +1186,16 @@ def _merge_tips(
         for stop in day.get("stops") or []:
             stop = dict(stop)
             if _is_travel_stop(stop):
-                stop["tip"] = ""
+                tip = str(stop.get("tip") or "").strip()
+                stop["tip"] = tip if tip.startswith("Çatış") or tip.startswith("Evə") else ""
                 stops.append(stop)
                 continue
             pid = str(stop.get("poi_id") or "")
             tip = tip_map.get(pid) or ""
-            if tip and not _claude_tip_mismatch(stop, tip):
+            if tip and not _claude_tip_mismatch(stop, tip) and len(tip.split()) <= 12:
                 stop["tip"] = sanitize_tip_text(tip)
             else:
-                # Mismatch / empty Claude → category tip or empty (never generic visit fluff)
-                stop["tip"] = sanitize_tip_text(_tip_for_stop(stop))
-            # Defense: never show forbidden-script place names in the plan list
+                stop["tip"] = ""
             if name_has_forbidden_script(str(stop.get("name") or "")):
                 stop["tip"] = ""
             stops.append(stop)

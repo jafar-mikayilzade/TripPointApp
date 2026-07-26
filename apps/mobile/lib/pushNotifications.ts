@@ -1,12 +1,25 @@
-import { Platform } from 'react-native';
+import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
 
 import { supabase } from './supabase';
 
+/** True only when native binary includes expo-notifications. */
+function hasPushNativeModule(): boolean {
+  if (NativeModules.ExpoPushTokenManager || NativeModules.ExpoNotifications) {
+    return true;
+  }
+  try {
+    return TurboModuleRegistry.get('ExpoPushTokenManager') != null;
+  } catch {
+    return false;
+  }
+}
+
 /** Register Expo push token on profile (no-op if native module missing). */
 export async function registerExpoPushToken(userId: string): Promise<void> {
-  if (Platform.OS === 'web') {
+  if (Platform.OS === 'web' || !hasPushNativeModule()) {
     return;
   }
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Notifications = require('expo-notifications') as typeof import('expo-notifications');
@@ -32,7 +45,7 @@ export async function registerExpoPushToken(userId: string): Promise<void> {
       .update({ expo_push_token: token })
       .eq('id', userId);
   } catch {
-    // Native module / permission — skip until rebuild with expo-notifications
+    // Permission / Expo Go without native module — skip until rebuild
   }
 }
 

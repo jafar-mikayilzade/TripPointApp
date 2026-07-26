@@ -100,8 +100,31 @@ export async function fetchGooglePlaceRating(placeId: string): Promise<GooglePla
     ratingCount: null,
     suggestedCategory: null,
   };
+  if (!placeId) {
+    return empty;
+  }
+
+  // Web: Places API (New) via Place.fetchFields — no PlacesService, no CORS
+  if (typeof document !== 'undefined') {
+    try {
+      const { fetchPlaceDetailsWeb } = await import('./googlePlaceDetails');
+      const viaJs = await fetchPlaceDetailsWeb(placeId);
+      if (viaJs.name || viaJs.rating != null || viaJs.types.length > 0) {
+        return {
+          name: viaJs.name,
+          rating: viaJs.rating,
+          ratingCount: viaJs.ratingCount,
+          suggestedCategory: mapGoogleTypesToCategory(viaJs.types),
+        };
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // Native / fallback: server-side REST (may fail in browser CORS)
   const key = getGoogleMapsKey();
-  if (!placeId || !key) {
+  if (!key) {
     return empty;
   }
 
@@ -235,6 +258,7 @@ export async function insertApprovedPoiFromGoogle(params: {
       address: null,
       phone: null,
       website,
+      place_id: params.placeId?.trim() || null,
       rating,
       rating_count,
     })

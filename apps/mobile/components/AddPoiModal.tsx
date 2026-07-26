@@ -15,7 +15,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import MapView, { Marker, type MapPressEvent } from './AppMap';
+import MapView, { Marker, PROVIDER_GOOGLE, type MapPressEvent } from './AppMap';
 
 import { DEFAULT_REGION_ID, REGIONS } from '../constants/regions';
 import { getErrorMessage } from '../lib/errors';
@@ -401,6 +401,13 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
               <View style={styles.miniMapWrap}>
                 <MapView
                   style={styles.miniMap}
+                  provider={PROVIDER_GOOGLE}
+                  {...(Platform.OS === 'web'
+                    ? {
+                        googleMapsApiKey:
+                          process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY || undefined,
+                      }
+                    : {})}
                   initialRegion={{
                     latitude: lat ?? selectedRegion.latitude,
                     longitude: lng ?? selectedRegion.longitude,

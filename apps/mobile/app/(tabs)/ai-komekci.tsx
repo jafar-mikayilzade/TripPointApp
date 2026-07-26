@@ -834,7 +834,13 @@ export default function AiKomekciScreen() {
                 key="manual-route-map"
                 ref={mapRef as never}
                 style={styles.map}
-                provider={Platform.OS === 'web' ? undefined : PROVIDER_GOOGLE}
+                provider={PROVIDER_GOOGLE}
+                {...(Platform.OS === 'web'
+                  ? {
+                      googleMapsApiKey:
+                        process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY || undefined,
+                    }
+                  : {})}
                 initialRegion={
                   regionMeta
                     ? {
