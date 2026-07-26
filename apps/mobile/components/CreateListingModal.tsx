@@ -32,6 +32,7 @@ import {
 } from '../lib/formValidation';
 import { isBeforeSelectableHour, nextSelectableHour } from '../lib/listingSchedule';
 import { notifyOrganizerNewTour } from '../lib/subscriptions';
+import { trackEvent } from '../lib/trackEvent';
 import { supabase } from '../lib/supabase';
 import type {
   ListingPriceType,
@@ -517,13 +518,17 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
             setFieldErrors({
               submit: `Elan yaradıldı, amma marşrut yerləri yazılmadı: ${getErrorMessage(poisError)}`,
             });
-            if (listingType === 'tour') {
-              void notifyOrganizerNewTour({
-                organizerId: user.id,
-                listingId,
-                title: resolvedTitle,
-              });
-            }
+            void notifyOrganizerNewTour({
+              organizerId: user.id,
+              listingId,
+              title: resolvedTitle,
+              region: payload.region,
+            });
+            void trackEvent('listing_create', {
+              listingId,
+              type: listingType,
+              region: payload.region,
+            });
             onCreated();
             onClose();
             return;
@@ -531,13 +536,17 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
         }
       }
 
-      if (listingType === 'tour') {
-        void notifyOrganizerNewTour({
-          organizerId: user.id,
-          listingId,
-          title: resolvedTitle,
-        });
-      }
+      void notifyOrganizerNewTour({
+        organizerId: user.id,
+        listingId,
+        title: resolvedTitle,
+        region: payload.region,
+      });
+      void trackEvent('listing_create', {
+        listingId,
+        type: listingType,
+        region: payload.region,
+      });
 
       onCreated();
       onClose();

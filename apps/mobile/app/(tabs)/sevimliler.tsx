@@ -53,7 +53,7 @@ type TabId = 'listings' | 'pois' | 'routes' | 'subscriptions' | 'notifications';
 const TABS: { id: TabId; label: string }[] = [
   { id: 'listings', label: 'Elanlar' },
   { id: 'pois', label: 'Yerlər' },
-  { id: 'routes', label: 'Marşrutlar' },
+  { id: 'routes', label: 'Marşrutlarım' },
   { id: 'subscriptions', label: 'Abunə' },
   { id: 'notifications', label: 'Bildiriş' },
 ];
@@ -150,13 +150,13 @@ export default function SevimlilerScreen() {
         const creatorIds = [...new Set(rows.map((r) => r.created_by))];
         const { data: profiles } = await supabase
           .from('profiles')
-          .select('id, full_name, avatar_url, phone')
+          .select('id, full_name, avatar_url, phone, is_verified')
           .in('id', creatorIds);
 
         const profileMap = new Map(
           (profiles ?? []).map((p) => [
             p.id,
-            p as Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'phone'>,
+            p as Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'phone' | 'is_verified'>,
           ])
         );
 
@@ -269,7 +269,7 @@ export default function SevimlilerScreen() {
     if (data.created_by) {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('id, full_name, avatar_url, phone')
+        .select('id, full_name, avatar_url, phone, is_verified')
         .eq('id', data.created_by)
         .maybeSingle();
       creator = profile ?? null;
@@ -305,7 +305,7 @@ export default function SevimlilerScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <ScreenHeader
         title="sevimlilər"
-        subtitle="Bookmark · marşrut · abunə"
+        subtitle="Bookmark · Marşrutlarım · abunə"
         style={{ paddingHorizontal: padH }}
         right={<ProfileCornerButton />}
       />
@@ -319,7 +319,7 @@ export default function SevimlilerScreen() {
                 {
                   listings: 'Elan',
                   pois: 'Yer',
-                  routes: 'Marşrut',
+                  routes: 'Marşrutlarım',
                   subscriptions: 'Abunə',
                   notifications: 'Bildiriş',
                 } as const
@@ -418,9 +418,9 @@ export default function SevimlilerScreen() {
           onRefresh={() => void load()}
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>Saxlanmış marşrut yoxdur</Text>
+              <Text style={styles.emptyTitle}>Marşrutlarınız boşdur</Text>
               <Text style={styles.emptySubtitle}>
-                Qur və ya Marşrut ekranında bookmark ilə saxlayın
+                Qur və ya Marşrut ekranında bookmark ilə «Marşrutlarım»a əlavə edin
               </Text>
             </View>
           }

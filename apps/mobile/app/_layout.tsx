@@ -18,10 +18,14 @@ import {
   setPasswordRecoveryPending,
   subscribePasswordRecovery,
 } from '../lib/passwordRecovery';
+import { registerExpoPushToken } from '../lib/pushNotifications';
+import { initSentry } from '../lib/sentry';
 import { supabase } from '../lib/supabase';
 
 import { InfoToastProvider } from '../components/InfoToastProvider';
 import { colors } from '../constants/theme';
+
+initSentry();
 
 const SESSION_TIMEOUT_MS = 8000;
 
@@ -113,6 +117,7 @@ export default function RootLayout() {
 
       if (isActive) {
         setSession(nextSession);
+        void registerExpoPushToken(user.id);
       }
     }
 

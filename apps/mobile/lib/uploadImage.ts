@@ -1,5 +1,4 @@
 import { decode } from 'base64-arraybuffer';
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 // Expo SDK 57: readAsStringAsync / EncodingType yalnız legacy API-də mövcuddur.
 import * as FileSystem from 'expo-file-system/legacy';
 
@@ -36,19 +35,29 @@ async function uploadFile(
   return data.publicUrl;
 }
 
+/**
+ * Lazy-load native manipulator — köhnə dev-client-də top-level import app-i çökdürür.
+ */
 async function resizeToJpeg(
   uri: string,
   width: number,
   compress: number
-): Promise<string> {
-  const context = ImageManipulator.manipulate(uri);
-  context.resize({ width });
-  const rendered = await context.renderAsync();
-  const saved = await rendered.saveAsync({
-    format: SaveFormat.JPEG,
-    compress,
-  });
-  return saved.uri;
+): Promise<string | null> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ImageManipulator = require('expo-image-manipulator') as typeof import('expo-image-manipulator');
+    const result = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width } }],
+      {
+        compress,
+        format: ImageManipulator.SaveFormat.JPEG,
+      }
+    );
+    return result.uri;
+  } catch {
+    return null;
+  }
 }
 
 /** Tək fayl yüklə (avatar və s.). */
@@ -66,16 +75,23 @@ export async function uploadImage(
  * thumb / medium / original variantları yaradıb Storage-ə yükləyir.
  * `basePath` uzantısız olmalıdır, məs: `userId/poiId-0`
  *
- * Qeyd: expo-image-manipulator native modul — production / yeni dev-client rebuild lazımdır.
+ * Native modul yoxdursa eyni URL hər üç sahəyə yazılır (app işləməyə davam edir).
+ * Tam variantlar üçün yeni native build lazımdır.
  */
 export async function uploadImageVariants(
   uri: string,
   bucket: string,
   basePath: string
 ): Promise<ImageVariantUrls> {
-  const originalUri = await resizeToJpeg(uri, 1600, 0.72);
-  const mediumUri = await resizeToJpeg(uri, 800, 0.7);
-  const thumbUri = await resizeToJpeg(uri, 150, 0.65);
+  const originalUri = (await resizeToJpeg(uri, 1600, 0.72)) ?? uri;
+  const mediumUri = (await resizeToJpeg(uri, 800, 0.7)) ?? originalUri;
+  const thumbUri = (await resizeToJpeg(uri, 150, 0.65)) ?? mediumUri;
+
+  // Manipulator yoxdursa bir dəfə yüklə, üç URL eyni olsun
+  if (originalUri === uri && mediumUri === uri && thumbUri === uri) {
+    const url = await uploadFile(uri, bucket, `${basePath}.jpg`);
+    return { original: url, medium: url, thumb: url };
+  }
 
   const [original, medium, thumb] = await Promise.all([
     uploadFile(originalUri, bucket, `${basePath}.jpg`),

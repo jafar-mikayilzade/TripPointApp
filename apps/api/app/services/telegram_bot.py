@@ -1,17 +1,24 @@
 """Telegram user bot — guest + optional app link + AI/manual (inline UX).
 
-Production note: replace _SESSIONS / _LAST_PLANS with DB/Redis for multi-worker.
+Sessions persist in Supabase `bot_sessions` (survives Railway restart).
 # TODO: optional email OTP (not required).
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.constants.regions import REGION_DB_ID
 from app.db import supabase
+from app.services.bot_sessions import (
+    clear_session as _db_clear_session,
+    get_last_plan,
+    load_session,
+    save_last_plan,
+    save_session,
+)
 from app.services.plan_route_run import (
     BOT_REGION_KEYS,
     REGION_EMOJI,
@@ -27,8 +34,8 @@ from app.services.telegram_notify import (
 
 logger = logging.getLogger(__name__)
 
-_SESSIONS: dict[str, dict[str, Any]] = {}
-_LAST_PLANS: dict[str, str] = {}
+# Request-local cache; flushed to Postgres at end of each update
+_SESSION_CACHE: dict[str, dict[str, Any]] = {}
 
 MAX_MANUAL_STOPS = 8
 POI_PAGE_SIZE = 8
@@ -115,17 +122,35 @@ def _edit_or_reply(
 
 
 def _clear_session(chat_id: str | int) -> None:
-    _SESSIONS.pop(_chat_key(chat_id), None)
+    key = _chat_key(chat_id)
+    _SESSION_CACHE.pop(key, None)
+    _db_clear_session(chat_id)
 
 
 def _get_session(chat_id: str | int) -> dict[str, Any]:
-    return _SESSIONS.setdefault(
-        _chat_key(chat_id), {"mode": "idle", "step": None, "data": {}}
-    )
+    key = _chat_key(chat_id)
+    if key not in _SESSION_CACHE:
+        _SESSION_CACHE[key] = load_session(key)
+    return _SESSION_CACHE[key]
+
+
+def _set_session(chat_id: str | int, session: dict[str, Any]) -> None:
+    key = _chat_key(chat_id)
+    _SESSION_CACHE[key] = session
+    save_session(key, session)
+
+
+def _flush_session(chat_id: str | int) -> None:
+    key = _chat_key(chat_id)
+    if key in _SESSION_CACHE:
+        save_session(key, _SESSION_CACHE[key])
 
 
 def _save_last(chat_id: str | int, text: str) -> None:
-    _LAST_PLANS[_chat_key(chat_id)] = text
+    save_last_plan(chat_id, text)
+    # Keep cache in sync
+    session = _get_session(chat_id)
+    session["last_plan"] = text
 
 
 def _is_admin_user(user_id: str | None) -> bool:
@@ -145,6 +170,85 @@ def _is_admin_user(user_id: str | None) -> bool:
     except Exception:
         logger.exception("lookup admin role failed")
         return False
+
+
+def _resolve_profile_id(email_or_id: str) -> str | None:
+    key = (email_or_id or "").strip()
+    if not key:
+        return None
+    try:
+        if "@" in key:
+            rows = (
+                supabase.table("profiles")
+                .select("id")
+                .ilike("email", key)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+        else:
+            rows = (
+                supabase.table("profiles")
+                .select("id")
+                .eq("id", key)
+                .limit(1)
+                .execute()
+                .data
+                or []
+            )
+        if rows and rows[0].get("id"):
+            return str(rows[0]["id"])
+    except Exception:
+        logger.exception("resolve profile failed %s", key)
+    return None
+
+
+def _admin_set_verified(email_or_id: str, *, verified: bool) -> tuple[bool, str]:
+    pid = _resolve_profile_id(email_or_id)
+    if not pid:
+        return False, "Profil tapılmadı."
+    patch: dict[str, Any] = {
+        "is_verified": verified,
+        "verified_at": datetime.now(timezone.utc).isoformat() if verified else None,
+    }
+    try:
+        supabase.table("profiles").update(patch).eq("id", pid).execute()
+        return True, ("Təsdiqləndi: " if verified else "Təsdiq götürüldü: ") + pid
+    except Exception:
+        logger.exception("set verified failed")
+        return False, "Yeniləmə uğursuz oldu."
+
+
+def _admin_set_sponsored(
+    poi_id: str, *, sponsored: bool, days: int = 30
+) -> tuple[bool, str]:
+    pid = (poi_id or "").strip()
+    if not pid:
+        return False, "poi_uuid lazımdır."
+    until = None
+    if sponsored:
+        until = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+    patch: dict[str, Any] = {
+        "is_sponsored": sponsored,
+        "sponsor_until": until,
+    }
+    try:
+        res = supabase.table("pois").update(patch).eq("id", pid).execute()
+        if not (res.data or []):
+            # some clients return empty data; verify exists
+            check = (
+                supabase.table("pois").select("id").eq("id", pid).limit(1).execute().data
+                or []
+            )
+            if not check:
+                return False, "POI tapılmadı."
+        if sponsored:
+            return True, f"Sponsor aktiv: {pid} ({days} gün)"
+        return True, f"Sponsor silindi: {pid}"
+    except Exception:
+        logger.exception("set sponsored failed")
+        return False, "Yeniləmə uğursuz oldu."
 
 
 def _main_keyboard(chat_id: str | int) -> dict[str, Any]:
@@ -399,6 +503,10 @@ def _help_text(chat_id: str | int) -> str:
         lines.append(f"{BTN_FAVS} — Elanlar / Yerlər / Marşrutlar / Abunə / Bildiriş")
         if _is_admin_user(user_id):
             lines.append(f"{BTN_ADMIN} — Məkan / Şəkil / Şikayət növbələri")
+            lines.append("/verify email|uuid — profil badge")
+            lines.append("/unverify email|uuid")
+            lines.append("/sponsor poi_uuid [gün] — sponsor (default 30)")
+            lines.append("/unsponsor poi_uuid")
     else:
         lines.append(f"{BTN_LINK_APP} — opsional app birləşdirmə")
     return "\n".join(lines)
@@ -788,11 +896,14 @@ def _show_ai_home(
     message_id: int | None = None,
 ) -> None:
     """AI starts directly with region select (no preset templates)."""
-    _SESSIONS[_chat_key(chat_id)] = {
-        "mode": "ai",
-        "step": "region",
-        "data": {"interests": [], "group_type": "solo"},
-    }
+    _set_session(
+        chat_id,
+        {
+            "mode": "ai",
+            "step": "region",
+            "data": {"interests": [], "group_type": "solo"},
+        },
+    )
     _edit_or_reply(
         chat_id,
         "🤖 AI marşrut — region seçin:",
@@ -931,11 +1042,14 @@ def _show_manual_poi_page(
 
 
 def _start_manual(chat_id: str | int, message_id: int | None = None) -> None:
-    _SESSIONS[_chat_key(chat_id)] = {
-        "mode": "manual",
-        "step": "region",
-        "data": {"stops": []},
-    }
+    _set_session(
+        chat_id,
+        {
+            "mode": "manual",
+            "step": "region",
+            "data": {"stops": []},
+        },
+    )
     _edit_or_reply(
         chat_id,
         "🗺️ Manual marşrut — region seçin:",
@@ -1673,8 +1787,20 @@ def _handle_manual_text(chat_id: str | int, text: str, session: dict[str, Any]) 
     )
 
 
+def _extract_chat_id(update: dict[str, Any]) -> str | int | None:
+    cq = update.get("callback_query") or {}
+    if cq:
+        message = cq.get("message") or {}
+        chat = message.get("chat") or {}
+        return chat.get("id")
+    message = update.get("message") or update.get("edited_message") or {}
+    chat = message.get("chat") or {}
+    return chat.get("id")
+
+
 def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
     """Process one Telegram Update. Never raises to caller."""
+    chat_id = _extract_chat_id(update)
     try:
         if update.get("callback_query"):
             return _handle_callback(update)
@@ -1796,8 +1922,45 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
             _show_admin_home(chat_id)
             return {"ok": True}
 
+        lower = text.lower()
+        if lower.startswith("/verify") or lower.startswith("/unverify"):
+            user_id = _lookup_user_id(chat_id)
+            if not _is_admin_user(user_id):
+                _reply(chat_id, "Yalnız admin.", reply_markup=_main_keyboard(chat_id))
+                return {"ok": True}
+            parts = text.split(maxsplit=1)
+            if len(parts) < 2 or not parts[1].strip():
+                _reply(chat_id, "İstifadə: /verify email|uuid")
+                return {"ok": True}
+            ok, msg = _admin_set_verified(parts[1].strip(), verified=lower.startswith("/verify"))
+            _reply(chat_id, msg, reply_markup=_main_keyboard(chat_id))
+            return {"ok": True}
+
+        if lower.startswith("/sponsor") or lower.startswith("/unsponsor"):
+            user_id = _lookup_user_id(chat_id)
+            if not _is_admin_user(user_id):
+                _reply(chat_id, "Yalnız admin.", reply_markup=_main_keyboard(chat_id))
+                return {"ok": True}
+            parts = text.split()
+            if len(parts) < 2:
+                _reply(chat_id, "İstifadə: /sponsor poi_uuid [gün] | /unsponsor poi_uuid")
+                return {"ok": True}
+            days = 30
+            if lower.startswith("/sponsor") and len(parts) >= 3:
+                try:
+                    days = max(1, min(365, int(parts[2])))
+                except ValueError:
+                    days = 30
+            ok, msg = _admin_set_sponsored(
+                parts[1].strip(),
+                sponsored=lower.startswith("/sponsor"),
+                days=days,
+            )
+            _reply(chat_id, msg, reply_markup=_main_keyboard(chat_id))
+            return {"ok": True}
+
         if text == BTN_LAST or text.lower() in {"/last", "son"}:
-            last = _LAST_PLANS.get(_chat_key(chat_id))
+            last = get_last_plan(chat_id)
             if last:
                 _reply(chat_id, last, reply_markup=_ai_result_keyboard())
             else:
@@ -1826,3 +1989,6 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
     except Exception:
         logger.exception("handle_telegram_update failed")
         return {"ok": True, "error": True}
+    finally:
+        if chat_id is not None:
+            _flush_session(chat_id)

@@ -142,7 +142,7 @@ export default function IcmaScreen() {
     const creatorIds = [...new Set(rows.map((row) => row.created_by))];
     const { data: profiles, error: profilesError } = await supabase
       .from('profiles')
-      .select('id, full_name, avatar_url, phone')
+      .select('id, full_name, avatar_url, phone, is_verified')
       .in('id', creatorIds);
 
     if (profilesError) {
@@ -155,7 +155,7 @@ export default function IcmaScreen() {
     const profileMap = new Map(
       (profiles ?? []).map((profile) => [
         profile.id,
-        profile as Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'phone'>,
+        profile as Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'phone' | 'is_verified'>,
       ])
     );
 

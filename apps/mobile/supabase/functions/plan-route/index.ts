@@ -1,7 +1,8 @@
 /**
- * DEPRECATED as primary planner.
- * Mobile now calls FastAPI POST /api/plan-route (Haversine NN + optional Claude tips).
- * This Edge Function remains as offline/fallback when EXPO_PUBLIC_API_URL is unreachable.
+ * DEPRECATED — do not call from mobile.
+ * Single source of truth: FastAPI POST /api/plan-route.
+ * Kept only for emergency manual invoke / historical reference.
+ * Dual-algorithm fallback was removed to avoid parity bugs.
  */
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 

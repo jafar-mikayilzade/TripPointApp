@@ -28,6 +28,10 @@ def build_weekly_stats() -> dict[str, Any]:
         "top_region": None,
         "pending_pois": 0,
         "pending_photos": 0,
+        "events_plan_route": 0,
+        "events_favorite_add": 0,
+        "events_listing_create": 0,
+        "events_listing_join": 0,
     }
 
     try:
@@ -112,6 +116,24 @@ def build_weekly_stats() -> dict[str, Any]:
     except Exception:
         logger.exception("weekly pending_photos failed")
 
+    for event_name, key in (
+        ("plan_route_success", "events_plan_route"),
+        ("favorite_add", "events_favorite_add"),
+        ("listing_create", "events_listing_create"),
+        ("listing_join", "events_listing_join"),
+    ):
+        try:
+            res = (
+                supabase.table("app_events")
+                .select("id", count="exact")
+                .eq("name", event_name)
+                .gte("created_at", since)
+                .execute()
+            )
+            stats[key] = res.count if res.count is not None else len(res.data or [])
+        except Exception:
+            logger.exception("weekly app_events %s failed", event_name)
+
     return stats
 
 
@@ -124,7 +146,11 @@ def format_weekly_report(stats: dict[str, Any]) -> str:
         f"(tur: {stats.get('tour_listings', 0)}, carpool: {stats.get('carpool_listings', 0)})\n"
         f"Aktiv elan (ümumi): {stats.get('active_listings', 0)}\n"
         f"Ən aktiv region (yeni elanlar): {top}\n"
-        f"Gözləyən POI / şəkil: {stats.get('pending_pois', 0)} / {stats.get('pending_photos', 0)}"
+        f"Gözləyən POI / şəkil: {stats.get('pending_pois', 0)} / {stats.get('pending_photos', 0)}\n"
+        f"Events (7g): route={stats.get('events_plan_route', 0)} "
+        f"fav={stats.get('events_favorite_add', 0)} "
+        f"create={stats.get('events_listing_create', 0)} "
+        f"join={stats.get('events_listing_join', 0)}"
     )
 
 

@@ -64,6 +64,10 @@ TELEGRAM_WEBHOOK_SECRET = _raw_tg_webhook.strip('"').strip("'") or None
 _raw_cron = (os.getenv("CRON_SECRET") or "").strip()
 CRON_SECRET = _raw_cron.strip('"').strip("'") or None
 
+# Optional Sentry (API)
+_raw_sentry = (os.getenv("SENTRY_DSN") or "").strip()
+SENTRY_DSN = _raw_sentry.strip('"').strip("'") or None
+
 
 def validate_settings() -> None:
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:

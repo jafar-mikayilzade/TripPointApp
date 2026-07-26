@@ -36,11 +36,15 @@ Yalnız Supabase Auth (email / Google). Python auth etmir.
 
 | Priority | Endpoint | Notes |
 |----------|----------|--------|
-| **Primary** | FastAPI `POST /api/plan-route` | Geo itinerary (Haversine NN), optional Claude tips, live Google candidates, `varietySeed` / travel window |
-| **Fallback** | Supabase Edge `plan-route` | Yalnız FastAPI əlçatan deyilsə (`EXPO_PUBLIC_API_URL` yox / 5xx / network). Edge-də fromOrigin / varietySeed tam dəstəklənməyə bilər |
+| **Only** | FastAPI `POST /api/plan-route` | Geo itinerary (Haversine NN), optional Claude tips, live Google candidates, `varietySeed` / travel window |
+| ~~Edge~~ | Supabase Edge `plan-route` | **Deprecated** — mobile çağırmır (parity riski). Emergency reference only. |
 
-Mobile: `apps/mobile/lib/planRoute.ts` — əvvəl FastAPI, uğursuz olsa Edge.  
-Edge faylı: `apps/mobile/supabase/functions/plan-route` (primary deyil).
+Mobile: `apps/mobile/lib/planRoute.ts` — FastAPI + bir retry; API yoxdursa açıq xəta.
+
+### Rate limit + live cache
+
+- In-memory IP limits: `plan-route` 5/min, `live-places` 30/min, `sync-places` 10/min, `pois/upsert-google-place` 20/min (`app/rate_limit.py`).
+- `live-places` viewport/region TTL ~12 dəq (`live_home_places.py`). Multi-worker üçün sonra Redis.
 
 ### Live places / cafe
 
@@ -123,7 +127,7 @@ Secret: header `X-Cron-Secret` = `CRON_SECRET` (yoxdursa `TELEGRAM_NOTIFY_SECRET
 
 | Endpoint | Tövsiyə olunan cədvəl | İş |
 |----------|----------------------|-----|
-| `POST /api/jobs/nightly` | hər gün 03:00 UTC | 30g+ pending POI/foto sil; `departure_at` keçmiş `active` → `completed`; `spots_left` yenilə; `profiles.rating_avg` |
+| `POST /api/jobs/nightly` | hər gün 03:00 UTC | pending cleanup; expired listings; spots; rating_avg; **dublikat POI Telegram alert** (silmir) |
 | `POST /api/jobs/enrich-places?limit=50` | hər gecə | Google Place Details (phone/website/description/opening_hours) — max 50/run |
 | `POST /api/jobs/weekly-report` | bazar ertəsi 08:00 UTC | Admin Telegram həftəlik stats |
 
@@ -133,8 +137,80 @@ Nümunə (curl):
 curl -X POST "$API_URL/api/jobs/nightly" -H "X-Cron-Secret: $CRON_SECRET"
 ```
 
+## Push + events + bot sessions
+
+| Piece | Where |
+|-------|--------|
+| Expo push token | `profiles.expo_push_token` — mobile `registerExpoPushToken` on session |
+| Push send | FastAPI `POST /api/notify/push` + `push_notify.py` |
+| Smart abunə | `subscriptions.ts` — organizer + region fans + Telegram/push mirror; listing spam-guard |
+| Notify auth | Mobile `EXPO_PUBLIC_NOTIFY_SECRET` → header `X-Notify-Secret` (= Railway `TELEGRAM_NOTIFY_SECRET` or `CRON_SECRET`) |
+| Product events | `app_events` + mobile `trackEvent` (`plan_route_success`, `favorite_add`, `listing_create`, `listing_join`) |
+| Bot sessions | `bot_sessions` table — API service role only; survives Railway restart |
+| Live Google → favorite | FastAPI `POST /api/pois/upsert-google-place` (service role) then favorite |
+
+Migration: `apps/mobile/supabase/migrations/20260726_backlog_push_events_sessions_sponsor.sql`
+
+## Sponsored POI + verified badge
+
+- `pois.is_sponsored` / `sponsor_until` — home siyahıda sponsorlar əvvəl; UI «Sponsor» chip
+- `profiles.is_verified` / `verified_at` — profil + elan creator badge
+- Telegram admin (linked admin): `/verify`, `/unverify`, `/sponsor`, `/unsponsor`
+
+## Observability
+
+- API: optional `SENTRY_DSN` → `sentry-sdk` in `factory.py`
+- Mobile: `lib/sentry.ts` no-op stub until `@sentry/react-native` + DSN + rebuild
+
+## FINAL STATUS (backlog STEP 0–15)
+
+| STEP | Status |
+|------|--------|
+| 0 Baseline | ✅ |
+| 1 Release hygiene | ✅ |
+| 2 Live POI → favorite | ✅ |
+| 3 Rate limiting | ✅ |
+| 4 live-places TTL cache | ✅ |
+| 5 plan-route single source | ✅ |
+| 6 Push notifications | ✅ (native rebuild + migration lazımdır) |
+| 7 Smart abunə notify | ✅ |
+| 8 Marşrutlarım UX | ✅ |
+| 9 Sentry | ✅ API optional; mobile stub |
+| 10 app_events + trackEvent | ✅ |
+| 11 bot_sessions Postgres | ✅ (migration apply) |
+| 12 Sponsored POI | ✅ |
+| 13 Verified badge | ✅ |
+| 14 Enrich UX + dup flag | ✅ (hours label + nightly Telegram) |
+| 15 Docs | ✅ |
+
+**Deploy checklist (manual):**
+
+1. Supabase-də migration-ları tətbiq et (`20260726_photo_variants…`, `20260726_backlog_push…`)
+2. Railway: `CRON_SECRET`, `TELEGRAM_NOTIFY_SECRET`, optional `SENTRY_DSN`
+3. Mobile `.env`: `EXPO_PUBLIC_NOTIFY_SECRET` = eyni `TELEGRAM_NOTIFY_SECRET` dəyəri
+4. Mobile: `npx expo prebuild` / EAS rebuild (`expo-notifications`, image manipulator)
+5. Cron: nightly + enrich + weekly-report
+6. Manual smoke: live POI → favorit; plan-route; listing create → abunə bildiriş; `/verify` + `/sponsor` bot
+
+### Manual test script
+
+```bash
+# Jobs (secret required → 401 without)
+curl -i -X POST "$API_URL/api/jobs/nightly"
+curl -X POST "$API_URL/api/jobs/nightly" -H "X-Cron-Secret: $CRON_SECRET"
+
+# Push (secret if configured)
+curl -X POST "$API_URL/api/notify/push" \
+  -H "Content-Type: application/json" \
+  -H "X-Notify-Secret: $TELEGRAM_NOTIFY_SECRET" \
+  -d '{"user_ids":["USER_UUID"],"title":"Test","body":"TripPoint"}'
+```
+
+App: Expo start → live marker favorit → DB id; Sevimlilər → Marşrutlarım; Profil verified badge (admin `/verify`).
+
 ## Non-goals (don't break)
 
 - Auth rewrite
 - Listings/feed-i Python-a keçirmək (ayrı task olmadan)
 - Google Places və ya service role key-i Expo app-ə qoymaq
+- Scraper, OCR, OR-Tools, Redis, Trip Chat, full offline, business claim panel

@@ -33,6 +33,7 @@ import {
   PoiMarkerBubble,
   shouldTrackMarkerViewChanges,
 } from '../../components/PoiMapMarker';
+import { FavoriteButton } from '../../components/FavoriteButton';
 import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
 import { useToast } from '../../components/Toast';
@@ -49,6 +50,7 @@ import {
   type HomeCategoryFilterId,
 } from '../../lib/categoryUtils';
 import { getErrorMessage } from '../../lib/errors';
+import { isPoiSponsored, summarizeOpeningHours } from '../../lib/openingHours';
 import { pickPhotoUrl } from '../../lib/photoUrls';
 import {
   fetchRegionWeather,
@@ -289,6 +291,11 @@ export default function HomeScreen() {
     });
 
     mapped.sort((a, b) => {
+      const sa = isPoiSponsored(a) ? 1 : 0;
+      const sb = isPoiSponsored(b) ? 1 : 0;
+      if (sb !== sa) {
+        return sb - sa;
+      }
       const ra = a.averageRating ?? -1;
       const rb = b.averageRating ?? -1;
       if (rb !== ra) {
@@ -1108,7 +1115,24 @@ export default function HomeScreen() {
           bottom={
             <View style={styles.listPane}>
               {selectedPoi ? (
-                <SelectedPoiPanel poi={selectedPoi} onBack={clearSelectedPoi} />
+                <SelectedPoiPanel
+                  poi={selectedPoi}
+                  onBack={clearSelectedPoi}
+                  onPoiIdResolved={(previousId, dbId) => {
+                    setSelectedPoi((current) =>
+                      current && current.id === previousId
+                        ? { ...current, id: dbId, place_id: current.place_id || previousId }
+                        : current
+                    );
+                    setPois((current) =>
+                      current.map((item) =>
+                        item.id === previousId
+                          ? { ...item, id: dbId, place_id: item.place_id || previousId }
+                          : item
+                      )
+                    );
+                  }}
+                />
               ) : (
                 <>
                   <View style={styles.listHeader}>
@@ -1293,7 +1317,15 @@ export default function HomeScreen() {
   );
 }
 
-function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
+function SelectedPoiPanel({
+  poi,
+  onBack,
+  onPoiIdResolved,
+}: {
+  poi: Poi;
+  onBack: () => void;
+  onPoiIdResolved?: (previousId: string, dbId: string) => void;
+}) {
   const initialRating =
     typeof (poi as PoiListItem).averageRating === 'number'
       ? (poi as PoiListItem).averageRating
@@ -1432,7 +1464,31 @@ function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
         <TouchableOpacity onPress={onBack} hitSlop={8} style={styles.backButton}>
           <Text style={styles.backButtonText}>← Geri</Text>
         </TouchableOpacity>
-        <View style={[styles.categoryBadge, { maxWidth: '70%' }]}>
+        <FavoriteButton
+          targetType="poi"
+          targetId={poi.id}
+          size={18}
+          liveSeed={
+            isDatabasePoiId(poi.id)
+              ? null
+              : {
+                  place_id: poi.place_id || poi.id,
+                  name: poi.name,
+                  lat: poi.lat,
+                  lng: poi.lng,
+                  category: poi.category,
+                  region: poi.region,
+                  rating: poi.rating,
+                  rating_count: poi.rating_count,
+                }
+          }
+          onResolvedId={(dbId) => {
+            if (dbId !== poi.id) {
+              onPoiIdResolved?.(poi.id, dbId);
+            }
+          }}
+        />
+        <View style={[styles.categoryBadge, { maxWidth: '55%' }]}>
           <CategoryIcon
             category={poi.category}
             size={12}
@@ -1444,15 +1500,42 @@ function SelectedPoiPanel({ poi, onBack }: { poi: Poi; onBack: () => void }) {
         </View>
       </View>
 
-      <Text style={styles.detailName} numberOfLines={2}>
-        {poi.name}
-      </Text>
+      <View style={styles.detailNameRow}>
+        <Text style={styles.detailName} numberOfLines={2}>
+          {poi.name}
+        </Text>
+        {isPoiSponsored(poi) ? (
+          <View style={styles.sponsorChip}>
+            <Text style={styles.sponsorChipText}>Sponsor</Text>
+          </View>
+        ) : null}
+      </View>
 
       <View style={styles.detailMetaRow}>
         <Text style={styles.detailMeta}>📍 {regionLabel}</Text>
         <Text style={styles.detailMeta}>
           ⭐ {averageRating === null ? '—' : averageRating.toFixed(1)}
         </Text>
+        {(() => {
+          const hours = summarizeOpeningHours(poi.opening_hours);
+          if (!hours) {
+            return null;
+          }
+          return (
+            <Text
+              style={[
+                styles.detailMeta,
+                hours.status === 'open'
+                  ? styles.hoursOpen
+                  : hours.status === 'closed'
+                    ? styles.hoursClosed
+                    : null,
+              ]}
+            >
+              {hours.label}
+            </Text>
+          );
+        })()}
       </View>
 
       {poi.description?.trim() ? (
@@ -1790,13 +1873,39 @@ const styles = StyleSheet.create({
     color: colors.accentPressed,
     flexShrink: 1,
   },
+  detailNameRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 6,
+  },
   detailName: {
+    flex: 1,
     fontSize: 16,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: 6,
     flexShrink: 1,
     minWidth: 0,
+  },
+  sponsorChip: {
+    marginTop: 2,
+    backgroundColor: colors.warningSoft,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  sponsorChipText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.warning,
+  },
+  hoursOpen: {
+    color: colors.success,
+    fontWeight: '700',
+  },
+  hoursClosed: {
+    color: '#B42318',
+    fontWeight: '700',
   },
   detailMetaRow: {
     flexDirection: 'row',

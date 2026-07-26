@@ -99,8 +99,14 @@
       "expo-font",
       "@react-native-google-signin/google-signin",
       "expo-image",
-      "expo-image-manipulator",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#1B4D3E"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.db import supabase
+from app.services.jobs_dup_alert import run_duplicate_poi_alert
 
 logger = logging.getLogger(__name__)
 
@@ -178,4 +179,9 @@ def run_nightly_cleanup() -> dict[str, Any]:
     result.update(complete_expired_listings())
     result.update(refresh_spots_left())
     result.update(recompute_profile_rating_avg())
+    try:
+        result.update(run_duplicate_poi_alert(send=True))
+    except Exception:
+        logger.exception("duplicate poi alert failed")
+        result["duplicate_pairs"] = -1
     return result

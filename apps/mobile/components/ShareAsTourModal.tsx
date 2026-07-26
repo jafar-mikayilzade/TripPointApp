@@ -327,6 +327,7 @@ export function ShareAsTourModal({
         organizerId: user.id,
         listingId,
         title: resolvedTitle,
+        region: regionId,
       });
 
       if (savedRouteId) {

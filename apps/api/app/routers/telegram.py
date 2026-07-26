@@ -7,7 +7,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from app.config import TELEGRAM_NOTIFY_SECRET, TELEGRAM_WEBHOOK_SECRET
+from app.config import CRON_SECRET, TELEGRAM_NOTIFY_SECRET, TELEGRAM_WEBHOOK_SECRET
 from app.services.telegram_bot import handle_telegram_update
 from app.services.telegram_notify import (
     admin_action_keyboard,
@@ -18,8 +18,8 @@ router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 
 
 def _require_notify_secret(x_notify_secret: str | None) -> None:
-    """If TELEGRAM_NOTIFY_SECRET is set, require matching X-Notify-Secret header."""
-    expected = TELEGRAM_NOTIFY_SECRET
+    """If a notify secret is set, require matching X-Notify-Secret header."""
+    expected = (TELEGRAM_NOTIFY_SECRET or CRON_SECRET or "").strip()
     if not expected:
         return
     if (x_notify_secret or "").strip() != expected:

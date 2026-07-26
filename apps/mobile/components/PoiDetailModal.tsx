@@ -23,6 +23,7 @@ import { TransientHint } from './TransientHint';
 import { notifyAdmins } from '../lib/adminNotify';
 import { getErrorMessage } from '../lib/errors';
 import { isDatabasePoiId } from '../lib/livePlaces';
+import { isPoiSponsored, summarizeOpeningHours } from '../lib/openingHours';
 import {
   getCategoryColor,
   getCategoryLabel,
@@ -38,13 +39,20 @@ interface PoiDetailModalProps {
   poi: Poi | null;
   visible: boolean;
   onClose: () => void;
+  /** Live POI favoritdən sonra parent siyahıda UUID yeniləmək üçün */
+  onPoiIdResolved?: (previousId: string, dbId: string) => void;
 }
 
 const GALLERY_WIDTH = Dimensions.get('window').width - 40;
 const STORAGE_BUCKET = 'poi-photos';
 const MAX_IMAGES = 3;
 
-export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
+export function PoiDetailModal({
+  poi,
+  visible,
+  onClose,
+  onPoiIdResolved,
+}: PoiDetailModalProps) {
   const [photos, setPhotos] = useState<string[]>([]);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [averageRating, setAverageRating] = useState<number | null>(null);
@@ -309,11 +317,29 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
       >
         <View style={styles.sheet}>
           <View style={styles.sheetHeader}>
-            {isDatabasePoiId(poi.id) ? (
-              <FavoriteButton targetType="poi" targetId={poi.id} />
-            ) : (
-              <View style={{ width: 42 }} />
-            )}
+            <FavoriteButton
+              targetType="poi"
+              targetId={poi.id}
+              liveSeed={
+                isDatabasePoiId(poi.id)
+                  ? null
+                  : {
+                      place_id: poi.place_id || poi.id,
+                      name: poi.name,
+                      lat: poi.lat,
+                      lng: poi.lng,
+                      category: poi.category,
+                      region: poi.region,
+                      rating: poi.rating,
+                      rating_count: poi.rating_count,
+                    }
+              }
+              onResolvedId={(dbId) => {
+                if (dbId !== poi.id) {
+                  onPoiIdResolved?.(poi.id, dbId);
+                }
+              }}
+            />
             <Pressable onPress={onClose} style={styles.closeButton} hitSlop={12}>
               <FontAwesome name="times" size={18} color={colors.text} />
             </Pressable>
@@ -356,9 +382,16 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
               )}
             </Pressable>
 
-            <Text style={styles.title} numberOfLines={2} ellipsizeMode="tail">
-              {poi.name}
-            </Text>
+            <View style={styles.titleRow}>
+              <Text style={styles.title} numberOfLines={2} ellipsizeMode="tail">
+                {poi.name}
+              </Text>
+              {isPoiSponsored(poi) ? (
+                <View style={styles.sponsorChip}>
+                  <Text style={styles.sponsorChipText}>Sponsor</Text>
+                </View>
+              ) : null}
+            </View>
 
             <View style={styles.metaRow}>
               <View style={[styles.categoryChip, { backgroundColor: `${color}22` }]}>
@@ -385,9 +418,29 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
               {poi.description?.trim() ? poi.description : 'Təsvir əlavə olunmayıb.'}
             </Text>
 
-            {poi.opening_hours?.trim() ? (
-              <Text style={styles.hoursText}>{poi.opening_hours.trim()}</Text>
-            ) : null}
+            {(() => {
+              const hours = summarizeOpeningHours(poi.opening_hours);
+              if (!hours) {
+                return null;
+              }
+              return (
+                <View style={styles.hoursBlock}>
+                  <Text
+                    style={[
+                      styles.hoursStatus,
+                      hours.status === 'open'
+                        ? styles.hoursOpen
+                        : hours.status === 'closed'
+                          ? styles.hoursClosed
+                          : null,
+                    ]}
+                  >
+                    {hours.label}
+                  </Text>
+                  <Text style={styles.hoursText}>{hours.detail}</Text>
+                </View>
+              );
+            })()}
 
             {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
@@ -534,12 +587,30 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.6,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 10,
+    paddingRight: 40,
+  },
   title: {
+    flex: 1,
     fontSize: 24,
     fontWeight: '800',
     color: colors.text,
-    marginBottom: 10,
-    paddingRight: 40,
+  },
+  sponsorChip: {
+    marginTop: 4,
+    backgroundColor: colors.warningSoft,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  sponsorChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.warning,
   },
   metaRow: {
     flexDirection: 'row',
@@ -586,12 +657,26 @@ const styles = StyleSheet.create({
     color: colors.chipText,
     marginBottom: 16,
   },
+  hoursBlock: {
+    marginBottom: 16,
+    marginTop: -8,
+    gap: 4,
+  },
+  hoursStatus: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  hoursOpen: {
+    color: colors.success,
+  },
+  hoursClosed: {
+    color: colors.danger,
+  },
   hoursText: {
     fontSize: 13,
     lineHeight: 18,
     color: colors.textMuted,
-    marginBottom: 16,
-    marginTop: -8,
   },
   actions: {
     gap: 10,

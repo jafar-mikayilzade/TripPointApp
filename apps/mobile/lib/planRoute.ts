@@ -1,11 +1,11 @@
 /**
- * Plan AI route via FastAPI (primary geo planner).
- * Supabase Edge `plan-route` = fallback only when API unreachable / 5xx.
+ * Plan AI route via FastAPI only (single source of truth).
+ * Edge Function algorithm is deprecated — no second planner.
  * See docs/ARCHITECTURE.md → "AI marşrut (plan-route)".
  */
 
 import { getApiBaseUrl } from './apiBase';
-import { supabase } from './supabase';
+import { trackEvent } from './trackEvent';
 
 export type PlanRouteStop = {
   poi_id?: string;
@@ -180,65 +180,29 @@ async function planRouteViaFastApi(
   }
 }
 
-async function planRouteViaEdge(
-  input: PlanRouteInput
-): Promise<PlanRouteResult> {
-  const response = await supabase.functions.invoke('plan-route', {
-    body: {
+/** FastAPI geo planner only — retry once on network/5xx; no Edge algorithm. */
+export async function planRoute(input: PlanRouteInput): Promise<PlanRouteResult> {
+  const first = await planRouteViaFastApi(input);
+  if (first) {
+    void trackEvent('plan_route_success', {
       region: input.region,
       days: input.days,
-      budget: input.budget,
-      interests: input.interests,
-      groupType: input.groupType ?? 'solo',
-      weather: input.weather ?? null,
-      pois: input.pois,
-    },
-  });
-
-  if (response.error) {
-    throw response.error;
+      source: first.source ?? 'fastapi',
+    });
+    return first;
   }
-
-  let planData: any = response.data;
-  if (typeof planData === 'string') {
-    let cleaned = planData.trim();
-    if (cleaned.startsWith('```json')) {
-      cleaned = cleaned.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
-    } else if (cleaned.startsWith('```')) {
-      cleaned = cleaned.replace(/^```\n?/, '').replace(/\n?```$/, '').trim();
-    }
-    planData = JSON.parse(cleaned);
+  // Brief retry for transient Railway/network blips
+  await new Promise((r) => setTimeout(r, 600));
+  const second = await planRouteViaFastApi(input);
+  if (second) {
+    void trackEvent('plan_route_success', {
+      region: input.region,
+      days: input.days,
+      source: second.source ?? 'fastapi_retry',
+    });
+    return second;
   }
-
-  if (planData?.error) {
-    throw new Error(String(planData.error));
-  }
-
-  if (!planData?.days || !Array.isArray(planData.days)) {
-    throw new Error('Marşrut düzgün formada gəlmədi. Yenidən cəhd edin.');
-  }
-
-  return {
-    summary: planData.summary ?? 'Marşrut hazırlandı.',
-    days: planData.days.map((day: PlanRouteDay) => ({
-      ...day,
-      stops: Array.isArray(day.stops)
-        ? day.stops
-        : Array.isArray((day as { pois?: PlanRouteStop[] }).pois)
-          ? (day as { pois: PlanRouteStop[] }).pois
-          : [],
-    })),
-    total_cost: planData.total_cost,
-    best_time: planData.best_time,
-    source: 'edge_fallback',
-  };
-}
-
-/** Prefer FastAPI geo planner; fall back to Edge Function if API unreachable. */
-export async function planRoute(input: PlanRouteInput): Promise<PlanRouteResult> {
-  const fromApi = await planRouteViaFastApi(input);
-  if (fromApi) {
-    return fromApi;
-  }
-  return planRouteViaEdge(input);
+  throw new Error(
+    'Marşrut serveri əlçatan deyil. İnterneti yoxlayın və yenidən cəhd edin.'
+  );
 }

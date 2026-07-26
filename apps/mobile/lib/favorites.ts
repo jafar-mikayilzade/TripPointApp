@@ -1,7 +1,11 @@
 import { supabase } from './supabase';
 import { isDatabasePoiId } from './livePlaces';
+import { trackEvent } from './trackEvent';
+import { upsertGooglePlace, type UpsertGooglePlaceInput } from './upsertGooglePlace';
 
 export type FavoriteTargetType = 'poi' | 'listing';
+
+export type LivePoiFavoriteSeed = UpsertGooglePlaceInput;
 
 export async function isFavorited(
   targetType: FavoriteTargetType,
@@ -31,17 +35,14 @@ export async function isFavorited(
   return !!data;
 }
 
+/**
+ * Toggle favorite. For live Google POIs pass `liveSeed` — upserts to DB then favorites UUID.
+ */
 export async function toggleFavorite(
   targetType: FavoriteTargetType,
-  targetId: string
-): Promise<{ favorited: boolean; error?: string }> {
-  if (targetType === 'poi' && !isDatabasePoiId(targetId)) {
-    return {
-      favorited: false,
-      error:
-        'Canlı Google məkanlarını hələ sevimliyə əlavə etmək olmur.',
-    };
-  }
+  targetId: string,
+  liveSeed?: LivePoiFavoriteSeed | null
+): Promise<{ favorited: boolean; resolvedId?: string; error?: string }> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -49,32 +50,54 @@ export async function toggleFavorite(
     return { favorited: false, error: 'Giriş lazımdır' };
   }
 
+  let resolvedId = targetId;
+
+  if (targetType === 'poi' && !isDatabasePoiId(targetId)) {
+    if (!liveSeed?.place_id || !liveSeed.name) {
+      return {
+        favorited: false,
+        error: 'Canlı məkan üçün place_id / ad lazımdır.',
+      };
+    }
+    try {
+      const upserted = await upsertGooglePlace({
+        ...liveSeed,
+        place_id: liveSeed.place_id || targetId,
+      });
+      resolvedId = upserted.id;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Məkan yazılmadı';
+      return { favorited: false, error: message };
+    }
+  }
+
   const { data: existing } = await supabase
     .from('favorites')
     .select('id')
     .eq('user_id', user.id)
     .eq('target_type', targetType)
-    .eq('target_id', targetId)
+    .eq('target_id', resolvedId)
     .maybeSingle();
 
   if (existing?.id) {
     const { error } = await supabase.from('favorites').delete().eq('id', existing.id);
     if (error) {
-      return { favorited: true, error: error.message };
+      return { favorited: true, resolvedId, error: error.message };
     }
-    return { favorited: false };
+    return { favorited: false, resolvedId };
   }
 
   const { error } = await supabase.from('favorites').insert({
     user_id: user.id,
     target_type: targetType,
-    target_id: targetId,
+    target_id: resolvedId,
   });
 
   if (error) {
-    return { favorited: false, error: error.message };
+    return { favorited: false, resolvedId, error: error.message };
   }
-  return { favorited: true };
+  void trackEvent('favorite_add', { targetType, targetId: resolvedId });
+  return { favorited: true, resolvedId };
 }
 
 export async function listFavoriteIds(

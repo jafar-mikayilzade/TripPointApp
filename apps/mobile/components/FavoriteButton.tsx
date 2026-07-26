@@ -7,6 +7,7 @@ import {
   isFavorited,
   toggleFavorite,
   type FavoriteTargetType,
+  type LivePoiFavoriteSeed,
 } from '../lib/favorites';
 import { isDatabasePoiId } from '../lib/livePlaces';
 import { useInfoToast } from './InfoToastProvider';
@@ -15,23 +16,34 @@ type Props = {
   targetType: FavoriteTargetType;
   targetId: string;
   size?: number;
+  /** Live Google POI — upsert-then-favorite */
+  liveSeed?: LivePoiFavoriteSeed | null;
+  /** Called when live POI was persisted and UUID resolved */
+  onResolvedId?: (dbId: string) => void;
 };
 
 /**
- * Bookmark for DB POIs / listings only.
- * Live Google place_ids are not UUID — favorites.target_id is uuid.
+ * Bookmark for listings and POIs (DB UUID or live Google with liveSeed).
  */
-export function FavoriteButton({ targetType, targetId, size = 22 }: Props) {
+export function FavoriteButton({
+  targetType,
+  targetId,
+  size = 22,
+  liveSeed = null,
+  onResolvedId,
+}: Props) {
   const { showInfo } = useInfoToast();
   const [favorited, setFavorited] = useState(false);
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
-
-  const unsupportedLivePoi =
-    targetType === 'poi' && !!targetId && !isDatabasePoiId(targetId);
+  const [activeId, setActiveId] = useState(targetId);
 
   useEffect(() => {
-    if (unsupportedLivePoi || !targetId) {
+    setActiveId(targetId);
+  }, [targetId]);
+
+  useEffect(() => {
+    if (!activeId || (targetType === 'poi' && !isDatabasePoiId(activeId))) {
       setFavorited(false);
       setReady(true);
       return;
@@ -39,7 +51,7 @@ export function FavoriteButton({ targetType, targetId, size = 22 }: Props) {
 
     let active = true;
     setReady(false);
-    void isFavorited(targetType, targetId).then((value) => {
+    void isFavorited(targetType, activeId).then((value) => {
       if (active) {
         setFavorited(value);
         setReady(true);
@@ -48,35 +60,28 @@ export function FavoriteButton({ targetType, targetId, size = 22 }: Props) {
     return () => {
       active = false;
     };
-  }, [targetType, targetId, unsupportedLivePoi]);
+  }, [targetType, activeId]);
 
   const onPress = useCallback(async () => {
     if (busy) {
       return;
     }
-    if (unsupportedLivePoi) {
-      Alert.alert(
-        'Sevimlilər',
-        'Canlı Google məkanlarını hələ sevimliyə əlavə etmək olmur. DB-dəki yerləri bookmark edin.'
-      );
-      return;
-    }
     setBusy(true);
-    const result = await toggleFavorite(targetType, targetId);
+    const result = await toggleFavorite(targetType, activeId, liveSeed);
     setBusy(false);
     if (result.error) {
       Alert.alert('Sevimlilər', result.error);
       return;
     }
+    if (result.resolvedId && result.resolvedId !== activeId) {
+      setActiveId(result.resolvedId);
+      onResolvedId?.(result.resolvedId);
+    }
     setFavorited(result.favorited);
     showInfo(
       result.favorited ? 'Sevimlilərə əlavə olundu' : 'Sevimlilərdən çıxarıldı'
     );
-  }, [busy, unsupportedLivePoi, targetType, targetId, showInfo]);
-
-  if (unsupportedLivePoi) {
-    return null;
-  }
+  }, [busy, targetType, activeId, liveSeed, onResolvedId, showInfo]);
 
   return (
     <Pressable

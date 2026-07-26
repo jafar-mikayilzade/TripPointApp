@@ -43,6 +43,7 @@ import {
   validateTextWordPatterns,
 } from '../../lib/formValidation';
 import { signOutEverywhere } from '../../lib/googleAuth';
+import { clearExpoPushToken } from '../../lib/pushNotifications';
 import { startTelegramLink } from '../../lib/telegramLink';
 import { fetchAdminQueueCounts, type AdminQueueCounts } from '../../lib/moderation';
 import { supabase } from '../../lib/supabase';
@@ -601,6 +602,9 @@ export default function ProfilScreen() {
         style: 'destructive',
         onPress: () => {
           void (async () => {
+            if (profile?.id) {
+              await clearExpoPushToken(profile.id);
+            }
             const { error } = await signOutEverywhere();
             if (error) {
               setErrorMessage(getErrorMessage(error));
@@ -804,10 +808,22 @@ export default function ProfilScreen() {
             </View>
           )}
 
-          <Text style={styles.name}>{displayName}</Text>
+          <View style={styles.nameRow}>
+            <Text style={styles.name}>{displayName}</Text>
+            {profile.is_verified ? (
+              <FontAwesome name="check-circle" size={16} color={colors.success} />
+            ) : null}
+          </View>
 
-          <View style={[styles.roleBadge, { backgroundColor: `${roleMeta.color}22` }]}>
-            <Text style={[styles.roleBadgeText, { color: roleMeta.color }]}>{roleMeta.label}</Text>
+          <View style={styles.badgeRow}>
+            <View style={[styles.roleBadge, { backgroundColor: `${roleMeta.color}22` }]}>
+              <Text style={[styles.roleBadgeText, { color: roleMeta.color }]}>{roleMeta.label}</Text>
+            </View>
+            {profile.is_verified ? (
+              <View style={[styles.roleBadge, { backgroundColor: colors.successSoft }]}>
+                <Text style={[styles.roleBadgeText, { color: colors.success }]}>Təsdiqlənib</Text>
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.ratingRow}>
@@ -1422,15 +1438,26 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.accent,
   },
-  name: {
+  nameRow: {
     marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  name: {
     fontSize: 18,
     fontWeight: '700',
     color: colors.text,
     letterSpacing: -0.3,
   },
+  badgeRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
+  },
   roleBadge: {
-    marginTop: 6,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 3,

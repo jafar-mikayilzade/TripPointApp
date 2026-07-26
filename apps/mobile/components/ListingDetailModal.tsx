@@ -36,6 +36,7 @@ import {
 } from '../lib/moderation';
 import {
   listListingSubscribers,
+  notifyParticipantStatus,
   notifyTourSubscribersUpdate,
   type ListingSubscriberRow,
 } from '../lib/subscriptions';
@@ -46,6 +47,7 @@ import {
   stripRouteBlockFromDescription,
   type ListingRouteStop,
 } from '../lib/listingRouteStops';
+import { trackEvent } from '../lib/trackEvent';
 import { supabase } from '../lib/supabase';
 import { useIsAdmin } from '../lib/useIsAdmin';
 import { confirmDelete, deleteListing } from '../lib/userContentDelete';
@@ -60,7 +62,7 @@ import type {
 import { colors } from '../constants/theme';
 
 export type ListingWithCreator = Listing & {
-  creator: Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'phone'> | null;
+  creator: Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'phone' | 'is_verified'> | null;
 };
 
 interface ListingDetailModalProps {
@@ -543,6 +545,7 @@ export function ListingDetailModal({
         return;
       }
 
+      void trackEvent('listing_join', { listingId: listing.id, type: listing.type });
       showInfoToast('Sorğunuz göndərildi, təsdiq gözlənilir');
       setShowJoinForm(false);
       setJoinMessage('');
@@ -556,6 +559,8 @@ export function ListingDetailModal({
   async function updateParticipantStatus(participantId: string, status: 'approved' | 'rejected') {
     setUpdatingParticipantId(participantId);
     setErrorMessage(null);
+
+    const participant = participants.find((row) => row.id === participantId);
 
     const { error } = await supabase
       .from('listing_participants')
@@ -572,6 +577,16 @@ export function ListingDetailModal({
       current.map((row) => (row.id === participantId ? { ...row, status } : row))
     );
     setUpdatingParticipantId(null);
+
+    if (listing && participant?.user_id && currentUserId) {
+      void notifyParticipantStatus({
+        userId: participant.user_id,
+        listingId: listing.id,
+        listingTitle: listing.title,
+        approved: status === 'approved',
+        actorId: currentUserId,
+      });
+    }
   }
 
   async function handleDeleteListing() {
@@ -747,7 +762,17 @@ export function ListingDetailModal({
                     <Text style={styles.avatarInitial}>{creatorName.charAt(0).toUpperCase()}</Text>
                   </View>
                 )}
-                <CreatorStarRating value={creatorRating} loading={loadingExtras} />
+                <View style={styles.creatorMeta}>
+                  <View style={styles.creatorNameRow}>
+                    <Text style={styles.creatorName} numberOfLines={1}>
+                      {creatorName}
+                    </Text>
+                    {listing.creator?.is_verified ? (
+                      <FontAwesome name="check-circle" size={14} color={colors.success} />
+                    ) : null}
+                  </View>
+                  <CreatorStarRating value={creatorRating} loading={loadingExtras} />
+                </View>
               </Pressable>
 
               <View style={styles.sideActions}>
@@ -1443,9 +1468,11 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   creatorLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    flexShrink: 0,
+    gap: 10,
+    flexShrink: 1,
+    minWidth: 0,
   },
   avatar: {
     width: 48,
@@ -1464,6 +1491,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: colors.chipText,
+  },
+  creatorMeta: {
+    flexShrink: 1,
+    minWidth: 0,
+    gap: 4,
+  },
+  creatorNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  creatorName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text,
+    maxWidth: 120,
   },
   ratingRow: {
     flexDirection: 'row',

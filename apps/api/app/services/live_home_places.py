@@ -6,7 +6,10 @@ Tourism filter + curated seeds + bucket mix.
 
 from __future__ import annotations
 
+import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from typing import Any
 
 from app.config import GOOGLE_PLACES_API_KEY
@@ -28,6 +31,31 @@ HOME_ALL_GOOGLE_CATS = ("restaurant", "hotel", "nature")
 
 # How-to expand: add hubs in tourism_hubs.py, seeds in tourism_seeds.py,
 # blacklist in places_tourism_filter.py
+
+logger = logging.getLogger(__name__)
+
+# In-memory viewport/region TTL cache (per process — use Redis if multi-worker)
+_LIVE_CACHE_TTL_SECONDS = 12 * 60
+_LIVE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_LIVE_CACHE_LOCK = Lock()
+
+
+def _cache_key(
+    region_key: str,
+    category: str | None,
+    limit: int,
+    lat: float | None,
+    lng: float | None,
+    radius: int | None,
+) -> str:
+    cat = (category or "all").strip().lower()
+    if lat is None or lng is None:
+        return f"{region_key}|{cat}|{limit}|region"
+    # Round to ~100m buckets to absorb tiny pans
+    lat_r = round(float(lat), 3)
+    lng_r = round(float(lng), 3)
+    rad_r = int(round((radius or 8000) / 500.0) * 500)
+    return f"{region_key}|{cat}|{limit}|{lat_r}|{lng_r}|{rad_r}"
 
 
 def _google_cats_for_filter(category: str | None) -> list[str]:
@@ -153,6 +181,46 @@ def load_live_home_places(
     if region_key not in REGION_COORDINATES:
         raise KeyError(region_key)
 
+    key = _cache_key(region_key, category, limit, lat, lng, radius)
+    now = time.time()
+    with _LIVE_CACHE_LOCK:
+        hit = _LIVE_CACHE.get(key)
+        if hit and now - hit[0] < _LIVE_CACHE_TTL_SECONDS:
+            logger.debug("live-places cache HIT %s", key)
+            cached = dict(hit[1])
+            cached["cache"] = "hit"
+            return cached
+        logger.debug("live-places cache MISS %s", key)
+
+    loaded = _load_live_home_places_uncached(
+        region_key,
+        category=category,
+        limit=limit,
+        lat=lat,
+        lng=lng,
+        radius=radius,
+    )
+    with _LIVE_CACHE_LOCK:
+        _LIVE_CACHE[key] = (now, loaded)
+        # Bound memory: drop oldest if huge
+        if len(_LIVE_CACHE) > 200:
+            oldest = sorted(_LIVE_CACHE.items(), key=lambda kv: kv[1][0])[:50]
+            for old_key, _ in oldest:
+                _LIVE_CACHE.pop(old_key, None)
+    out = dict(loaded)
+    out["cache"] = "miss"
+    return out
+
+
+def _load_live_home_places_uncached(
+    region_key: str,
+    *,
+    category: str | None = None,
+    limit: int = 60,
+    lat: float | None = None,
+    lng: float | None = None,
+    radius: int | None = None,
+) -> dict[str, Any]:
     db_region = REGION_DB_ID.get(region_key, region_key)
     warnings: list[str] = []
     region_hubs = _centers_for_region(region_key)

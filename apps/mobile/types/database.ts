@@ -55,6 +55,10 @@ export type Profile = {
   bio: string | null;
   rating_avg: number | null;
   email_verified_at: string | null;
+  /** Trust badge (admin-set); unpaid */
+  is_verified?: boolean;
+  verified_at?: string | null;
+  expo_push_token?: string | null;
   telegram_chat_id?: string | null;
   telegram_linked_at?: string | null;
   created_at: string;
@@ -77,6 +81,9 @@ export type Poi = {
   website: string | null;
   /** Google Place Details weekday text (optional) */
   opening_hours?: string | null;
+  /** Featured on home when true and sponsor_until not expired */
+  is_sponsored?: boolean;
+  sponsor_until?: string | null;
   /** External (Google) rating 1–5; OSM usually null */
   rating: number | null;
   rating_count: number | null;

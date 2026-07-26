@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from './apiBase';
+import { getNotifySecretHeaders } from './notifySecret';
 
 export type AdminNotifyKind = 'poi_pending' | 'photo_pending' | 'listing_report';
 
@@ -46,7 +47,7 @@ export async function notifyAdmins(
 
     const res = await fetch(`${base}/api/telegram/notify`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getNotifySecretHeaders(),
       body: JSON.stringify(body),
       signal: controller.signal,
     });

@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from './apiBase';
+import { getNotifySecretHeaders } from './notifySecret';
 import { supabase } from './supabase';
 
 export type SubscriptionTargetType = 'listing' | 'organizer';
@@ -136,11 +137,38 @@ async function mirrorNotificationsToTelegram(
   try {
     await fetch(`${base}/api/telegram/notify-users`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getNotifySecretHeaders(),
       body: JSON.stringify({ user_ids: userIds, text }),
     });
   } catch {
     // optional channel
+  }
+}
+
+/** Fire-and-forget Expo push via FastAPI. */
+async function mirrorNotificationsToPush(
+  userIds: string[],
+  title: string,
+  body?: string | null,
+  listingId?: string | null
+): Promise<void> {
+  const base = getApiBaseUrl();
+  if (!base || userIds.length === 0) {
+    return;
+  }
+  try {
+    await fetch(`${base}/api/notify/push`, {
+      method: 'POST',
+      headers: getNotifySecretHeaders(),
+      body: JSON.stringify({
+        user_ids: userIds,
+        title,
+        body: body ?? title,
+        data: listingId ? { listingId } : {},
+      }),
+    });
+  } catch {
+    // optional until native rebuild
   }
 }
 
@@ -168,6 +196,7 @@ async function insertNotificationsForUsers(input: {
 
   await supabase.from('notifications').insert(rows);
   void mirrorNotificationsToTelegram(unique, input.title, input.body);
+  void mirrorNotificationsToPush(unique, input.title, input.body, input.listingId);
 }
 
 /** Yeni tur yaradılanda — təşkilatçı abunələrinə bildiriş */
@@ -175,24 +204,97 @@ export async function notifyOrganizerNewTour(input: {
   organizerId: string;
   listingId: string;
   title: string;
+  region?: string | null;
 }): Promise<void> {
+  // Spam guard: eyni listing üçün bir dəfə (own app_events — RLS-safe)
+  const { data: prior } = await supabase
+    .from('app_events')
+    .select('id, props')
+    .eq('user_id', input.organizerId)
+    .eq('name', 'notify_organizer_sent')
+    .limit(40);
+  const already = (prior ?? []).some((row) => {
+    const props = row.props as { listingId?: string } | null;
+    return props?.listingId === input.listingId;
+  });
+  if (already) {
+    return;
+  }
+
   const { data } = await supabase
     .from('subscriptions')
     .select('user_id')
     .eq('target_type', 'organizer')
     .eq('target_id', input.organizerId);
 
-  const userIds = (data ?? [])
-    .map((r) => r.user_id)
-    .filter((id) => id !== input.organizerId);
+  const userIds = new Set(
+    (data ?? [])
+      .map((r) => r.user_id)
+      .filter((id) => id !== input.organizerId)
+  );
+
+  // Region fans: users subscribed to other active listings in the same region
+  const region = input.region?.trim().toLowerCase();
+  if (region) {
+    const { data: regionListings } = await supabase
+      .from('listings')
+      .select('id')
+      .ilike('region', region)
+      .eq('status', 'active')
+      .neq('id', input.listingId)
+      .limit(40);
+    const listingIds = (regionListings ?? []).map((r) => r.id);
+    if (listingIds.length > 0) {
+      const { data: regionSubs } = await supabase
+        .from('subscriptions')
+        .select('user_id')
+        .eq('target_type', 'listing')
+        .in('target_id', listingIds)
+        .limit(200);
+      for (const row of regionSubs ?? []) {
+        if (row.user_id && row.user_id !== input.organizerId) {
+          userIds.add(row.user_id);
+        }
+      }
+    }
+  }
 
   await insertNotificationsForUsers({
-    userIds,
+    userIds: [...userIds],
     kind: 'organizer_new_tour',
     title: 'Yeni tur',
-    body: `${input.title} — izlədiyiniz təşkilatçı yeni tur paylaşıb.`,
+    body: `${input.title} — izlədiyiniz təşkilatçı / regionda yeni elan.`,
     listingId: input.listingId,
     actorId: input.organizerId,
+  });
+
+  await supabase.from('app_events').insert({
+    user_id: input.organizerId,
+    name: 'notify_organizer_sent',
+    props: { listingId: input.listingId },
+  });
+}
+
+/** İştirakçı statusu dəyişəndə — yalnız həmin istifadəçiyə */
+export async function notifyParticipantStatus(input: {
+  userId: string;
+  listingId: string;
+  listingTitle: string;
+  approved: boolean;
+  actorId: string;
+}): Promise<void> {
+  if (!input.userId || input.userId === input.actorId) {
+    return;
+  }
+  await insertNotificationsForUsers({
+    userIds: [input.userId],
+    kind: 'tour_update',
+    title: input.approved ? 'Müraciət təsdiqləndi' : 'Müraciət rədd edildi',
+    body: input.approved
+      ? `"${input.listingTitle}" elanına qoşulmanız təsdiqləndi.`
+      : `"${input.listingTitle}" elanına müraciətiniz rədd edildi.`,
+    listingId: input.listingId,
+    actorId: input.actorId,
   });
 }
 
