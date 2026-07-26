@@ -19,6 +19,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getErrorMessage } from '../lib/errors';
+import { shareSplitBillPdf } from '../lib/shareSplitBill';
 import {
   calculateMemberBalances,
   calculateSettlements,
@@ -117,6 +118,7 @@ export default function SplitBillScreen() {
   const [expenseError, setExpenseError] = useState<string | null>(null);
   const [settling, setSettling] = useState(false);
   const [paymentCard, setPaymentCard] = useState<string | null>(null);
+  const [listingRegion, setListingRegion] = useState<string | null>(null);
   const [cardDraft, setCardDraft] = useState('');
   const [savingCard, setSavingCard] = useState(false);
   const [cardEditVisible, setCardEditVisible] = useState(false);
@@ -245,11 +247,11 @@ export default function SplitBillScreen() {
 
     setGroup(groupData);
 
-    // Elana bağlı kart nömrəsi
+    // Elana bağlı kart / region
     if (groupData.listing_id) {
       const { data: listingRow } = await supabase
         .from('listings')
-        .select('payment_card')
+        .select('payment_card, region')
         .eq('id', groupData.listing_id)
         .maybeSingle();
       if (gen !== loadGroupDetailGen.current) {
@@ -257,8 +259,10 @@ export default function SplitBillScreen() {
       }
       const card = listingRow?.payment_card?.replace(/\D/g, '') || null;
       setPaymentCard(card && card.length >= 12 ? card : null);
+      setListingRegion(listingRow?.region?.trim() || null);
     } else {
       setPaymentCard(null);
+      setListingRegion(null);
     }
 
     const { data: memberRows, error: membersError } = await supabase
@@ -481,6 +485,33 @@ export default function SplitBillScreen() {
     setCreateVisible(false);
     await loadGroups();
     setSelectedGroupId(created.id);
+  }
+
+  async function shareGroupPdf() {
+    if (!group) {
+      return;
+    }
+    try {
+      await shareSplitBillPdf({
+        groupName: group.name,
+        region: listingRegion,
+        totalAmount,
+        fairShare,
+        expenses: expenses.map((item) => ({
+          title: item.description,
+          amount: item.amount,
+          payerName: item.payerName,
+          createdAt: item.created_at,
+        })),
+        balances,
+        settlements,
+      });
+    } catch (err) {
+      const message = getErrorMessage(err);
+      if (!/dismiss|cancel|ləğv/i.test(message)) {
+        setErrorMessage(message);
+      }
+    }
   }
 
   async function copyPaymentCard() {
@@ -716,6 +747,11 @@ export default function SplitBillScreen() {
                 <Text style={styles.primaryButtonText}>Xərc əlavə et</Text>
               </Pressable>
             ) : null}
+
+            <Pressable style={styles.pdfButton} onPress={() => void shareGroupPdf()}>
+              <FontAwesome name="file-pdf-o" size={14} color={colors.accent} />
+              <Text style={styles.pdfButtonText}>PDF paylaş</Text>
+            </Pressable>
 
             <Text style={styles.sectionTitle}>Xərclər</Text>
             {expenses.length === 0 ? (
@@ -1404,6 +1440,23 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: colors.chipText,
     fontWeight: '700',
+  },
+  pdfButton: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.surface,
+  },
+  pdfButtonText: {
+    color: colors.accent,
+    fontWeight: '700',
+    fontSize: 14,
   },
   flexOne: {
     flex: 1,

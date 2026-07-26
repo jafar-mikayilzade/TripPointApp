@@ -117,6 +117,22 @@ TripPoint/
   .cursor/rules
 ```
 
+## Scheduled jobs (Railway cron → FastAPI)
+
+Secret: header `X-Cron-Secret` = `CRON_SECRET` (yoxdursa `TELEGRAM_NOTIFY_SECRET`).
+
+| Endpoint | Tövsiyə olunan cədvəl | İş |
+|----------|----------------------|-----|
+| `POST /api/jobs/nightly` | hər gün 03:00 UTC | 30g+ pending POI/foto sil; `departure_at` keçmiş `active` → `completed`; `spots_left` yenilə; `profiles.rating_avg` |
+| `POST /api/jobs/enrich-places?limit=50` | hər gecə | Google Place Details (phone/website/description/opening_hours) — max 50/run |
+| `POST /api/jobs/weekly-report` | bazar ertəsi 08:00 UTC | Admin Telegram həftəlik stats |
+
+Nümunə (curl):
+
+```bash
+curl -X POST "$API_URL/api/jobs/nightly" -H "X-Cron-Secret: $CRON_SECRET"
+```
+
 ## Non-goals (don't break)
 
 - Auth rewrite

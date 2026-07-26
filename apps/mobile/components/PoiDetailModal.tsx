@@ -27,8 +27,9 @@ import {
   getCategoryColor,
   getCategoryLabel,
 } from '../lib/poi';
+import { pickPhotoUrl } from '../lib/photoUrls';
 import { supabase } from '../lib/supabase';
-import { uploadImage } from '../lib/uploadImage';
+import { uploadImageVariants } from '../lib/uploadImage';
 import type { Poi } from '../types/database';
 
 import { colors } from '../constants/theme';
@@ -90,7 +91,7 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
       const [photosResult, ratingsResult] = await Promise.all([
         supabase
           .from('poi_photos')
-          .select('photo_url, order_index, created_at, status')
+          .select('photo_url, thumb_url, medium_url, order_index, created_at, status')
           .eq('poi_id', poi!.id)
           .eq('status', 'approved')
           .order('order_index', { ascending: true }),
@@ -104,7 +105,11 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
       if (photosResult.error) {
         setErrorMessage(getErrorMessage(photosResult.error));
       } else {
-        setPhotos((photosResult.data ?? []).map((photo) => photo.photo_url));
+        setPhotos(
+          (photosResult.data ?? [])
+            .map((photo) => pickPhotoUrl(photo, 'medium'))
+            .filter((url): url is string => Boolean(url))
+        );
       }
 
       if (ratingsResult.error) {
@@ -192,16 +197,13 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
       const rows = [];
       for (let i = 0; i < result.assets.length; i += 1) {
         const uri = result.assets[i].uri;
-        const extension = uri.split('.').pop()?.split('?')[0]?.toLowerCase() ?? 'jpg';
-        const safeExt =
-          extension === 'png' || extension === 'webp' || extension === 'jpeg' || extension === 'jpg'
-            ? extension
-            : 'jpg';
-        const path = `${currentUserId}/${poi.id}-u${Date.now()}-${i}.${safeExt}`;
-        const publicUrl = await uploadImage(uri, STORAGE_BUCKET, path);
+        const basePath = `${currentUserId}/${poi.id}-u${Date.now()}-${i}`;
+        const variants = await uploadImageVariants(uri, STORAGE_BUCKET, basePath);
         rows.push({
           poi_id: poi.id,
-          photo_url: publicUrl,
+          photo_url: variants.original,
+          medium_url: variants.medium,
+          thumb_url: variants.thumb,
           order_index: photos.length + i,
           status: 'pending' as const,
           uploaded_by: currentUserId,
@@ -382,6 +384,10 @@ export function PoiDetailModal({ poi, visible, onClose }: PoiDetailModalProps) {
             <Text style={styles.description}>
               {poi.description?.trim() ? poi.description : 'Təsvir əlavə olunmayıb.'}
             </Text>
+
+            {poi.opening_hours?.trim() ? (
+              <Text style={styles.hoursText}>{poi.opening_hours.trim()}</Text>
+            ) : null}
 
             {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
@@ -579,6 +585,13 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: colors.chipText,
     marginBottom: 16,
+  },
+  hoursText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textMuted,
+    marginBottom: 16,
+    marginTop: -8,
   },
   actions: {
     gap: 10,

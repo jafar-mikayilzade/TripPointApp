@@ -32,7 +32,7 @@ import {
 import { notifyAdmins } from '../lib/adminNotify';
 import { parseCoordsFromGoogleMapsUrl, POI_CATEGORY_OPTIONS } from '../lib/poi';
 import { supabase } from '../lib/supabase';
-import { uploadImage } from '../lib/uploadImage';
+import { uploadImageVariants } from '../lib/uploadImage';
 import type { PoiCategory } from '../types/database';
 import { PhoneField } from './PhoneField';
 import { CategoryIcon } from './CategoryIcon';
@@ -203,26 +203,21 @@ export function AddPoiModal({ visible, onClose, initialRegionId }: AddPoiModalPr
       }
 
       if (imageUris.length > 0) {
-        const uploadedUrls: string[] = [];
+        const photoRows = [];
 
         for (let i = 0; i < imageUris.length; i += 1) {
-          const extension = imageUris[i].split('.').pop()?.split('?')[0]?.toLowerCase() ?? 'jpg';
-          const safeExt =
-            extension === 'png' || extension === 'webp' || extension === 'jpeg' || extension === 'jpg'
-              ? extension
-              : 'jpg';
-          const path = `${user.id}/${poi.id}-${i}.${safeExt}`;
-          const publicUrl = await uploadImage(imageUris[i], STORAGE_BUCKET, path);
-          uploadedUrls.push(publicUrl);
+          const basePath = `${user.id}/${poi.id}-${i}`;
+          const variants = await uploadImageVariants(imageUris[i], STORAGE_BUCKET, basePath);
+          photoRows.push({
+            poi_id: poi.id,
+            photo_url: variants.original,
+            medium_url: variants.medium,
+            thumb_url: variants.thumb,
+            order_index: i,
+            status: 'pending' as const,
+            uploaded_by: user.id,
+          });
         }
-
-        const photoRows = uploadedUrls.map((photoUrl, index) => ({
-          poi_id: poi.id,
-          photo_url: photoUrl,
-          order_index: index,
-          status: 'pending' as const,
-          uploaded_by: user.id,
-        }));
 
         const { error: photoError } = await supabase.from('poi_photos').insert(photoRows);
         if (photoError) {

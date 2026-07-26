@@ -60,6 +60,10 @@ TELEGRAM_NOTIFY_SECRET = _raw_tg_secret.strip('"').strip("'") or None
 _raw_tg_webhook = (os.getenv("TELEGRAM_WEBHOOK_SECRET") or "").strip()
 TELEGRAM_WEBHOOK_SECRET = _raw_tg_webhook.strip('"').strip("'") or None
 
+# Optional: Railway cron → POST /api/jobs/* with header X-Cron-Secret
+_raw_cron = (os.getenv("CRON_SECRET") or "").strip()
+CRON_SECRET = _raw_cron.strip('"').strip("'") or None
+
 
 def validate_settings() -> None:
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:

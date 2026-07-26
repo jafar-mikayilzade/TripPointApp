@@ -14,6 +14,7 @@ from app.routers import (
     plan_route,
     live_places,
     telegram,
+    jobs,
 )
 
 
@@ -35,4 +36,5 @@ def create_app() -> FastAPI:
     application.include_router(plan_route.router)
     application.include_router(live_places.router)
     application.include_router(telegram.router)
+    application.include_router(jobs.router)
     return application

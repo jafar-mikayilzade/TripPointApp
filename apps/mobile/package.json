@@ -1,6 +1,6 @@
 {
   "name": "trippoint-app",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/ngrok": "^4.1.0",
@@ -19,6 +19,7 @@
     "expo-file-system": "~57.0.0",
     "expo-font": "~57.0.0",
     "expo-image": "~57.0.1",
+    "expo-image-manipulator": "~57.0.6",
     "expo-image-picker": "~57.0.2",
     "expo-linking": "~57.0.2",
     "expo-location": "~57.0.2",
@@ -45,8 +46,8 @@
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web"
   },
   "private": true

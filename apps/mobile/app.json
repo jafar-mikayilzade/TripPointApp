@@ -3,7 +3,7 @@
     "name": "TripPoint",
     "slug": "trippoint-app",
     "scheme": "trippoint",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "com.jafar.TripPoint",
-      "versionCode": 12,
+      "versionCode": 14,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -99,6 +99,7 @@
       "expo-font",
       "@react-native-google-signin/google-signin",
       "expo-image",
+      "expo-image-manipulator",
       "expo-sharing"
     ],
     "experiments": {

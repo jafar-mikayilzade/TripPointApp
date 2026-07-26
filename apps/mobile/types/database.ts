@@ -75,6 +75,8 @@ export type Poi = {
   address: string | null;
   phone: string | null;
   website: string | null;
+  /** Google Place Details weekday text (optional) */
+  opening_hours?: string | null;
   /** External (Google) rating 1–5; OSM usually null */
   rating: number | null;
   rating_count: number | null;
@@ -88,6 +90,8 @@ export type PoiPhoto = {
   id: string;
   poi_id: string;
   photo_url: string;
+  thumb_url?: string | null;
+  medium_url?: string | null;
   order_index: number;
   status: PhotoModerationStatus;
   uploaded_by: string | null;

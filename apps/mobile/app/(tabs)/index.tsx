@@ -49,6 +49,7 @@ import {
   type HomeCategoryFilterId,
 } from '../../lib/categoryUtils';
 import { getErrorMessage } from '../../lib/errors';
+import { pickPhotoUrl } from '../../lib/photoUrls';
 import {
   fetchRegionWeather,
   formatWeatherLabel,
@@ -73,7 +74,10 @@ type PoiListItem = Poi & {
 };
 
 type PoiQueryRow = Poi & {
-  poi_photos?: Pick<PoiPhoto, 'photo_url' | 'order_index' | 'created_at' | 'status'>[] | null;
+  poi_photos?: Pick<
+    PoiPhoto,
+    'photo_url' | 'thumb_url' | 'medium_url' | 'order_index' | 'created_at' | 'status'
+  >[] | null;
 };
 
 const LOCATION_OPTIONS: { label: string; value: string | null }[] = [
@@ -238,6 +242,8 @@ export default function HomeScreen() {
           *,
           poi_photos (
             photo_url,
+            thumb_url,
+            medium_url,
             order_index,
             created_at,
             status
@@ -270,7 +276,7 @@ export default function HomeScreen() {
       const { poi_photos: _ignored, ...rest } = poi;
       return {
         ...rest,
-        photoUrl: photos[0]?.photo_url ?? null,
+        photoUrl: pickPhotoUrl(photos[0], 'thumb'),
         averageRating:
           typeof rest.rating === 'number' && Number.isFinite(rest.rating)
             ? rest.rating

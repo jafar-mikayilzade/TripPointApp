@@ -20,6 +20,7 @@ import {
   updateListingAsAdmin,
   deleteListingAsAdminOrOwner,
 } from '../lib/moderation';
+import { pickPhotoUrl } from '../lib/photoUrls';
 import { confirmDelete } from '../lib/userContentDelete';
 import { supabase } from '../lib/supabase';
 import type { ListingReport, Poi, PoiPhoto } from '../types/database';
@@ -68,7 +69,7 @@ export function AdminModerationModal({
         .limit(50),
       supabase
         .from('poi_photos')
-        .select('id, poi_id, photo_url, order_index, status, uploaded_by, created_at')
+        .select('id, poi_id, photo_url, thumb_url, medium_url, order_index, status, uploaded_by, created_at')
         .eq('status', 'pending')
         .order('created_at', { ascending: false })
         .limit(50),
@@ -315,7 +316,10 @@ export function AdminModerationModal({
                   ? <Text style={styles.empty}>Gözləyən şəkil yoxdur</Text>
                   : pendingPhotos.map((photo) => (
                       <View key={photo.id} style={styles.card}>
-                        <Image source={{ uri: photo.photo_url }} style={styles.thumb} />
+                        <Image
+                          source={{ uri: pickPhotoUrl(photo, 'thumb') ?? photo.photo_url }}
+                          style={styles.thumb}
+                        />
                         <Text style={styles.meta}>{photo.poi_name ?? 'Məkan'}</Text>
                         <View style={styles.row}>
                           <Pressable
