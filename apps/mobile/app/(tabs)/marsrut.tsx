@@ -308,6 +308,7 @@ export default function MarsrutScreen() {
     latitude: number;
     longitude: number;
   } | null>(null);
+  const [mapSize, setMapSize] = useState<{ width: number; height: number } | null>(null);
   /** Forma: xəritə gizli; plan: ~yarı yarı — istifadəçi yenə sürükləyə bilər */
   const [splitRatio, setSplitRatio] = useState(MARSRUT_FORM_SPLIT);
   const [savingRoute, setSavingRoute] = useState(false);
@@ -475,9 +476,9 @@ export default function MarsrutScreen() {
     return out;
   }, [plan]);
 
-  // After plan: fit every day's pins (day-1 included)
+  // After plan + map layout: fit every day's pins (day-1 included)
   useEffect(() => {
-    if (!plan || planMapMarkers.length === 0) {
+    if (!plan || !mapSize || planMapMarkers.length === 0) {
       return;
     }
     const coords = planMapMarkers.map((m) => ({
@@ -491,7 +492,7 @@ export default function MarsrutScreen() {
       });
     }, 400);
     return () => clearTimeout(t);
-  }, [plan, planMapMarkers]);
+  }, [plan, mapSize, planMapMarkers]);
 
   useEffect(() => {
     if (!loading) {
@@ -577,6 +578,7 @@ export default function MarsrutScreen() {
     setRouteSegments([]);
     setStopDurations({});
     setErrorMessage(null);
+    setMapSize(null);
     setSplitRatio(MARSRUT_FORM_SPLIT);
   }
 
@@ -790,7 +792,7 @@ export default function MarsrutScreen() {
       let accommodations: any[] = [];
       let attractions: any[] = [];
 
-      const ranked = await fetchRouteCandidates(regionId, Math.max(28, days * 10), {
+      const ranked = await fetchRouteCandidates(regionId, 16, {
         interests,
       });
       if (
@@ -853,11 +855,11 @@ export default function MarsrutScreen() {
         restaurants = pois
           .filter((p) => hasAny(p, ['restaurant', 'home_restaurant', 'cafe']))
           .sort(byRating)
-          .slice(0, 20);
+          .slice(0, 12);
         accommodations = pois
           .filter((p) => hasAny(p, ['hotel', 'hostel', 'guesthouse', 'camping']))
           .sort(byRating)
-          .slice(0, 16);
+          .slice(0, 12);
         attractions = preferAttractionsForInterests(
           pois
             .filter((p) =>
@@ -873,7 +875,7 @@ export default function MarsrutScreen() {
             )
             .sort(byRating),
           interests
-        ).slice(0, Math.max(28, days * 10));
+        ).slice(0, 16);
       }
 
       if (restaurants.length + accommodations.length + attractions.length === 0) {
@@ -1049,26 +1051,42 @@ export default function MarsrutScreen() {
         minTopRatio={0}
         maxTopRatio={0.85}
         top={
-          <View style={styles.mapSection}>
-            <MapView
-              ref={mapRef as never}
-              style={StyleSheet.absoluteFillObject}
-              provider={PROVIDER_GOOGLE}
-              {...(Platform.OS === 'web'
-                ? {
-                    googleMapsApiKey:
-                      process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY || undefined,
-                  }
-                : {})}
-              initialRegion={{
-                latitude: regionMeta.latitude,
-                longitude: regionMeta.longitude,
-                latitudeDelta: regionMeta.latitudeDelta,
-                longitudeDelta: regionMeta.longitudeDelta,
-              }}
-              showsUserLocation={false}
-              showsMyLocationButton={false}
-            >
+          <View
+            style={styles.mapSection}
+            onLayout={(e) => {
+              const { width, height } = e.nativeEvent.layout;
+              if (width > 0 && height > 0) {
+                setMapSize((prev) =>
+                  prev && prev.width === width && prev.height === height
+                    ? prev
+                    : { width, height }
+                );
+              } else {
+                setMapSize(null);
+              }
+            }}
+          >
+            {mapSize ? (
+              <MapView
+                key={plan ? `marsrut-plan-${plan.regionLabel}-${plan.daysCount}` : 'marsrut-form'}
+                ref={mapRef as never}
+                style={{ width: mapSize.width, height: mapSize.height }}
+                provider={PROVIDER_GOOGLE}
+                {...(Platform.OS === 'web'
+                  ? {
+                      googleMapsApiKey:
+                        process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY || undefined,
+                    }
+                  : {})}
+                initialRegion={{
+                  latitude: regionMeta.latitude,
+                  longitude: regionMeta.longitude,
+                  latitudeDelta: regionMeta.latitudeDelta,
+                  longitudeDelta: regionMeta.longitudeDelta,
+                }}
+                showsUserLocation={false}
+                showsMyLocationButton={false}
+              >
                   {fromOrigin && userLocation ? (
                     <Marker
                       coordinate={userLocation}
@@ -1147,6 +1165,11 @@ export default function MarsrutScreen() {
                     ) : null
                   )}
                 </MapView>
+              ) : (
+                <View style={styles.mapPlaceholder}>
+                  <Text style={styles.mapPlaceholderText}>Xəritə yüklənir…</Text>
+                </View>
+              )}
 
               {plan ? (
                 <TouchableOpacity onPress={handleReset} style={styles.resetBadge}>

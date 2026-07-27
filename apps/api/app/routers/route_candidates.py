@@ -1,4 +1,4 @@
-"""Ranked POI candidates for AI route planning (DB pois table by default)."""
+"""Ranked POI candidates for AI route planning (Google-first)."""
 
 from __future__ import annotations
 
@@ -19,14 +19,14 @@ router = APIRouter(tags=["route"])
 @router.get("/api/route-candidates")
 def route_candidates_endpoint(
     region: str = Query(..., description="Tourism region key, e.g. quba"),
-    per_bucket: int = Query(24, ge=4, le=40, description="Max POIs per category group"),
+    per_bucket: int = Query(12, ge=4, le=30, description="Max POIs per category group"),
     interests: str | None = Query(
         None,
         description="Comma-separated mobile interests, e.g. nature,food,history",
     ),
     source: Literal["google", "db"] = Query(
-        "db",
-        description="Candidate source: db = Supabase pois table (default); google = live Places",
+        "google",
+        description="Candidate source preference (google falls back to db)",
     ),
 ) -> JSONResponse:
     region_key = region.strip().lower()

@@ -1,4 +1,4 @@
-/** Fetch rating-ranked POI buckets from FastAPI (Supabase `pois` table). */
+/** Fetch rating-ranked POI buckets from FastAPI for AI route planning. */
 
 import { getApiBaseUrl } from './apiBase';
 
@@ -40,7 +40,7 @@ export async function fetchRouteCandidates(
     const qs = new URLSearchParams({
       region: region.toLowerCase(),
       per_bucket: String(perBucket),
-      source: 'db',
+      source: 'google',
     });
     if (interests.length > 0) {
       qs.set('interests', interests.join(','));
@@ -48,7 +48,8 @@ export async function fetchRouteCandidates(
 
     const url = `${base}/api/route-candidates?${qs.toString()}`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12_000);
+    // Google Nearby (parallel) + fallback — allow a bit more than DB-only
+    const timer = setTimeout(() => controller.abort(), 20_000);
     const res = await fetch(url, {
       method: 'GET',
       headers: { Accept: 'application/json' },

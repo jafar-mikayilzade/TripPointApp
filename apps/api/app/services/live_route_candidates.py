@@ -178,11 +178,11 @@ def load_live_route_candidates(
     *,
     per_bucket: int = 12,
     interests: list[str] | None = None,
-    source: Literal["google", "db"] = "db",
+    source: Literal["google", "db"] = "google",
 ) -> dict[str, Any]:
     """
     Candidate buckets for AI planning.
-    Default source=db reads approved rows from Supabase `pois`.
+    Default source=google (Nearby), falls back to Supabase `pois` when empty/unavailable.
     """
     region_key = region_key.strip().lower()
     if region_key not in REGION_COORDINATES:
