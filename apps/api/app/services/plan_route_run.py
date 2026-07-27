@@ -42,6 +42,9 @@ def run_plan_route(
     from_origin: bool = False,
     origin_lat: float | None = None,
     origin_lng: float | None = None,
+    depart_time: str | None = "08:00",
+    return_by_time: str | None = "21:00",
+    start_day_offset: int = 0,
 ) -> dict[str, Any]:
     """Build itinerary. Raises ValueError on user/input errors."""
     region_key = (region or "").strip().lower()
@@ -52,16 +55,34 @@ def run_plan_route(
         )
 
     days_n = int(days)
-    if days_n < 1 or days_n > 7:
-        raise ValueError("Gün sayı 1–7 arası olmalıdır")
+    if days_n < 1 or days_n > 3:
+        raise ValueError("Gün sayı 1–3 arası olmalıdır")
 
     use_origin = bool(
         from_origin and origin_lat is not None and origin_lng is not None
     )
+    offset = max(0, min(4, int(start_day_offset or 0)))
+    depart = (depart_time or "08:00").strip() or "08:00"
+    return_by = (return_by_time or "21:00").strip() or "21:00"
 
     db_region = REGION_DB_ID.get(region_key, region_key)
     region_label = REGION_LABELS.get(region_key) or REGION_LABELS.get(db_region) or db_region
     interest_list = [str(i) for i in (interests or [])]
+
+    weather_payload: dict[str, Any] | None = None
+    try:
+        from app.services.weather import fetch_region_weather
+
+        raw = fetch_region_weather(region_key, days_n, start_offset=offset)
+        if raw.get("ok"):
+            weather_payload = {
+                "prefer_indoor": bool(raw.get("prefer_indoor")),
+                "summary_az": raw.get("summary_az") or raw.get("display_az"),
+                "exclude_categories": list(raw.get("exclude_categories") or []),
+                "prefer_categories": list(raw.get("prefer_categories") or []),
+            }
+    except Exception:
+        weather_payload = None
 
     loaded = load_live_route_candidates(
         region_key,
@@ -87,12 +108,12 @@ def run_plan_route(
         restaurants=restaurants,
         accommodations=accommodations,
         attractions=attractions,
-        weather=None,
+        weather=weather_payload,
         origin_lat=float(origin_lat) if use_origin else None,
         origin_lng=float(origin_lng) if use_origin else None,
         from_origin=use_origin,
-        depart_time="08:00",
-        return_by_time="21:00",
+        depart_time=depart,
+        return_by_time=return_by,
         variety_seed=None,
         exclude_poi_ids=[],
     )
@@ -104,7 +125,7 @@ def run_plan_route(
         budget=budget or "mid",
         interests=interest_list,
         group_type=(group_type or "solo").strip() or "solo",
-        weather=None,
+        weather=weather_payload,
     )
 
     travel = plan.pop("travel", None) or skeleton.get("travel")
@@ -124,6 +145,10 @@ def run_plan_route(
         "source": "fastapi_geo",
         "candidatesSource": candidate_source,
         "fromOrigin": use_origin,
+        "departTime": depart if use_origin else None,
+        "returnByTime": return_by if use_origin else None,
+        "startDayOffset": offset,
+        "weatherSummary": (weather_payload or {}).get("summary_az"),
     }
 
 
@@ -131,8 +156,22 @@ def format_plan_for_telegram(plan: dict[str, Any]) -> str:
     """Compact AZ text for Telegram (under ~4000 chars)."""
     label = plan.get("regionLabel") or plan.get("region") or ""
     lines: list[str] = [f"📍 {label} — AI marşrut"]
+    offset = int(plan.get("startDayOffset") or 0)
+    if offset == 0:
+        lines.append("🗓 Başlanğıc: bugün")
+    elif offset == 1:
+        lines.append("🗓 Başlanğıc: sabah")
+    elif offset > 1:
+        lines.append(f"🗓 Başlanğıc: +{offset} gün")
     if plan.get("fromOrigin"):
         lines.append("🚗 Cari məkandan gediş nəzərə alınıb")
+        if plan.get("departTime"):
+            lines.append(f"🕐 Çıxış: {plan['departTime']}")
+        if plan.get("returnByTime"):
+            lines.append(f"🕐 Qayıdış: {plan['returnByTime']}")
+    weather = (plan.get("weatherSummary") or "").strip()
+    if weather:
+        lines.append(f"🌤 {weather}")
     summary = (plan.get("summary") or "").strip()
     if summary:
         lines.append(summary)

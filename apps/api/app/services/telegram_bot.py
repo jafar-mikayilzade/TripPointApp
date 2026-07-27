@@ -306,8 +306,75 @@ def _region_inline(prefix: str) -> dict[str, Any]:
 
 
 def _days_inline() -> dict[str, Any]:
-    row = [_btn(f"{i} gün", f"ai:d:{i}") for i in range(1, 8)]
-    return _ik([row[:4], row[4:], [_btn("🏠 Menyu", "menu")]])
+    return _ik(
+        [
+            [
+                _btn("1 gün", "ai:d:1"),
+                _btn("2 gün", "ai:d:2"),
+                _btn("3 gün", "ai:d:3"),
+            ],
+            [_btn("🏠 Menyu", "menu")],
+        ]
+    )
+
+
+def _start_day_inline() -> dict[str, Any]:
+    return _ik(
+        [
+            [
+                _btn("Bugün", "ai:sd:0"),
+                _btn("Sabah", "ai:sd:1"),
+                _btn("+2 gün", "ai:sd:2"),
+            ],
+            [_btn("🏠 Menyu", "menu")],
+        ]
+    )
+
+
+DEPART_TIME_OPTIONS = ("07:00", "08:00", "09:00", "10:00", "12:00")
+RETURN_TIME_OPTIONS = ("17:00", "18:00", "19:00", "20:00", "21:00")
+
+
+def _time_inline(prefix: str, options: tuple[str, ...]) -> dict[str, Any]:
+    """prefix e.g. ai:dep or ai:ret — callback ai:dep:0800 (no colon in HHMM)."""
+    rows: list[list[dict[str, str]]] = []
+    row: list[dict[str, str]] = []
+    for t in options:
+        hhmm = t.replace(":", "")
+        row.append(_btn(t, f"{prefix}:{hhmm}"))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([_btn("🏠 Menyu", "menu")])
+    return _ik(rows)
+
+
+def _depart_inline() -> dict[str, Any]:
+    return _time_inline("ai:dep", DEPART_TIME_OPTIONS)
+
+
+def _return_inline() -> dict[str, Any]:
+    return _time_inline("ai:ret", RETURN_TIME_OPTIONS)
+
+
+def _parse_hhmm_callback(raw: str) -> str | None:
+    """'0800' or '08:00' → '08:00'."""
+    s = (raw or "").strip()
+    if len(s) == 4 and s.isdigit():
+        return f"{s[:2]}:{s[2:]}"
+    if len(s) == 5 and s[2] == ":" and s[:2].isdigit() and s[3:].isdigit():
+        return s
+    return None
+
+
+def _start_day_label(offset: int) -> str:
+    if offset <= 0:
+        return "bugün"
+    if offset == 1:
+        return "sabah"
+    return f"+{offset} gün"
 
 
 def _budget_inline() -> dict[str, Any]:
@@ -503,7 +570,8 @@ def _help_text(chat_id: str | int) -> str:
     lines = [
         "TripPoint bot (app lazım deyil)",
         "",
-        f"{BTN_AI} — region/gün/büdcə/maraq (düymələrlə)",
+        f"{BTN_AI} — region / gün (1–3) / başlanğıc gün / büdcə / maraq",
+        "   cari məkandan → çıxış və qayıdış saati",
         f"{BTN_MANUAL} — rayondan məkan seçib marşrut",
         f"{BTN_LAST} — son marşrut",
         "Cari məkandan: AI-də «Bəli» → lokasiya paylaş",
@@ -934,6 +1002,9 @@ def _run_and_send_plan(chat_id: str | int, data: dict[str, Any]) -> None:
             from_origin=bool(data.get("from_origin")),
             origin_lat=data.get("origin_lat"),
             origin_lng=data.get("origin_lng"),
+            depart_time=str(data.get("depart_time") or "08:00"),
+            return_by_time=str(data.get("return_by_time") or "21:00"),
+            start_day_offset=int(data.get("start_day_offset") or 0),
         )
         text = format_plan_for_telegram(plan)
         _save_last(chat_id, text)
@@ -950,6 +1021,46 @@ def _run_and_send_plan(chat_id: str | int, data: dict[str, Any]) -> None:
             "Marşrut hazırlanmadı. Bir az sonra yenidən yoxlayın.",
             reply_markup=_main_keyboard(chat_id),
         )
+
+
+def _ask_start_day(chat_id: str | int, message_id: int | None) -> None:
+    session = _get_session(chat_id)
+    session["mode"] = "ai"
+    session["step"] = "start_day"
+    _edit_or_reply(
+        chat_id,
+        "🗓 Səyahət hansı gündən başlasın?",
+        message_id=message_id,
+        reply_markup=_start_day_inline(),
+    )
+
+
+def _ask_depart_time(chat_id: str | int, *, message_id: int | None = None) -> None:
+    session = _get_session(chat_id)
+    session["mode"] = "ai"
+    session["step"] = "depart_time"
+    text = "🕐 Çıxış saatını seçin:"
+    if message_id is not None:
+        _edit_or_reply(
+            chat_id,
+            text,
+            message_id=message_id,
+            reply_markup=_depart_inline(),
+        )
+    else:
+        _reply(chat_id, text, reply_markup=_depart_inline())
+
+
+def _ask_return_time(chat_id: str | int, message_id: int | None) -> None:
+    session = _get_session(chat_id)
+    session["mode"] = "ai"
+    session["step"] = "return_time"
+    _edit_or_reply(
+        chat_id,
+        "🕐 Qayıdış saatını seçin:",
+        message_id=message_id,
+        reply_markup=_return_inline(),
+    )
 
 
 def _ask_from_origin(chat_id: str | int, message_id: int | None) -> None:
@@ -1629,14 +1740,23 @@ def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
 
     if data.startswith("ai:d:"):
         days = data.split(":")[-1]
-        if not days.isdigit() or not (1 <= int(days) <= 7):
+        if not days.isdigit() or not (1 <= int(days) <= 3):
             return {"ok": True}
         session = _get_session(chat_id)
         session["data"]["days"] = int(days)
+        _ask_start_day(chat_id, message_id)
+        return {"ok": True}
+
+    if data.startswith("ai:sd:"):
+        raw = data.split(":")[-1]
+        if not raw.isdigit() or not (0 <= int(raw) <= 2):
+            return {"ok": True}
+        session = _get_session(chat_id)
+        session["data"]["start_day_offset"] = int(raw)
         session["step"] = "budget"
         _edit_or_reply(
             chat_id,
-            "Büdcə seçin:",
+            f"Başlanğıc: {_start_day_label(int(raw))}\nBüdcə seçin:",
             message_id=message_id,
             reply_markup=_budget_inline(),
         )
@@ -1696,6 +1816,8 @@ def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
         session["data"]["from_origin"] = False
         session["data"].pop("origin_lat", None)
         session["data"].pop("origin_lng", None)
+        session["data"].pop("depart_time", None)
+        session["data"].pop("return_by_time", None)
         payload = dict(session.get("data") or {})
         _clear_session(chat_id)
         _run_and_send_plan(chat_id, payload)
@@ -1703,6 +1825,26 @@ def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
 
     if data == "ai:fo:1":
         _request_location(chat_id)
+        return {"ok": True}
+
+    if data.startswith("ai:dep:"):
+        t = _parse_hhmm_callback(data.split(":")[-1])
+        if not t:
+            return {"ok": True}
+        session = _get_session(chat_id)
+        session["data"]["depart_time"] = t
+        _ask_return_time(chat_id, message_id)
+        return {"ok": True}
+
+    if data.startswith("ai:ret:"):
+        t = _parse_hhmm_callback(data.split(":")[-1])
+        if not t:
+            return {"ok": True}
+        session = _get_session(chat_id)
+        session["data"]["return_by_time"] = t
+        payload = dict(session.get("data") or {})
+        _clear_session(chat_id)
+        _run_and_send_plan(chat_id, payload)
         return {"ok": True}
 
     if data.startswith("man:r:"):
@@ -1834,12 +1976,15 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
         if isinstance(loc, dict) and loc.get("latitude") is not None:
             session = _get_session(chat_id)
             if session.get("mode") == "ai" and session.get("step") == "await_location":
-                data = dict(session.get("data") or {})
-                data["from_origin"] = True
-                data["origin_lat"] = float(loc["latitude"])
-                data["origin_lng"] = float(loc["longitude"])
-                _clear_session(chat_id)
-                _run_and_send_plan(chat_id, data)
+                session["data"]["from_origin"] = True
+                session["data"]["origin_lat"] = float(loc["latitude"])
+                session["data"]["origin_lng"] = float(loc["longitude"])
+                _reply(
+                    chat_id,
+                    "Lokasiya alındı ✅",
+                    reply_markup=_main_keyboard(chat_id),
+                )
+                _ask_depart_time(chat_id)
                 return {"ok": True}
 
         text = (message.get("text") or "").strip()
