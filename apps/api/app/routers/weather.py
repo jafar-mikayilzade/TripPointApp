@@ -13,5 +13,11 @@ router = APIRouter(tags=["weather"])
 def weather_endpoint(
     region: str = Query(..., description="Tourism region key, e.g. quba"),
     days: int = Query(3, ge=1, le=5, description="Trip length in days"),
+    start_day: int = Query(
+        0,
+        ge=0,
+        le=4,
+        description="0=today, 1=tomorrow — first day of the trip in forecast",
+    ),
 ) -> dict:
-    return fetch_region_weather(region, days)
+    return fetch_region_weather(region, days, start_offset=start_day)

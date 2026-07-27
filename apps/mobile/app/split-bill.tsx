@@ -19,6 +19,13 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getErrorMessage } from '../lib/errors';
+import {
+  createExpenseGroup,
+  fetchGroupDetail,
+  fetchUserGroupCards,
+  findActiveGroupForListing,
+  type ExpenseGroupCard,
+} from '../lib/expenseGroups';
 import { shareSplitBillPdf } from '../lib/shareSplitBill';
 import {
   calculateMemberBalances,
@@ -45,14 +52,11 @@ import { colors } from '../constants/theme';
 
 type MemberProfile = Pick<Profile, 'id' | 'full_name' | 'phone'>;
 
-type GroupCard = ExpenseGroup & {
-  memberCount: number;
-  totalAmount: number;
-};
-
 type ExpenseRow = Expense & {
   payerName: string;
 };
+
+type GroupCard = ExpenseGroupCard;
 
 function formatMoney(amount: number): string {
   return `${amount.toFixed(2)}₼`;
@@ -140,83 +144,14 @@ export default function SplitBillScreen() {
 
     setAuthUserId(user.id);
 
-    const [ownedResult, memberResult] = await Promise.all([
-      supabase.from('expense_groups').select('*').eq('created_by', user.id),
-      supabase.from('expense_group_members').select('group_id').eq('user_id', user.id),
-    ]);
-
-    if (ownedResult.error) {
-      setErrorMessage(getErrorMessage(ownedResult.error));
+    try {
+      setGroups(await fetchUserGroupCards(user.id));
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err));
       setGroups([]);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    if (memberResult.error) {
-      setErrorMessage(getErrorMessage(memberResult.error));
-      setGroups([]);
-      setLoading(false);
-      return;
-    }
-
-    const memberGroupIds = (memberResult.data ?? []).map((row) => row.group_id);
-    const ownedGroups = ownedResult.data ?? [];
-    const ownedIds = new Set(ownedGroups.map((row) => row.id));
-    const missingIds = memberGroupIds.filter((id) => !ownedIds.has(id));
-
-    let memberGroups: ExpenseGroup[] = [];
-    if (missingIds.length > 0) {
-      const { data, error } = await supabase.from('expense_groups').select('*').in('id', missingIds);
-      if (error) {
-        setErrorMessage(getErrorMessage(error));
-        setGroups([]);
-        setLoading(false);
-        return;
-      }
-      memberGroups = data ?? [];
-    }
-
-    const allGroups = [...ownedGroups, ...memberGroups].sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-
-    if (allGroups.length === 0) {
-      setGroups([]);
-      setLoading(false);
-      return;
-    }
-
-    const groupIds = allGroups.map((item) => item.id);
-    const [membersResult, expensesResult] = await Promise.all([
-      supabase.from('expense_group_members').select('group_id').in('group_id', groupIds),
-      supabase.from('expenses').select('group_id, amount').in('group_id', groupIds),
-    ]);
-
-    if (membersResult.error) {
-      setErrorMessage(getErrorMessage(membersResult.error));
-    }
-    if (expensesResult.error) {
-      setErrorMessage(getErrorMessage(expensesResult.error));
-    }
-
-    const memberCountMap = new Map<string, number>();
-    for (const row of membersResult.data ?? []) {
-      memberCountMap.set(row.group_id, (memberCountMap.get(row.group_id) ?? 0) + 1);
-    }
-
-    const totalMap = new Map<string, number>();
-    for (const row of expensesResult.data ?? []) {
-      totalMap.set(row.group_id, (totalMap.get(row.group_id) ?? 0) + Number(row.amount));
-    }
-
-    setGroups(
-      allGroups.map((item) => ({
-        ...item,
-        memberCount: memberCountMap.get(item.id) ?? 0,
-        totalAmount: Math.round((totalMap.get(item.id) ?? 0) * 100) / 100,
-      }))
-    );
-    setLoading(false);
   }, []);
 
   const loadGroupDetailGen = useRef(0);
@@ -226,129 +161,95 @@ export default function SplitBillScreen() {
     setDetailLoading(true);
     setErrorMessage(null);
 
-    const { data: groupData, error: groupError } = await supabase
-      .from('expense_groups')
-      .select('*')
-      .eq('id', groupId)
-      .maybeSingle();
-
-    if (gen !== loadGroupDetailGen.current) {
-      return;
-    }
-
-    if (groupError || !groupData) {
-      setErrorMessage(groupError ? getErrorMessage(groupError) : 'Qrup tapılmadı.');
-      setGroup(null);
-      setMembers([]);
-      setExpenses([]);
-      setDetailLoading(false);
-      return;
-    }
-
-    setGroup(groupData);
-
-    // Elana bağlı kart / region
-    if (groupData.listing_id) {
-      const { data: listingRow } = await supabase
-        .from('listings')
-        .select('payment_card, region')
-        .eq('id', groupData.listing_id)
-        .maybeSingle();
+    try {
+      const detail = await fetchGroupDetail(groupId);
       if (gen !== loadGroupDetailGen.current) {
         return;
       }
-      const card = listingRow?.payment_card?.replace(/\D/g, '') || null;
-      setPaymentCard(card && card.length >= 12 ? card : null);
-      setListingRegion(listingRow?.region?.trim() || null);
-    } else {
-      setPaymentCard(null);
-      setListingRegion(null);
-    }
-
-    const { data: memberRows, error: membersError } = await supabase
-      .from('expense_group_members')
-      .select('user_id')
-      .eq('group_id', groupId);
-
-    if (gen !== loadGroupDetailGen.current) {
-      return;
-    }
-
-    if (membersError) {
-      setErrorMessage(getErrorMessage(membersError));
-      setDetailLoading(false);
-      return;
-    }
-
-    const userIds = (memberRows ?? []).map((row) => row.user_id);
-    let memberProfiles: MemberProfile[] = [];
-
-    if (userIds.length > 0) {
-      const { data: profiles, error: profilesError } = await supabase
-        .from('profiles')
-        .select('id, full_name, phone')
-        .in('id', userIds);
-
+      if (!detail) {
+        setErrorMessage('Qrup tapılmadı.');
+        setGroup(null);
+        setMembers([]);
+        setExpenses([]);
+        return;
+      }
+      setGroup(detail.group);
+      setMembers(detail.members);
+      setExpenses(detail.expenses);
+      setPaymentCard(detail.paymentCard);
+      setListingRegion(detail.listingRegion);
+    } catch (err) {
       if (gen !== loadGroupDetailGen.current) {
         return;
       }
-
-      if (profilesError) {
-        setErrorMessage(getErrorMessage(profilesError));
-      } else {
-        memberProfiles = (profiles ?? []) as MemberProfile[];
+      setErrorMessage(getErrorMessage(err));
+    } finally {
+      if (gen === loadGroupDetailGen.current) {
+        setDetailLoading(false);
       }
     }
-
-    setMembers(memberProfiles);
-
-    const { data: expenseRows, error: expensesError } = await supabase
-      .from('expenses')
-      .select('*')
-      .eq('group_id', groupId)
-      .order('created_at', { ascending: false });
-
-    if (gen !== loadGroupDetailGen.current) {
-      return;
-    }
-
-    if (expensesError) {
-      setErrorMessage(getErrorMessage(expensesError));
-      setExpenses([]);
-      setDetailLoading(false);
-      return;
-    }
-
-    const nameMap = new Map(
-      memberProfiles.map((item) => [item.id, item.full_name?.trim() || 'İstifadəçi'])
-    );
-    setExpenses(
-      (expenseRows ?? []).map((row) => ({
-        ...row,
-        payerName: nameMap.get(row.paid_by) || 'İstifadəçi',
-      }))
-    );
-    setDetailLoading(false);
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      loadGroups();
+      void loadGroups();
       if (paramGroupId) {
         setSelectedGroupId(paramGroupId);
+        return;
       }
       if (paramListingId) {
-        setSelectedListingId(paramListingId);
-        setCreateVisible(true);
+        void (async () => {
+          const existingId = await findActiveGroupForListing(paramListingId);
+          if (existingId) {
+            setSelectedGroupId(existingId);
+            setCreateVisible(false);
+          } else {
+            setSelectedListingId(paramListingId);
+            setCreateVisible(true);
+          }
+        })();
       }
     }, [loadGroups, paramGroupId, paramListingId])
   );
 
   useFocusEffect(
     useCallback(() => {
-      if (selectedGroupId) {
-        loadGroupDetail(selectedGroupId);
+      if (!selectedGroupId) {
+        return;
       }
+      void loadGroupDetail(selectedGroupId);
+
+      const channel = supabase
+        .channel(`expense-group-${selectedGroupId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'expenses',
+            filter: `group_id=eq.${selectedGroupId}`,
+          },
+          () => {
+            void loadGroupDetail(selectedGroupId);
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'expense_group_members',
+            filter: `group_id=eq.${selectedGroupId}`,
+          },
+          () => {
+            void loadGroupDetail(selectedGroupId);
+          }
+        )
+        .subscribe();
+
+      return () => {
+        void supabase.removeChannel(channel);
+      };
     }, [loadGroupDetail, selectedGroupId])
   );
 
@@ -433,58 +334,26 @@ export default function SplitBillScreen() {
       return;
     }
 
-    const { data: created, error: createErr } = await supabase
-      .from('expense_groups')
-      .insert({
-        created_by: user.id,
-        name: groupName.trim(),
-        listing_id: selectedListingId,
-        status: 'active',
-      })
-      .select('*')
-      .single();
-
-    if (createErr || !created) {
-      setCreateError(createErr ? getErrorMessage(createErr) : 'Qrup yaradılmadı.');
-      setCreating(false);
-      return;
-    }
-
-    const memberIds = new Set<string>([user.id]);
-
-    // Elana bağlı qrup: təsdiqlənmiş iştirakçıları avtomatik əlavə et
-    if (selectedListingId) {
-      const { data: participants } = await supabase
-        .from('listing_participants')
-        .select('user_id')
-        .eq('listing_id', selectedListingId)
-        .eq('status', 'approved');
-      for (const row of participants ?? []) {
-        if (row.user_id) {
-          memberIds.add(row.user_id);
-        }
-      }
-    }
-
-    const { error: membersError } = await supabase.from('expense_group_members').insert(
-      [...memberIds].map((userId) => ({
-        group_id: created.id,
-        user_id: userId,
-      }))
-    );
-    if (membersError) {
-      setCreateError(`Qrup yaradıldı, amma üzv yazılmadı: ${getErrorMessage(membersError)}`);
-      setCreating(false);
-      await loadGroups();
-      setSelectedGroupId(created.id);
-      setCreateVisible(false);
-      return;
-    }
+    const { groupId, error } = await createExpenseGroup({
+      name: groupName.trim(),
+      listingId: selectedListingId,
+      userId: user.id,
+    });
 
     setCreating(false);
+
+    if (!groupId) {
+      setCreateError(error || 'Qrup yaradılmadı.');
+      return;
+    }
+
+    if (error) {
+      setCreateError(error);
+    }
+
     setCreateVisible(false);
     await loadGroups();
-    setSelectedGroupId(created.id);
+    setSelectedGroupId(groupId);
   }
 
   async function shareGroupPdf() {
@@ -1156,7 +1025,7 @@ export default function SplitBillScreen() {
               </View>
 
               <Text style={styles.mvpHint}>
-                MVP: qrup yalnız sizin üçün yaradılır. Üzv əlavə etmə tezliklə gələcək.
+                Tur elanına bağlasanız, təsdiqlənmiş iştirakçılar avtomatik qrupa əlavə olunur.
               </Text>
 
               <View style={styles.modalActions}>

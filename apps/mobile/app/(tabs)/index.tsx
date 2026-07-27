@@ -1156,11 +1156,6 @@ export default function HomeScreen() {
                       <Text style={styles.listTitle} numberOfLines={2}>
                         {loading ? 'Yüklənir...' : listTitle}
                       </Text>
-                      {selectedRegionId && weatherLabel ? (
-                        <Text style={styles.listWeather} numberOfLines={1}>
-                          {weatherLabel}
-                        </Text>
-                      ) : null}
                     </View>
                     <TouchableOpacity
                       onPress={() => router.push('/feed' as never)}

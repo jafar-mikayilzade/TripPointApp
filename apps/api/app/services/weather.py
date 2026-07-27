@@ -94,7 +94,77 @@ def analyze_forecast(slots: list[dict[str, Any]], days: int) -> dict[str, Any]:
     }
 
 
-def fetch_region_weather(region_key: str, days: int = 3) -> dict[str, Any]:
+def _slots_by_calendar_day(
+    slots: list[dict[str, Any]],
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Group OpenWeather 3h buckets by YYYY-MM-DD, sorted."""
+    from collections import defaultdict
+
+    by_day: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for slot in slots:
+        dt_txt = str(slot.get("dt_txt") or "")
+        day_key = dt_txt.split(" ")[0] if " " in dt_txt else ""
+        if day_key:
+            by_day[day_key].append(slot)
+    return sorted(by_day.items(), key=lambda item: item[0])
+
+
+def build_daily_forecast(
+    slots: list[dict[str, Any]],
+    *,
+    trip_days: int,
+    start_offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Per-day summaries for UI — respects trip start offset into the forecast."""
+    days_n = max(1, min(trip_days, 5))
+    offset = max(0, min(start_offset, 4))
+    day_groups = _slots_by_calendar_day(slots)
+    selected = day_groups[offset : offset + days_n]
+    out: list[dict[str, Any]] = []
+
+    for i, (day_key, day_slots) in enumerate(selected):
+        analysis = analyze_forecast(day_slots, 1)
+        temp_c: float | None = None
+        condition_az = ""
+        if day_slots:
+            midday = day_slots[min(len(day_slots) // 2, len(day_slots) - 1)]
+            main = midday.get("main") or {}
+            weather0 = (midday.get("weather") or [{}])[0] or {}
+            try:
+                if main.get("temp") is not None:
+                    temp_c = round(float(main["temp"]), 1)
+            except (TypeError, ValueError):
+                temp_c = None
+            condition_az = str(
+                weather0.get("description") or weather0.get("main") or ""
+            ).strip()
+
+        if temp_c is not None and condition_az:
+            display_az = f"{temp_c:.0f}° · {condition_az}"
+        elif temp_c is not None:
+            display_az = f"{temp_c:.0f}°"
+        else:
+            display_az = str(analysis.get("summary_az") or "")
+
+        out.append(
+            {
+                "day_index": i,
+                "date": day_key,
+                "temp_c": temp_c,
+                "condition_az": condition_az,
+                "display_az": display_az,
+                "prefer_indoor": analysis["prefer_indoor"],
+                "summary_az": analysis["summary_az"],
+                "exclude_categories": analysis["exclude_categories"],
+                "prefer_categories": analysis["prefer_categories"],
+            }
+        )
+    return out
+
+
+def fetch_region_weather(
+    region_key: str, days: int = 3, *, start_offset: int = 0
+) -> dict[str, Any]:
     key = region_key.strip().lower()
     if key not in REGION_COORDINATES:
         return {
@@ -120,7 +190,7 @@ def fetch_region_weather(region_key: str, days: int = 3) -> dict[str, Any]:
             "available": False,
         }
 
-    cache_key = f"{key}:{max(1, min(days, 5))}"
+    cache_key = f"{key}:{max(1, min(days, 5))}:{max(0, min(start_offset, 4))}"
     cached = _cache_get(cache_key)
     if cached:
         return {**cached, "cached": True}
@@ -148,12 +218,24 @@ def fetch_region_weather(region_key: str, days: int = 3) -> dict[str, Any]:
         }
 
     slots = data.get("list") or []
-    analysis = analyze_forecast(slots, days)
+    offset = max(0, min(start_offset, 4))
+    day_groups = _slots_by_calendar_day(slots)
+    window_slots: list[dict[str, Any]] = []
+    for _, day_slots in day_groups[offset : offset + max(1, min(days, 5))]:
+        window_slots.extend(day_slots)
+    analysis = analyze_forecast(window_slots or slots, days)
+    daily_forecast = build_daily_forecast(
+        slots, trip_days=days, start_offset=offset
+    )
 
     temp_c: float | None = None
     feels_like: float | None = None
     condition_az = ""
-    if slots:
+    first_day_slots = daily_forecast[0] if daily_forecast else None
+    if first_day_slots:
+        temp_c = first_day_slots.get("temp_c")
+        condition_az = str(first_day_slots.get("condition_az") or "")
+    elif slots:
         first = slots[0] or {}
         main = first.get("main") or {}
         weather0 = (first.get("weather") or [{}])[0] or {}
@@ -169,8 +251,9 @@ def fetch_region_weather(region_key: str, days: int = 3) -> dict[str, Any]:
             feels_like = None
         condition_az = str(weather0.get("description") or weather0.get("main") or "").strip()
 
-    # UI üçün qısa sətir (AI summary_az ayrıca qalır)
-    if temp_c is not None and condition_az:
+    if first_day_slots and first_day_slots.get("display_az"):
+        display_az = str(first_day_slots["display_az"])
+    elif temp_c is not None and condition_az:
         display_az = f"{temp_c:.0f}° · {condition_az}"
     elif temp_c is not None:
         display_az = f"{temp_c:.0f}°"
@@ -188,6 +271,8 @@ def fetch_region_weather(region_key: str, days: int = 3) -> dict[str, Any]:
         "feels_like": feels_like,
         "condition_az": condition_az,
         "display_az": display_az,
+        "daily_forecast": daily_forecast,
+        "start_offset": offset,
         **analysis,
     }
     _cache_set(cache_key, payload)

@@ -2,6 +2,18 @@
 
 import { getApiBaseUrl } from './apiBase';
 
+export type DailyWeather = {
+  day_index: number;
+  date: string;
+  temp_c?: number | null;
+  condition_az?: string;
+  display_az?: string;
+  prefer_indoor?: boolean;
+  summary_az?: string;
+  exclude_categories?: string[];
+  prefer_categories?: string[];
+};
+
 export type WeatherAdvice = {
   ok: boolean;
   available?: boolean;
@@ -17,6 +29,8 @@ export type WeatherAdvice = {
   prefer_categories: string[];
   cached?: boolean;
   error?: string;
+  daily_forecast?: DailyWeather[];
+  start_offset?: number;
 };
 
 /** Qısa hava mətni — banner / chip üçün. */
@@ -38,14 +52,33 @@ export function formatWeatherLabel(weather: WeatherAdvice | null | undefined): s
   return summary || null;
 }
 
+/** Per-day label for multi-day plan headers. */
+export function formatDayWeatherLabel(
+  weather: WeatherAdvice | null | undefined,
+  dayIndex: number
+): string | null {
+  const day = weather?.daily_forecast?.[dayIndex];
+  if (day?.display_az?.trim()) {
+    return day.display_az.trim();
+  }
+  if (day && typeof day.temp_c === 'number' && day.condition_az) {
+    return `${Math.round(day.temp_c)}° · ${day.condition_az}`;
+  }
+  if (dayIndex === 0) {
+    return formatWeatherLabel(weather);
+  }
+  return null;
+}
+
 const MEMORY_TTL_MS = 10 * 60_000;
 const memory = new Map<string, { at: number; data: WeatherAdvice }>();
 
 export async function fetchRegionWeather(
   region: string,
-  days: number
+  days: number,
+  startDay = 0
 ): Promise<WeatherAdvice | null> {
-  const key = `${region.toLowerCase()}:${days}`;
+  const key = `${region.toLowerCase()}:${days}:${startDay}`;
   const hit = memory.get(key);
   if (hit && Date.now() - hit.at < MEMORY_TTL_MS) {
     return hit.data;
@@ -59,7 +92,9 @@ export async function fetchRegionWeather(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 9000);
   try {
-    const url = `${base}/api/weather?region=${encodeURIComponent(region.toLowerCase())}&days=${days}`;
+    const url =
+      `${base}/api/weather?region=${encodeURIComponent(region.toLowerCase())}` +
+      `&days=${days}&start_day=${Math.max(0, Math.min(startDay, 4))}`;
     const res = await fetch(url, {
       method: 'GET',
       headers: { Accept: 'application/json' },
@@ -96,4 +131,26 @@ export function applyWeatherPoiFilter<T extends { category: string }>(
   const filtered = pois.filter((p) => !exclude.has(p.category));
   // Keep at least some stops if filter wiped everything
   return filtered.length >= 5 ? filtered : pois;
+}
+
+/** Merge per-day indoor bias when any trip day is rainy. */
+export function weatherForPlanDay(
+  weather: WeatherAdvice | null,
+  dayIndex: number
+): WeatherAdvice | null {
+  if (!weather?.ok) {
+    return weather;
+  }
+  const day = weather.daily_forecast?.[dayIndex];
+  if (!day) {
+    return weather;
+  }
+  return {
+    ...weather,
+    prefer_indoor: Boolean(day.prefer_indoor),
+    summary_az: day.summary_az || weather.summary_az,
+    display_az: day.display_az || weather.display_az,
+    exclude_categories: day.exclude_categories || weather.exclude_categories,
+    prefer_categories: day.prefer_categories || weather.prefer_categories,
+  };
 }

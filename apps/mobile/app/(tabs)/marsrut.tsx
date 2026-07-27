@@ -23,6 +23,7 @@ import MapView, {
   type Region as MapRegion,
 } from '../../components/AppMap';
 import { CategoryIcon } from '../../components/CategoryIcon';
+import { ChipRow } from '../../components/ChipRow';
 import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
@@ -39,6 +40,7 @@ import { useInfoToast } from '../../components/InfoToastProvider';
 import {
   applyWeatherPoiFilter,
   fetchRegionWeather,
+  formatDayWeatherLabel,
   formatWeatherLabel,
   type WeatherAdvice,
 } from '../../lib/weather';
@@ -168,6 +170,26 @@ const DAY_OPTIONS: { value: DayOption; label: string }[] = [
   { value: 4, label: '4+ gün' },
 ];
 
+const START_DAY_OPTIONS = [
+  { value: 0, label: 'Bu gün' },
+  { value: 1, label: 'Sabah' },
+  { value: 2, label: '+2 gün' },
+  { value: 3, label: '+3 gün' },
+  { value: 4, label: '+4 gün' },
+] as const;
+
+const DEPART_TIME_OPTIONS = [
+  { value: '08:00', label: '08:00 — evdən çıxış' },
+  { value: '09:00', label: '09:00 — evdən çıxış' },
+  { value: '10:00', label: '10:00 — evdən çıxış' },
+] as const;
+
+const RETURN_TIME_OPTIONS = [
+  { value: '21:00', label: '21:00 — evdə ol' },
+  { value: '22:00', label: '22:00 — evdə ol' },
+  { value: '23:00', label: '23:00 — evdə ol' },
+] as const;
+
 const BUDGET_OPTIONS: { value: BudgetOption; label: string }[] = [
   { value: 'budget', label: 'Ekonom' },
   { value: 'mid', label: 'Orta' },
@@ -289,6 +311,9 @@ export default function MarsrutScreen() {
   const [routeSegments, setRouteSegments] = useState<RouteSegment[]>([]);
   const [stopDurations, setStopDurations] = useState<Record<string, StopDuration>>({});
   const [fromOrigin, setFromOrigin] = useState(false);
+  const [departTime, setDepartTime] = useState<(typeof DEPART_TIME_OPTIONS)[number]['value']>('08:00');
+  const [returnByTime, setReturnByTime] = useState<(typeof RETURN_TIME_OPTIONS)[number]['value']>('21:00');
+  const [startDayOffset, setStartDayOffset] = useState(0);
   const [userLocation, setUserLocation] = useState<{
     latitude: number;
     longitude: number;
@@ -500,7 +525,7 @@ export default function MarsrutScreen() {
       return;
     }
     let cancelled = false;
-    void fetchRegionWeather(regionId, days).then((data) => {
+    void fetchRegionWeather(regionId, days, startDayOffset).then((data) => {
       if (!cancelled) {
         setWeatherAdvice(data);
       }
@@ -508,7 +533,7 @@ export default function MarsrutScreen() {
     return () => {
       cancelled = true;
     };
-  }, [regionId, days, plan]);
+  }, [regionId, days, startDayOffset, plan]);
 
   function toggleInterest(id: InterestId) {
     setInterests((current) =>
@@ -738,7 +763,7 @@ export default function MarsrutScreen() {
         return;
       }
 
-      const weather = await fetchRegionWeather(regionId, days);
+      const weather = await fetchRegionWeather(regionId, days, startDayOffset);
       setWeatherAdvice(weather);
 
       let restaurants: any[] = [];
@@ -852,6 +877,8 @@ export default function MarsrutScreen() {
         fromOrigin,
         originLat: fromOrigin && userLocation ? userLocation.latitude : null,
         originLng: fromOrigin && userLocation ? userLocation.longitude : null,
+        departTime: fromOrigin ? departTime : undefined,
+        returnByTime: fromOrigin ? returnByTime : undefined,
         varietySeed: Date.now(),
         excludePoiIds,
       });
@@ -1117,13 +1144,6 @@ export default function MarsrutScreen() {
                   </Text>
                 </TouchableOpacity>
               ) : null}
-              {plan && formatWeatherLabel(weatherAdvice) ? (
-                <View style={styles.mapWeatherBadge} pointerEvents="none">
-                  <Text style={styles.mapWeatherBadgeText} numberOfLines={1}>
-                    {formatWeatherLabel(weatherAdvice)}
-                  </Text>
-                </View>
-              ) : null}
               {plan ? <ProfileCornerButton style={styles.profileCorner} /> : null}
             </View>
           }
@@ -1179,6 +1199,25 @@ export default function MarsrutScreen() {
                     />
                   </View>
 
+                  {fromOrigin ? (
+                    <>
+                      <Text style={styles.label}>Evdən çıxış saatı</Text>
+                      <ChipRow
+                        options={[...DEPART_TIME_OPTIONS]}
+                        value={departTime}
+                        onChange={setDepartTime}
+                        chipFontSize={responsive.chipFontSize}
+                      />
+                      <Text style={[styles.label, { marginTop: 10 }]}>Eve qayıdış saatı</Text>
+                      <ChipRow
+                        options={[...RETURN_TIME_OPTIONS]}
+                        value={returnByTime}
+                        onChange={setReturnByTime}
+                        chipFontSize={responsive.chipFontSize}
+                      />
+                    </>
+                  ) : null}
+
                   <Text style={styles.label}>
                     Region <Text style={styles.required}>*</Text>
                   </Text>
@@ -1222,11 +1261,22 @@ export default function MarsrutScreen() {
 
                   {formatWeatherLabel(weatherAdvice) ? (
                     <View style={[styles.weatherChip, { marginBottom: 10, maxWidth: '100%' }]}>
-                      <Text style={styles.weatherChipText} numberOfLines={1}>
+                      <Text style={styles.weatherChipText} numberOfLines={2}>
                         Hava · {formatWeatherLabel(weatherAdvice)}
+                        {START_DAY_OPTIONS.find((d) => d.value === startDayOffset)
+                          ? ` · ${START_DAY_OPTIONS.find((d) => d.value === startDayOffset)?.label}`
+                          : ''}
                       </Text>
                     </View>
                   ) : null}
+
+                  <Text style={styles.label}>Turun başlanğıc günü</Text>
+                  <ChipRow
+                    options={[...START_DAY_OPTIONS]}
+                    value={startDayOffset}
+                    onChange={setStartDayOffset}
+                    chipFontSize={responsive.chipFontSize}
+                  />
 
                   <Text style={styles.label}>
                     Gün sayı <Text style={styles.required}>*</Text>
@@ -1371,13 +1421,6 @@ export default function MarsrutScreen() {
                       <Text style={styles.summaryText} numberOfLines={1}>
                         {plan.regionLabel} · {plan.daysCount} gün
                       </Text>
-                      {formatWeatherLabel(weatherAdvice) ? (
-                        <View style={styles.weatherChip}>
-                          <Text style={styles.weatherChipText} numberOfLines={1}>
-                            {formatWeatherLabel(weatherAdvice)}
-                          </Text>
-                        </View>
-                      ) : null}
                     </View>
                     {plan.total_cost ? (
                       <View style={styles.summaryMetaRow}>
@@ -1393,7 +1436,10 @@ export default function MarsrutScreen() {
                           ? ` · ${plan.travel.distance_km.toFixed(0)} km`
                           : ''}
                         {plan.travel.depart_origin_at
-                          ? ` · ${plan.travel.depart_origin_at}`
+                          ? ` · çıxış ${plan.travel.depart_origin_at}`
+                          : ''}
+                        {plan.travel.return_origin_by
+                          ? ` · qayıdış ${plan.travel.return_origin_by}`
                           : ''}
                       </Text>
                     ) : null}
@@ -1466,9 +1512,16 @@ export default function MarsrutScreen() {
                         >
                           <Text style={styles.dayBadgeText}>{day.day}</Text>
                         </View>
-                        <Text style={styles.dayTitle} numberOfLines={2}>
-                          {day.title}
-                        </Text>
+                        <View style={styles.dayHeaderMain}>
+                          <Text style={styles.dayTitle} numberOfLines={2}>
+                            {day.title}
+                          </Text>
+                          {formatDayWeatherLabel(weatherAdvice, dayIdx) ? (
+                            <Text style={styles.dayWeather} numberOfLines={1}>
+                              {formatDayWeatherLabel(weatherAdvice, dayIdx)}
+                            </Text>
+                          ) : null}
+                        </View>
                         {day.estimated_cost ? (
                           <Text style={styles.dayCost} numberOfLines={1}>
                             {day.estimated_cost}
@@ -2092,6 +2145,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: colors.text,
+  },
+  dayHeaderMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  dayWeather: {
+    fontSize: 11,
+    color: colors.accent,
+    marginTop: 3,
+    fontWeight: '500',
   },
   dayCost: {
     fontSize: 11,

@@ -23,7 +23,7 @@ import { FavoriteButton } from './FavoriteButton';
 import { SubscribeMenuButton } from './SubscribeMenuButton';
 import { TransientHint } from './TransientHint';
 import { notifyAdmins } from '../lib/adminNotify';
-import { getErrorMessage } from '../lib/errors';
+import { resolveSplitBillParamsForListing } from '../lib/expenseGroups';
 import {
   buildListingWhatsAppUrl,
   resolveListingWhatsAppPhone,
@@ -794,10 +794,13 @@ export function ListingDetailModal({
                   style={[styles.sideActionBtn, styles.splitBillButton]}
                   onPress={() => {
                     onClose();
-                    router.push({
-                      pathname: '/split-bill',
-                      params: { listingId: listing.id },
-                    } as never);
+                    void (async () => {
+                      const params = await resolveSplitBillParamsForListing(listing.id);
+                      router.push({
+                        pathname: '/split-bill',
+                        params,
+                      } as never);
+                    })();
                   }}
                 >
                   <FontAwesome name="money" size={11} color={colors.textOnAccent} />
