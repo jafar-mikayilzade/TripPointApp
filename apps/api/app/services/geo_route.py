@@ -519,96 +519,6 @@ def farthest_point_seeds(
     return seeds
 
 
-def assign_to_nearest_seed(
-    pois: Sequence[dict[str, Any]],
-    seeds: Sequence[dict[str, Any]],
-) -> list[list[dict[str, Any]]]:
-    """Assign each POI to nearest seed → one cluster per seed."""
-    clusters: list[list[dict[str, Any]]] = [[] for _ in seeds]
-    seed_coords = [_coord(s) for s in seeds]
-    for poi in pois:
-        coord = _coord(poi)
-        if coord is None:
-            continue
-        best_i = 0
-        best_d = float("inf")
-        for i, sc in enumerate(seed_coords):
-            if sc is None:
-                continue
-            d = haversine_km(coord[0], coord[1], sc[0], sc[1])
-            if d < best_d:
-                best_d = d
-                best_i = i
-        clusters[best_i].append(poi)
-    return clusters
-
-
-def rebalance_clusters(
-    clusters: list[list[dict[str, Any]]],
-    *,
-    min_size: int = 2,
-    max_steal_km: float = 12.0,
-) -> list[list[dict[str, Any]]]:
-    """
-    Steal from rich days into thin ones — only when the POI is geographically
-    nearer the needy cluster than the donor (no cross-town transplants).
-    """
-    if not clusters:
-        return clusters
-    clusters = [list(c) for c in clusters]
-
-    def size(i: int) -> int:
-        return len(clusters[i])
-
-    for _ in range(max(8, len(clusters) * 3)):
-        needy = [i for i in range(len(clusters)) if size(i) < min_size]
-        if not needy:
-            break
-        progressed = False
-        for i in needy:
-            needy_c = cluster_centroid(clusters[i])
-            # Thin/empty: aim toward a point far from the richest donor later
-            best_move: tuple[float, int, int] | None = None  # (dist_to_needy, donor, idx)
-            for donor in range(len(clusters)):
-                if donor == i or size(donor) <= min_size:
-                    continue
-                donor_c = cluster_centroid(clusters[donor])
-                if not donor_c or not clusters[donor]:
-                    continue
-                for j, poi in enumerate(clusters[donor]):
-                    coord = _coord(poi)
-                    if coord is None:
-                        continue
-                    d_donor = haversine_km(donor_c[0], donor_c[1], coord[0], coord[1])
-                    if needy_c is None:
-                        # Empty needy: only peel a fringe point far from donor core
-                        if d_donor < 3.0:
-                            continue
-                        score = -d_donor
-                        cand = (score, donor, j)
-                    else:
-                        d_needy = haversine_km(
-                            needy_c[0], needy_c[1], coord[0], coord[1]
-                        )
-                        if d_needy > max_steal_km:
-                            continue
-                        # Must be closer to needy than to donor centroid
-                        if d_needy + 0.5 >= d_donor:
-                            continue
-                        cand = (d_needy, donor, j)
-                    if best_move is None or cand[0] < best_move[0]:
-                        best_move = cand
-            if best_move is None:
-                continue
-            _, donor, move_i = best_move
-            clusters[i].append(clusters[donor].pop(move_i))
-            progressed = True
-        if not progressed:
-            break
-
-    return clusters
-
-
 def min_km_to_coords(
     poi: dict[str, Any],
     coords: Sequence[tuple[float, float]],
@@ -663,25 +573,6 @@ def cluster_member_ids(clusters: Sequence[Sequence[dict[str, Any]]]) -> list[set
                 ids.add(pid)
         out.append(ids)
     return out
-
-
-def order_clusters_from_origin(
-    clusters: list[list[dict[str, Any]]],
-    *,
-    origin_lat: float,
-    origin_lng: float,
-) -> list[list[dict[str, Any]]]:
-    """Order day clusters by centroid distance from region center (near → far)."""
-    indexed: list[tuple[float, int, list[dict[str, Any]]]] = []
-    for i, cluster in enumerate(clusters):
-        c = cluster_centroid(cluster)
-        if c is None:
-            dist = float("inf")
-        else:
-            dist = haversine_km(origin_lat, origin_lng, c[0], c[1])
-        indexed.append((dist, i, cluster))
-    indexed.sort(key=lambda t: (t[0], t[1]))
-    return [t[2] for t in indexed]
 
 
 def farthest_point_sample(

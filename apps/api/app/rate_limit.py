@@ -12,12 +12,19 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+# Counters for IPs idle longer than this are dropped during periodic sweeps
+_EVICT_AFTER_SECONDS = 600
+_EVICT_EVERY_SECONDS = 300
+
 # path prefix → max requests per window
 _DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     "/api/plan-route": (5, 60),
     "/api/live-places": (30, 60),
     "/api/sync-places": (10, 60),
     "/api/pois/upsert-google-place": (20, 60),
+    # Paid third-party quota (Google Places / OpenWeather) — generous but capped
+    "/api/route-candidates": (60, 60),
+    "/api/weather": (60, 60),
 }
 
 
@@ -52,6 +59,17 @@ def _limits() -> dict[str, tuple[int, int]]:
             ),
             60,
         ),
+        "/api/route-candidates": (
+            _env_int(
+                "RATE_LIMIT_ROUTE_CANDIDATES",
+                _DEFAULT_LIMITS["/api/route-candidates"][0],
+            ),
+            60,
+        ),
+        "/api/weather": (
+            _env_int("RATE_LIMIT_WEATHER", _DEFAULT_LIMITS["/api/weather"][0]),
+            60,
+        ),
     }
 
 
@@ -60,6 +78,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._hits: dict[str, deque[float]] = defaultdict(deque)
         self._lock = Lock()
+        self._last_evict = time.time()
 
     def _client_ip(self, request: Request) -> str:
         forwarded = request.headers.get("x-forwarded-for")
@@ -69,22 +88,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return request.client.host
         return "unknown"
 
+    def _evict_stale(self, now: float) -> None:
+        """Drop counters for IPs that went quiet — keeps memory bounded."""
+        stale = [
+            key
+            for key, hits in self._hits.items()
+            if not hits or now - hits[-1] > _EVICT_AFTER_SECONDS
+        ]
+        for key in stale:
+            self._hits.pop(key, None)
+        self._last_evict = now
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        match: tuple[int, int] | None = None
-        for prefix, lim in _limits().items():
-            if path == prefix or path.startswith(prefix + "?"):
-                match = lim
-                break
-            if path.startswith(prefix) and prefix != "/":
-                # exact path match preferred
-                if path == prefix:
-                    match = lim
-                    break
-        # Only exact known paths
-        if path in _limits():
-            match = _limits()[path]
-
+        match = _limits().get(path)
         if match is None:
             return await call_next(request)
 
@@ -94,6 +111,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         now = time.time()
 
         with self._lock:
+            if now - self._last_evict > _EVICT_EVERY_SECONDS:
+                self._evict_stale(now)
             q = self._hits[key]
             while q and now - q[0] > window:
                 q.popleft()

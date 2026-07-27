@@ -34,8 +34,18 @@ from app.services.telegram_notify import (
 
 logger = logging.getLogger(__name__)
 
-# Request-local cache; flushed to Postgres at end of each update
+# Hot cache in front of Postgres; bounded so a busy bot cannot grow unbounded.
+# Evicted entries are reloaded by load_session() on the next update — no data loss.
 _SESSION_CACHE: dict[str, dict[str, Any]] = {}
+_SESSION_CACHE_MAX = 200
+
+
+def _remember_session(key: str, session: dict[str, Any]) -> None:
+    if key in _SESSION_CACHE:
+        del _SESSION_CACHE[key]
+    elif len(_SESSION_CACHE) >= _SESSION_CACHE_MAX:
+        _SESSION_CACHE.pop(next(iter(_SESSION_CACHE)), None)
+    _SESSION_CACHE[key] = session
 
 MAX_MANUAL_STOPS = 8
 POI_PAGE_SIZE = 8
@@ -130,13 +140,13 @@ def _clear_session(chat_id: str | int) -> None:
 def _get_session(chat_id: str | int) -> dict[str, Any]:
     key = _chat_key(chat_id)
     if key not in _SESSION_CACHE:
-        _SESSION_CACHE[key] = load_session(key)
+        _remember_session(key, load_session(key))
     return _SESSION_CACHE[key]
 
 
 def _set_session(chat_id: str | int, session: dict[str, Any]) -> None:
     key = _chat_key(chat_id)
-    _SESSION_CACHE[key] = session
+    _remember_session(key, session)
     save_session(key, session)
 
 

@@ -1679,7 +1679,6 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   map: {
-    ...StyleSheet.absoluteFillObject,
     width: '100%',
     height: '100%',
   },

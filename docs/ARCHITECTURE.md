@@ -123,7 +123,8 @@ TripPoint/
 
 ## Scheduled jobs (Railway cron → FastAPI)
 
-Secret: header `X-Cron-Secret` = `CRON_SECRET` (yoxdursa `TELEGRAM_NOTIFY_SECRET`).
+Secret: header `X-Cron-Secret` = `CRON_SECRET`. Fallback yoxdur — `CRON_SECRET`
+qurulmayanda bu endpoint-lər 503 qaytarır.
 
 | Endpoint | Tövsiyə olunan cədvəl | İş |
 |----------|----------------------|-----|
@@ -142,9 +143,11 @@ curl -X POST "$API_URL/api/jobs/nightly" -H "X-Cron-Secret: $CRON_SECRET"
 | Piece | Where |
 |-------|--------|
 | Expo push token | `profiles.expo_push_token` — mobile `registerExpoPushToken` on session |
-| Push send | FastAPI `POST /api/notify/push` + `push_notify.py` |
+| Push send (app) | FastAPI `POST /api/notify/dispatch` → `notify_dispatch.py` + `push_notify.py` |
+| Push send (server) | FastAPI `POST /api/notify/push` — `X-Notify-Secret`, server/tooling only |
 | Smart abunə | `subscriptions.ts` — organizer + region fans + Telegram/push mirror; listing spam-guard |
-| Notify auth | Mobile `EXPO_PUBLIC_NOTIFY_SECRET` → header `X-Notify-Secret` (= Railway `TELEGRAM_NOTIFY_SECRET` or `CRON_SECRET`) |
+| Notify auth | Supabase session token (`Authorization: Bearer`). Bundle-da server sirri yoxdur |
+| Anti-spam | `/dispatch` yalnız `notification_ids` alır; alıcı və mətn bazadakı sətirlərdən oxunur (`actor_id = caller`, ≤15 dəq). `notifications` INSERT RLS-i onsuz da alıcının abunə olmasını tələb edir |
 | Product events | `app_events` + mobile `trackEvent` (`plan_route_success`, `favorite_add`, `listing_create`, `listing_join`) |
 | Bot sessions | `bot_sessions` table — API service role only; survives Railway restart |
 | Live Google → favorite | FastAPI `POST /api/pois/upsert-google-place` (service role) then favorite |
@@ -186,8 +189,9 @@ Migration: `apps/mobile/supabase/migrations/20260726_backlog_push_events_session
 **Deploy checklist (manual):**
 
 1. Supabase-də migration-ları tətbiq et (`20260726_photo_variants…`, `20260726_backlog_push…`)
-2. Railway: `CRON_SECRET`, `TELEGRAM_NOTIFY_SECRET`, optional `SENTRY_DSN`
-3. Mobile `.env`: `EXPO_PUBLIC_NOTIFY_SECRET` = eyni `TELEGRAM_NOTIFY_SECRET` dəyəri
+2. Railway: `CRON_SECRET` (**məcburi**, `TELEGRAM_NOTIFY_SECRET`-dən fərqli olmalıdır),
+   `TELEGRAM_NOTIFY_SECRET`, optional `SENTRY_DSN`
+3. Mobile `.env`: notify sirri **yoxdur** — bildirişlər istifadəçi sessiyası ilə gedir
 4. Mobile: `npx expo prebuild` / EAS rebuild (`expo-notifications`, image manipulator)
 5. Cron: nightly + enrich + weekly-report
 6. Manual smoke: live POI → favorit; plan-route; listing create → abunə bildiriş; `/verify` + `/sponsor` bot
@@ -199,11 +203,16 @@ Migration: `apps/mobile/supabase/migrations/20260726_backlog_push_events_session
 curl -i -X POST "$API_URL/api/jobs/nightly"
 curl -X POST "$API_URL/api/jobs/nightly" -H "X-Cron-Secret: $CRON_SECRET"
 
-# Push (secret if configured)
+# Push — server route (secret required, 503 if unset)
 curl -X POST "$API_URL/api/notify/push" \
   -H "Content-Type: application/json" \
   -H "X-Notify-Secret: $TELEGRAM_NOTIFY_SECRET" \
   -d '{"user_ids":["USER_UUID"],"title":"Test","body":"TripPoint"}'
+
+# Push — app route (401 without a valid Supabase session token)
+curl -i -X POST "$API_URL/api/notify/dispatch" \
+  -H "Content-Type: application/json" \
+  -d '{"notification_ids":["ROW_UUID"]}'
 ```
 
 App: Expo start → live marker favorit → DB id; Sevimlilər → Marşrutlarım; Profil verified badge (admin `/verify`).

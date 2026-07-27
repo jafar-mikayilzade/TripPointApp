@@ -267,6 +267,7 @@ const MARSRUT_PLAN_SPLIT = 0.5;
 
 export default function MarsrutScreen() {
   const mapRef = useRef<MapRef | null>(null);
+  const fitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { showInfo } = useInfoToast();
   const responsive = useResponsiveLayout();
   const GOOGLE_MAPS_KEY =
@@ -301,6 +302,15 @@ export default function MarsrutScreen() {
    * is true during first paint. Split resize remounts the map — re-pulse.
    */
   const [tracksMarkers, setTracksMarkers] = useState(true);
+
+  useEffect(
+    () => () => {
+      if (fitTimerRef.current) {
+        clearTimeout(fitTimerRef.current);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (!plan) {
@@ -686,7 +696,11 @@ export default function MarsrutScreen() {
       const toFit = fitCoords.length > 0 ? fitCoords : allCoords;
       if (toFit.length > 0 && mapRef.current) {
         // Defer until split layout settles
-        setTimeout(() => {
+        if (fitTimerRef.current) {
+          clearTimeout(fitTimerRef.current);
+        }
+        fitTimerRef.current = setTimeout(() => {
+          fitTimerRef.current = null;
           mapRef.current?.fitToCoordinates(toFit, {
             edgePadding: { top: 72, right: 48, bottom: 48, left: 48 },
             animated: true,

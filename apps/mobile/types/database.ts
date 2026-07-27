@@ -310,6 +310,14 @@ export type Expense = {
   created_at: string;
 };
 
+export type AppEvent = {
+  id: string;
+  user_id: string | null;
+  name: string;
+  props: Record<string, unknown>;
+  created_at: string;
+};
+
 // Supabase-js-in `createClient<Database>()` generic-i üçün.
 // Hər cədvəl üçün Row (oxunan sətir), Insert (yaradılan zaman lazım olan
 // minimal sahələr, qalanları optional), Update (hamısı optional) və
@@ -491,6 +499,12 @@ export type Database = {
         Insert: Pick<Expense, 'group_id' | 'paid_by' | 'amount' | 'description'> &
           Partial<Omit<Expense, 'group_id' | 'paid_by' | 'amount' | 'description'>>;
         Update: Partial<Expense>;
+        Relationships: [];
+      };
+      app_events: {
+        Row: AppEvent;
+        Insert: Pick<AppEvent, 'name'> & Partial<Omit<AppEvent, 'name'>>;
+        Update: Partial<AppEvent>;
         Relationships: [];
       };
     };

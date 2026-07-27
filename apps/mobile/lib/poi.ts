@@ -63,28 +63,6 @@ export function getCategoryIcon(category: PoiCategory): ComponentProps<typeof Fo
   return CATEGORY_ICONS[category] ?? CATEGORY_ICONS.other;
 }
 
-export type CategoryFilterId = 'all' | 'restaurant' | 'hotel' | 'nature' | 'historical';
-
-export const CATEGORY_FILTERS: {
-  id: CategoryFilterId;
-  label: string;
-  categories: PoiCategory[] | null;
-}[] = [
-  { id: 'all', label: 'Hamısı', categories: null },
-  { id: 'restaurant', label: 'Restoran', categories: ['restaurant'] },
-  {
-    id: 'hotel',
-    label: 'Otel',
-    categories: ['hotel', 'hostel', 'home_restaurant', 'guesthouse'],
-  },
-  {
-    id: 'nature',
-    label: 'Təbiət',
-    categories: ['nature', 'waterfall', 'mountain', 'lake'],
-  },
-  { id: 'historical', label: 'Tarixi', categories: ['historical', 'monument'] },
-];
-
 const EARTH_RADIUS_KM = 6371;
 
 function toRadians(degrees: number): number {

@@ -7,7 +7,9 @@ from typing import Any, Literal
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.auth import verify_user
 from app.config import CRON_SECRET, TELEGRAM_NOTIFY_SECRET, TELEGRAM_WEBHOOK_SECRET
+from app.security import secret_matches
 from app.services.telegram_bot import handle_telegram_update
 from app.services.telegram_notify import (
     admin_action_keyboard,
@@ -17,20 +19,43 @@ from app.services.telegram_notify import (
 router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 
 
+def _has_server_secret(x_notify_secret: str | None) -> bool:
+    expected = (TELEGRAM_NOTIFY_SECRET or CRON_SECRET or "").strip()
+    return bool(expected) and secret_matches(x_notify_secret, expected)
+
+
 def _require_notify_secret(x_notify_secret: str | None) -> None:
-    """If a notify secret is set, require matching X-Notify-Secret header."""
+    """Server-only route: fail closed when no secret is configured."""
     expected = (TELEGRAM_NOTIFY_SECRET or CRON_SECRET or "").strip()
     if not expected:
-        return
-    if (x_notify_secret or "").strip() != expected:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "notify_secret_unset",
+                "message": "Set TELEGRAM_NOTIFY_SECRET on the server.",
+            },
+        )
+    if not secret_matches(x_notify_secret, expected):
         raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+
+
+def _require_user_or_secret(
+    authorization: str | None,
+    x_notify_secret: str | None,
+) -> None:
+    """App users authenticate with their Supabase session; servers with a secret."""
+    if _has_server_secret(x_notify_secret):
+        return
+    if verify_user(authorization):
+        return
+    raise HTTPException(status_code=401, detail={"error": "unauthorized"})
 
 
 def _require_webhook_secret(x_telegram_bot_api_secret_token: str | None) -> None:
     expected = TELEGRAM_WEBHOOK_SECRET
     if not expected:
         return
-    if (x_telegram_bot_api_secret_token or "").strip() != expected:
+    if not secret_matches(x_telegram_bot_api_secret_token, expected):
         raise HTTPException(status_code=401, detail={"error": "unauthorized"})
 
 
@@ -62,10 +87,11 @@ def telegram_test(
 @router.post("/notify")
 def telegram_notify(
     body: NotifyBody,
+    authorization: str | None = Header(default=None, alias="Authorization"),
     x_notify_secret: str | None = Header(default=None, alias="X-Notify-Secret"),
 ) -> dict[str, object]:
     """Admin notify hook — bütün bağlı adminlərə + TELEGRAM_CHAT_ID."""
-    _require_notify_secret(x_notify_secret)
+    _require_user_or_secret(authorization, x_notify_secret)
     markup = None
     if body.kind and body.target_id:
         markup = admin_action_keyboard(body.kind, body.target_id)

@@ -1,5 +1,5 @@
 import { getApiBaseUrl } from './apiBase';
-import { getNotifySecretHeaders } from './notifySecret';
+import { getAuthHeaders } from './authHeaders';
 import { supabase } from './supabase';
 
 export type SubscriptionTargetType = 'listing' | 'organizer';
@@ -123,52 +123,29 @@ export async function toggleSubscription(
   return { subscribed: true };
 }
 
-/** Fire-and-forget Telegram mirror for linked users only. */
-async function mirrorNotificationsToTelegram(
-  userIds: string[],
-  title: string,
-  body?: string | null
-): Promise<void> {
+/**
+ * Fire-and-forget push + Telegram mirror.
+ *
+ * Only the row ids are sent — the server re-reads the rows and derives the
+ * recipients and text itself, so nothing here can be forged client-side.
+ */
+async function mirrorNotifications(notificationIds: string[]): Promise<void> {
   const base = getApiBaseUrl();
-  if (!base || userIds.length === 0) {
+  if (!base || notificationIds.length === 0) {
     return;
   }
-  const text = body?.trim() ? `${title}\n${body.trim()}` : title;
+  const headers = await getAuthHeaders();
+  if (!headers) {
+    return;
+  }
   try {
-    await fetch(`${base}/api/telegram/notify-users`, {
+    await fetch(`${base}/api/notify/dispatch`, {
       method: 'POST',
-      headers: getNotifySecretHeaders(),
-      body: JSON.stringify({ user_ids: userIds, text }),
+      headers,
+      body: JSON.stringify({ notification_ids: notificationIds }),
     });
   } catch {
     // optional channel
-  }
-}
-
-/** Fire-and-forget Expo push via FastAPI. */
-async function mirrorNotificationsToPush(
-  userIds: string[],
-  title: string,
-  body?: string | null,
-  listingId?: string | null
-): Promise<void> {
-  const base = getApiBaseUrl();
-  if (!base || userIds.length === 0) {
-    return;
-  }
-  try {
-    await fetch(`${base}/api/notify/push`, {
-      method: 'POST',
-      headers: getNotifySecretHeaders(),
-      body: JSON.stringify({
-        user_ids: userIds,
-        title,
-        body: body ?? title,
-        data: listingId ? { listingId } : {},
-      }),
-    });
-  } catch {
-    // optional until native rebuild
   }
 }
 
@@ -194,9 +171,13 @@ async function insertNotificationsForUsers(input: {
     actor_id: input.actorId ?? null,
   }));
 
-  await supabase.from('notifications').insert(rows);
-  void mirrorNotificationsToTelegram(unique, input.title, input.body);
-  void mirrorNotificationsToPush(unique, input.title, input.body, input.listingId);
+  const { data: inserted } = await supabase
+    .from('notifications')
+    .insert(rows)
+    .select('id');
+
+  const ids = (inserted ?? []).map((row) => row.id).filter(Boolean);
+  void mirrorNotifications(ids);
 }
 
 /** Yeni tur yaradılanda — təşkilatçı abunələrinə bildiriş */

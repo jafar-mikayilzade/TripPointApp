@@ -1,5 +1,5 @@
 import { getApiBaseUrl } from './apiBase';
-import { getNotifySecretHeaders } from './notifySecret';
+import { getAuthHeaders } from './authHeaders';
 
 export type AdminNotifyKind = 'poi_pending' | 'photo_pending' | 'listing_report';
 
@@ -33,6 +33,14 @@ export async function notifyAdmins(
     return { sent: false, error: 'API URL yoxdur' };
   }
 
+  const headers = await getAuthHeaders();
+  if (!headers) {
+    if (__DEV__) {
+      console.warn('[adminNotify] no session — skip Telegram');
+    }
+    return { sent: false, error: 'Sessiya yoxdur' };
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TELEGRAM_NOTIFY_TIMEOUT_MS);
 
@@ -47,7 +55,7 @@ export async function notifyAdmins(
 
     const res = await fetch(`${base}/api/telegram/notify`, {
       method: 'POST',
-      headers: getNotifySecretHeaders(),
+      headers,
       body: JSON.stringify(body),
       signal: controller.signal,
     });

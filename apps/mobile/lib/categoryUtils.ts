@@ -21,27 +21,3 @@ export function getCategoryLabel(cat: string): string {
 
 /** Home map chips — cafe excluded (noisy; live/DB also skip cafe). */
 export type HomeCategoryFilterId = 'all' | Exclude<PoiCategory, 'cafe'>;
-
-export const HOME_CATEGORY_FILTERS: {
-  id: HomeCategoryFilterId;
-  label: string;
-}[] = [
-  { id: 'all', label: 'Hamısı' },
-  { id: 'restaurant', label: 'Restoran' },
-  { id: 'hotel', label: 'Otel' },
-  { id: 'hostel', label: 'Hostel' },
-  { id: 'home_restaurant', label: 'Ev restoranı' },
-  { id: 'guesthouse', label: 'Qonaq evi' },
-  { id: 'nature', label: 'Təbiət' },
-  { id: 'waterfall', label: 'Şəlalə' },
-  { id: 'mountain', label: 'Dağ' },
-  { id: 'lake', label: 'Göl' },
-  { id: 'historical', label: 'Tarixi' },
-  { id: 'monument', label: 'Abidə' },
-  { id: 'other', label: 'Digər' },
-];
-
-export function getHomeCategoryChipLabel(id: HomeCategoryFilterId): string {
-  const item = HOME_CATEGORY_FILTERS.find((f) => f.id === id);
-  return item?.label ?? 'Hamısı';
-}

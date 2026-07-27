@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import random
 import re
 import time
@@ -12,6 +11,7 @@ from typing import Any
 
 import requests
 
+from app.config import ANTHROPIC_API_KEY
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
 from app.services.attraction_classify import (
     INTEREST_ATTRACTION_CATS,
@@ -1063,7 +1063,7 @@ def enrich_with_claude(
     group_type: str,
     weather: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    api_key = (os.getenv("ANTHROPIC_API_KEY") or "").strip().strip('"').strip("'")
+    api_key = ANTHROPIC_API_KEY
     if not api_key:
         return template_enrich(plan, region_label=region_label, days=days)
 
