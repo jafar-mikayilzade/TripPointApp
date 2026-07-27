@@ -21,12 +21,20 @@ jobs:
           cache-dependency-path: apps/api/requirements.txt
 
       - run: pip install -r requirements.txt
+      - run: pip install -r requirements-dev.txt
 
       - name: Import smoke
         env:
           SUPABASE_URL: https://example.supabase.co
           SUPABASE_SERVICE_KEY: dummy-for-ci
         run: python -c "import main"
+
+      - name: Unit tests
+        env:
+          SUPABASE_URL: https://example.supabase.co
+          SUPABASE_SERVICE_KEY: dummy-for-ci
+          DATA_SOURCE: mock
+        run: pytest -q
 
   mobile-checks:
     runs-on: ubuntu-latest
