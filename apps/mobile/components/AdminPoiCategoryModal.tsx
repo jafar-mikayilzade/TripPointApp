@@ -22,7 +22,8 @@ type Props = {
   poi: GoogleMapPoiPayload | null;
   loading?: boolean;
   onCancel: () => void;
-  onConfirm: (category: PoiCategory, name: string) => void;
+  /** Primary = categories[0]; may include hotel+restaurant etc. */
+  onConfirm: (categories: PoiCategory[], name: string) => void;
 };
 
 export function AdminPoiCategoryModal({
@@ -32,18 +33,31 @@ export function AdminPoiCategoryModal({
   onCancel,
   onConfirm,
 }: Props) {
-  const [category, setCategory] = useState<PoiCategory | null>(null);
+  const [categories, setCategories] = useState<PoiCategory[]>([]);
   const [name, setName] = useState('');
 
   useEffect(() => {
     if (visible && poi) {
       setName(poi.name?.trim() || '');
-      setCategory(poi.suggestedCategory ?? null);
+      setCategories(poi.suggestedCategory ? [poi.suggestedCategory] : []);
     }
   }, [visible, poi]);
 
-  const canConfirm = Boolean(poi) && name.trim().length >= 2 && category != null && !loading;
+  const canConfirm =
+    Boolean(poi) && name.trim().length >= 2 && categories.length >= 1 && !loading;
   const suggested = poi?.suggestedCategory ?? null;
+
+  function toggleCategory(item: PoiCategory) {
+    setCategories((prev) => {
+      if (prev.includes(item)) {
+        if (prev.length === 1) {
+          return prev;
+        }
+        return prev.filter((c) => c !== item);
+      }
+      return [...prev, item];
+    });
+  }
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
@@ -70,12 +84,12 @@ export function AdminPoiCategoryModal({
               <Text style={styles.suggestHint}>Təklif olunan kateqoriya:</Text>
               <CategoryIcon category={suggested} size={14} color={colors.accent} />
               <Text style={styles.suggestHint}>
-                {getCategoryLabel(suggested)} — dəyişə bilərsiniz
+                {getCategoryLabel(suggested)} — əlavə kateqoriya da seçə bilərsiniz
               </Text>
             </View>
           ) : (
             <Text style={styles.suggestHintMuted}>
-              Kateqoriya bilinmədi — öz kateqoriyanızı seçin
+              Bir və ya bir neçə kateqoriya seçin (məs: otel + restoran)
             </Text>
           )}
 
@@ -90,15 +104,17 @@ export function AdminPoiCategoryModal({
             autoFocus
           />
 
-          <Text style={styles.label}>Kateqoriya seçin</Text>
+          <Text style={styles.label}>
+            Kateqoriyalar ({categories.length}) — çoxlu seçim
+          </Text>
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
             {ADMIN_POI_CATEGORIES.map((item) => {
-              const selected = item === category;
+              const selected = categories.includes(item);
               return (
                 <Pressable
                   key={item}
                   style={[styles.option, selected && styles.optionSelected]}
-                  onPress={() => setCategory(item)}
+                  onPress={() => toggleCategory(item)}
                   disabled={loading}
                 >
                   <CategoryIcon
@@ -108,6 +124,9 @@ export function AdminPoiCategoryModal({
                   />
                   <Text style={[styles.optionText, selected && styles.optionTextSelected]}>
                     {getCategoryLabel(item)}
+                  </Text>
+                  <Text style={[styles.check, selected && styles.checkOn]}>
+                    {selected ? '✓' : ''}
                   </Text>
                 </Pressable>
               );
@@ -119,14 +138,14 @@ export function AdminPoiCategoryModal({
               <Text style={styles.cancelText}>Ləğv et</Text>
             </Pressable>
             <Pressable
-              style={[styles.confirmBtn, !canConfirm && styles.disabled]}
-              onPress={() => category && onConfirm(category, name.trim())}
+              style={[styles.okBtn, !canConfirm && styles.okDisabled]}
+              onPress={() => categories.length > 0 && onConfirm(categories, name.trim())}
               disabled={!canConfirm}
             >
               {loading ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={colors.textOnAccent} />
               ) : (
-                <Text style={styles.confirmText}>Təsdiq et</Text>
+                <Text style={styles.okText}>Əlavə et</Text>
               )}
             </Pressable>
           </View>
@@ -139,48 +158,43 @@ export function AdminPoiCategoryModal({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: colors.overlay,
     justifyContent: 'center',
     padding: 20,
   },
   card: {
-    backgroundColor: colors.surface,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 3,
+    backgroundColor: colors.bg,
     borderRadius: 16,
     padding: 16,
-    maxHeight: '85%',
+    maxHeight: '88%',
   },
   title: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
     color: colors.text,
   },
   coords: {
-    marginTop: 6,
+    marginTop: 4,
     fontSize: 12,
     color: colors.textMuted,
   },
   ratingHint: {
+    marginTop: 6,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.chipText,
+  },
+  suggestRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
     marginTop: 8,
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.warning,
   },
   suggestHint: {
     fontSize: 12,
-    fontWeight: '600',
-    color: colors.accent,
-  },
-  suggestRow: {
-    marginTop: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 4,
+    color: colors.textSecondary,
+    flexShrink: 1,
   },
   suggestHintMuted: {
     marginTop: 8,
@@ -188,29 +202,28 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   label: {
-    marginTop: 16,
-    marginBottom: 8,
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textSecondary,
+    marginTop: 12,
+    marginBottom: 6,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.chipText,
   },
   nameInput: {
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    backgroundColor: colors.surface,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 14,
     color: colors.text,
-    backgroundColor: colors.surfaceMuted,
   },
   list: {
-    maxHeight: 240,
+    maxHeight: 280,
   },
   listContent: {
-    gap: 6,
-    paddingBottom: 4,
+    gap: 4,
+    paddingBottom: 8,
   },
   option: {
     flexDirection: 'row',
@@ -219,54 +232,64 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
   },
   optionSelected: {
-    borderColor: colors.accent,
     backgroundColor: colors.accentSoft,
-  },
-  optionEmoji: {
-    fontSize: 16,
+    borderColor: colors.accent,
   },
   optionText: {
+    flex: 1,
     fontSize: 14,
-    fontWeight: '600',
-    color: colors.chipText,
+    fontWeight: '500',
+    color: colors.text,
   },
   optionTextSelected: {
-    color: colors.accentPressed,
+    color: colors.accent,
+    fontWeight: '700',
+  },
+  check: {
+    width: 18,
+    textAlign: 'right',
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  checkOn: {
+    color: colors.accent,
   },
   actions: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 16,
+    marginTop: 12,
   },
   cancelBtn: {
     flex: 1,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
     paddingVertical: 12,
+    borderRadius: 10,
     alignItems: 'center',
+    backgroundColor: colors.surface,
   },
   cancelText: {
-    fontWeight: '700',
-    color: colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textMuted,
   },
-  confirmBtn: {
+  okBtn: {
     flex: 1,
-    borderRadius: 10,
-    backgroundColor: colors.accent,
     paddingVertical: 12,
+    borderRadius: 10,
     alignItems: 'center',
+    backgroundColor: colors.accent,
   },
-  confirmText: {
+  okDisabled: {
+    opacity: 0.5,
+  },
+  okText: {
+    fontSize: 14,
     fontWeight: '700',
     color: colors.textOnAccent,
-  },
-  disabled: {
-    opacity: 0.65,
   },
 });

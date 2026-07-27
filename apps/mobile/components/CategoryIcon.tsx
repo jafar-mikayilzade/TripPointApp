@@ -19,6 +19,7 @@ export const CATEGORY_IONICONS: Record<PoiCategory | 'all', IoniconName> = {
   hostel: 'people-outline',
   home_restaurant: 'home-outline',
   guesthouse: 'business-outline',
+  camping: 'bonfire-outline',
   nature: 'leaf-outline',
   waterfall: 'rainy-outline',
   mountain: 'triangle-outline',

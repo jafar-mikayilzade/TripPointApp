@@ -23,9 +23,10 @@ import MapView, {
   type Region as MapRegion,
 } from '../../components/AppMap';
 import { CategoryIcon } from '../../components/CategoryIcon';
-import { ChipRow } from '../../components/ChipRow';
+import { DropdownButton } from '../../components/DropdownButton';
 import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
+import { TripScheduleFields } from '../../components/TripScheduleFields';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
 import { colors } from '../../constants/theme';
 import { getErrorMessage } from '../../lib/errors';
@@ -36,6 +37,14 @@ import { fetchRouteCandidates } from '../../lib/routeCandidates';
 import { saveRoute, planDaysToSavedStops } from '../../lib/savedRoutes';
 import { shareRouteText } from '../../lib/shareRoute';
 import { supabase } from '../../lib/supabase';
+import {
+  defaultReturnAt,
+  defaultTripStartAt,
+  formatHhMm,
+  isWithinWeatherForecast,
+  startDayOffsetFromDate,
+  syncReturnForTrip,
+} from '../../lib/tripSchedule';
 import { useInfoToast } from '../../components/InfoToastProvider';
 import {
   applyWeatherPoiFilter,
@@ -50,7 +59,7 @@ import {
   type POI,
 } from '../../utils/routeOptimizer';
 
-type DayOption = 1 | 2 | 3 | 4;
+type DayOption = 1 | 2 | 3;
 type BudgetOption = 'budget' | 'mid' | 'premium';
 type InterestId = 'nature' | 'history';
 type GroupOption = 'solo' | 'couple' | 'family' | 'group';
@@ -167,28 +176,7 @@ const DAY_OPTIONS: { value: DayOption; label: string }[] = [
   { value: 1, label: '1 gün' },
   { value: 2, label: '2 gün' },
   { value: 3, label: '3 gün' },
-  { value: 4, label: '4+ gün' },
 ];
-
-const START_DAY_OPTIONS = [
-  { value: 0, label: 'Bu gün' },
-  { value: 1, label: 'Sabah' },
-  { value: 2, label: '+2 gün' },
-  { value: 3, label: '+3 gün' },
-  { value: 4, label: '+4 gün' },
-] as const;
-
-const DEPART_TIME_OPTIONS = [
-  { value: '08:00', label: '08:00 — evdən çıxış' },
-  { value: '09:00', label: '09:00 — evdən çıxış' },
-  { value: '10:00', label: '10:00 — evdən çıxış' },
-] as const;
-
-const RETURN_TIME_OPTIONS = [
-  { value: '21:00', label: '21:00 — evdə ol' },
-  { value: '22:00', label: '22:00 — evdə ol' },
-  { value: '23:00', label: '23:00 — evdə ol' },
-] as const;
 
 const BUDGET_OPTIONS: { value: BudgetOption; label: string }[] = [
   { value: 'budget', label: 'Ekonom' },
@@ -311,9 +299,11 @@ export default function MarsrutScreen() {
   const [routeSegments, setRouteSegments] = useState<RouteSegment[]>([]);
   const [stopDurations, setStopDurations] = useState<Record<string, StopDuration>>({});
   const [fromOrigin, setFromOrigin] = useState(false);
-  const [departTime, setDepartTime] = useState<(typeof DEPART_TIME_OPTIONS)[number]['value']>('08:00');
-  const [returnByTime, setReturnByTime] = useState<(typeof RETURN_TIME_OPTIONS)[number]['value']>('21:00');
-  const [startDayOffset, setStartDayOffset] = useState(0);
+  const [startAt, setStartAt] = useState(() => defaultTripStartAt());
+  const [returnAt, setReturnAt] = useState(() => defaultReturnAt());
+  const startDayOffset = startDayOffsetFromDate(startAt);
+  const departTime = formatHhMm(startAt);
+  const returnByTime = formatHhMm(returnAt);
   const [userLocation, setUserLocation] = useState<{
     latitude: number;
     longitude: number;
@@ -519,9 +509,13 @@ export default function MarsrutScreen() {
     return () => clearInterval(timer);
   }, [loading]);
 
-  // Seçilmiş rayon üçün hava — forma açıq olanda
+  // Seçilmiş rayon üçün hava — forma açıq olanda (OpenWeather ~5 gün)
   useEffect(() => {
     if (plan) {
+      return;
+    }
+    if (!isWithinWeatherForecast(startAt)) {
+      setWeatherAdvice(null);
       return;
     }
     let cancelled = false;
@@ -533,7 +527,13 @@ export default function MarsrutScreen() {
     return () => {
       cancelled = true;
     };
-  }, [regionId, days, startDayOffset, plan]);
+  }, [regionId, days, startDayOffset, startAt, plan]);
+
+  useEffect(() => {
+    setReturnAt((prev) => syncReturnForTrip(startAt, prev, days, false));
+    // Only re-align return day when trip length changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days]);
 
   function toggleInterest(id: InterestId) {
     setInterests((current) =>
@@ -793,7 +793,9 @@ export default function MarsrutScreen() {
       } else {
         const { data: poisRaw, error: poisError } = await supabase
           .from('pois')
-          .select('id, name, category, description, lat, lng, region, rating, rating_count')
+          .select(
+            'id, name, category, categories, description, lat, lng, region, rating, rating_count'
+          )
           .eq('status', 'approved')
           .eq('region', regionId.toLowerCase())
           .order('rating', { ascending: false, nullsFirst: false })
@@ -819,19 +821,27 @@ export default function MarsrutScreen() {
           const cb = typeof b.rating_count === 'number' ? b.rating_count : 0;
           return cb - ca;
         };
+        const poiCats = (p: any): string[] => {
+          if (Array.isArray(p.categories) && p.categories.length > 0) {
+            return p.categories.map(String);
+          }
+          return p.category ? [String(p.category)] : [];
+        };
+        const hasAny = (p: any, allowed: string[]) =>
+          poiCats(p).some((c) => allowed.includes(c));
 
         restaurants = pois
-          .filter((p) => ['restaurant', 'home_restaurant'].includes(p.category))
+          .filter((p) => hasAny(p, ['restaurant', 'home_restaurant', 'cafe']))
           .sort(byRating)
           .slice(0, 12);
         accommodations = pois
-          .filter((p) => ['hotel', 'hostel', 'guesthouse'].includes(p.category))
+          .filter((p) => hasAny(p, ['hotel', 'hostel', 'guesthouse', 'camping']))
           .sort(byRating)
           .slice(0, 12);
         attractions = preferAttractionsForInterests(
           pois
             .filter((p) =>
-              [
+              hasAny(p, [
                 'nature',
                 'waterfall',
                 'mountain',
@@ -839,7 +849,7 @@ export default function MarsrutScreen() {
                 'historical',
                 'monument',
                 'other',
-              ].includes(p.category)
+              ])
             )
             .sort(byRating),
           interests
@@ -879,7 +889,7 @@ export default function MarsrutScreen() {
         originLng: fromOrigin && userLocation ? userLocation.longitude : null,
         departTime: fromOrigin ? departTime : undefined,
         returnByTime: fromOrigin ? returnByTime : undefined,
-        varietySeed: Date.now(),
+        varietySeed: Date.now() ^ (Math.floor(Math.random() * 1_000_000_000) + 1),
         excludePoiIds,
       });
 
@@ -1184,6 +1194,57 @@ export default function MarsrutScreen() {
                     <Text style={styles.errorText}>{errorMessage}</Text>
                   ) : null}
 
+                  <View style={styles.regionDaysRow}>
+                    <DropdownButton
+                      caption="Region"
+                      label="Region seç"
+                      value={regionId}
+                      options={REGIONS.map((r) => ({ value: r.id, label: r.label }))}
+                      compact
+                      onSelect={(id) => {
+                        setRegionId(id);
+                        const region = REGIONS.find((r) => r.id === id);
+                        if (region) {
+                          mapRef.current?.animateToRegion(
+                            {
+                              latitude: region.latitude,
+                              longitude: region.longitude,
+                              latitudeDelta: region.latitudeDelta,
+                              longitudeDelta: region.longitudeDelta,
+                            },
+                            600
+                          );
+                        }
+                      }}
+                      style={styles.regionDaysField}
+                    />
+                    <DropdownButton
+                      caption="Gün sayı"
+                      label="Gün seç"
+                      value={String(days)}
+                      options={DAY_OPTIONS.map((o) => ({
+                        value: String(o.value),
+                        label: o.label,
+                      }))}
+                      compact
+                      onSelect={(v) => setDays(Number(v) as DayOption)}
+                      style={styles.regionDaysField}
+                    />
+                  </View>
+
+                  <TripScheduleFields
+                    fromOrigin={fromOrigin}
+                    startAt={startAt}
+                    returnAt={returnAt}
+                    onStartAtChange={setStartAt}
+                    onReturnAtChange={setReturnAt}
+                    tripDays={days}
+                    showStartDay
+                    showTimes={false}
+                    weather={weatherAdvice}
+                    showWeather={Boolean(regionId)}
+                  />
+
                   <View style={styles.fromOriginRow}>
                     <View style={styles.fromOriginTextWrap}>
                       <Text style={styles.fromOriginLabel}>Cari məkandan gedirəm</Text>
@@ -1198,142 +1259,49 @@ export default function MarsrutScreen() {
                       thumbColor={fromOrigin ? colors.accent : colors.textMuted}
                     />
                   </View>
-
-                  {fromOrigin ? (
-                    <>
-                      <Text style={styles.label}>Evdən çıxış saatı</Text>
-                      <ChipRow
-                        options={[...DEPART_TIME_OPTIONS]}
-                        value={departTime}
-                        onChange={setDepartTime}
-                        chipFontSize={responsive.chipFontSize}
-                      />
-                      <Text style={[styles.label, { marginTop: 10 }]}>Eve qayıdış saatı</Text>
-                      <ChipRow
-                        options={[...RETURN_TIME_OPTIONS]}
-                        value={returnByTime}
-                        onChange={setReturnByTime}
-                        chipFontSize={responsive.chipFontSize}
-                      />
-                    </>
-                  ) : null}
-
-                  <Text style={styles.label}>
-                    Region <Text style={styles.required}>*</Text>
-                  </Text>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.chipRow}
-                  >
-                    {REGIONS.map((region) => {
-                      const selected = region.id === regionId;
-                      return (
-                        <Pressable
-                          key={region.id}
-                          onPress={() => {
-                            setRegionId(region.id);
-                            mapRef.current?.animateToRegion(
-                              {
-                                latitude: region.latitude,
-                                longitude: region.longitude,
-                                latitudeDelta: region.latitudeDelta,
-                                longitudeDelta: region.longitudeDelta,
-                              },
-                              600
-                            );
-                          }}
-                          style={[styles.chip, selected && styles.chipSelected]}
-                        >
-                          <Text
-                            style={[
-                              styles.chipText,
-                              { fontSize: responsive.chipFontSize },
-                              selected && styles.chipTextSelected,
-                            ]}
-                          >
-                            {region.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-
-                  {formatWeatherLabel(weatherAdvice) ? (
-                    <View style={[styles.weatherChip, { marginBottom: 10, maxWidth: '100%' }]}>
-                      <Text style={styles.weatherChipText} numberOfLines={2}>
-                        Hava · {formatWeatherLabel(weatherAdvice)}
-                        {START_DAY_OPTIONS.find((d) => d.value === startDayOffset)
-                          ? ` · ${START_DAY_OPTIONS.find((d) => d.value === startDayOffset)?.label}`
-                          : ''}
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  <Text style={styles.label}>Turun başlanğıc günü</Text>
-                  <ChipRow
-                    options={[...START_DAY_OPTIONS]}
-                    value={startDayOffset}
-                    onChange={setStartDayOffset}
-                    chipFontSize={responsive.chipFontSize}
+                  <TripScheduleFields
+                    fromOrigin={fromOrigin}
+                    startAt={startAt}
+                    returnAt={returnAt}
+                    onStartAtChange={setStartAt}
+                    onReturnAtChange={setReturnAt}
+                    tripDays={days}
+                    showStartDay={false}
+                    showTimes
+                    weather={weatherAdvice}
+                    showWeather={false}
                   />
-
-                  <Text style={styles.label}>
-                    Gün sayı <Text style={styles.required}>*</Text>
-                  </Text>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.chipRow}
-                  >
-                    {DAY_OPTIONS.map((option) => {
-                      const selected = option.value === days;
-                      return (
-                        <Pressable
-                          key={option.value}
-                          onPress={() => setDays(option.value)}
-                          style={[styles.chip, selected && styles.chipSelected]}
-                        >
-                          <Text
-                            style={[styles.chipText, selected && styles.chipTextSelected]}
-                          >
-                            {option.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
 
                   <Text style={styles.label}>
                     Büdcə <Text style={styles.required}>*</Text>
                   </Text>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.chipRow}
-                  >
+                  <View style={styles.optionRow}>
                     {BUDGET_OPTIONS.map((option) => {
                       const selected = option.value === budget;
                       return (
                         <Pressable
                           key={option.value}
                           onPress={() => setBudget(option.value)}
-                          style={[styles.chip, selected && styles.chipSelected]}
+                          style={[styles.optionChip, selected && styles.optionChipSelected]}
                         >
                           <Text
-                            style={[styles.chipText, selected && styles.chipTextSelected]}
+                            style={[
+                              styles.optionChipText,
+                              selected && styles.optionChipTextSelected,
+                            ]}
+                            numberOfLines={1}
                           >
                             {option.label}
                           </Text>
                         </Pressable>
                       );
                     })}
-                  </ScrollView>
+                  </View>
 
                   <Text style={styles.label}>
                     Maraqlar <Text style={styles.required}>*</Text>
                   </Text>
-                  <View style={styles.interestGrid}>
+                  <View style={styles.optionRow}>
                     {INTEREST_OPTIONS.map((option) => {
                       const selected = interests.includes(option.id);
                       return (
@@ -1341,16 +1309,14 @@ export default function MarsrutScreen() {
                           key={option.id}
                           onPress={() => toggleInterest(option.id)}
                           style={[
-                            styles.interestChip,
-                            { flexBasis: responsive.interestBasis },
-                            selected && styles.interestChipSelected,
+                            styles.optionChip,
+                            selected && styles.optionChipAccent,
                           ]}
                         >
                           <Text
                             style={[
-                              styles.interestText,
-                              { fontSize: responsive.chipFontSize },
-                              selected && styles.interestTextSelected,
+                              styles.optionChipText,
+                              selected && styles.optionChipTextAccent,
                             ]}
                             numberOfLines={1}
                           >
@@ -1362,28 +1328,28 @@ export default function MarsrutScreen() {
                   </View>
 
                   <Text style={styles.label}>Neçə nəfər (istəyə bağlı)</Text>
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.chipRow}
-                  >
+                  <View style={styles.optionRow}>
                     {GROUP_OPTIONS.map((option) => {
                       const selected = option.value === group;
                       return (
                         <Pressable
                           key={option.value}
                           onPress={() => setGroup(selected ? null : option.value)}
-                          style={[styles.chip, selected && styles.chipSelected]}
+                          style={[styles.optionChip, selected && styles.optionChipSelected]}
                         >
                           <Text
-                            style={[styles.chipText, selected && styles.chipTextSelected]}
+                            style={[
+                              styles.optionChipText,
+                              selected && styles.optionChipTextSelected,
+                            ]}
+                            numberOfLines={1}
                           >
                             {option.label}
                           </Text>
                         </Pressable>
                       );
                     })}
-                  </ScrollView>
+                  </View>
 
                   <Pressable
                     style={[
@@ -1442,6 +1408,13 @@ export default function MarsrutScreen() {
                           ? ` · qayıdış ${plan.travel.return_origin_by}`
                           : ''}
                       </Text>
+                    ) : null}
+                    {formatWeatherLabel(weatherAdvice) ? (
+                      <View style={styles.planWeatherStrip}>
+                        <Text style={styles.planWeatherStripText} numberOfLines={2}>
+                          Hava · {formatWeatherLabel(weatherAdvice)}
+                        </Text>
+                      </View>
                     ) : null}
                     <View style={styles.shareRow}>
                       <TouchableOpacity
@@ -1787,8 +1760,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 8,
-    marginTop: 4,
+    marginBottom: 0,
+    marginTop: 8,
+    minHeight: 40,
+  },
+  regionDaysRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    marginBottom: 0,
+    zIndex: 1,
+  },
+  regionDaysField: {
+    flex: 1,
+    height: 40,
   },
   fromOriginTextWrap: {
     flex: 1,
@@ -1813,6 +1799,21 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
   },
+  planWeatherStrip: {
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  planWeatherStripText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.chipText,
+    lineHeight: 16,
+  },
   lodgingNote: {
     fontSize: 12,
     fontWeight: '600',
@@ -1832,7 +1833,6 @@ const styles = StyleSheet.create({
   formContent: {
     paddingHorizontal: 12,
     paddingBottom: 24,
-    flexGrow: 1,
   },
   formHeader: {
     flexDirection: 'row',
@@ -1880,16 +1880,19 @@ const styles = StyleSheet.create({
   chipRow: {
     paddingBottom: 6,
     gap: 6,
+    alignItems: 'center',
   },
   chip: {
+    height: 36,
     paddingHorizontal: 12,
-    paddingVertical: 6,
     borderRadius: 10,
     backgroundColor: colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderSoft,
     marginRight: 4,
     overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   chipSelected: {
     backgroundColor: colors.chipSelected,
@@ -1903,6 +1906,46 @@ const styles = StyleSheet.create({
   chipTextSelected: {
     color: colors.textOnAccent,
   },
+  /** Equal-width fixed-height option chips — no grow/shrink on select. */
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+    height: 36,
+  },
+  optionChip: {
+    flex: 1,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    overflow: 'hidden',
+  },
+  optionChipSelected: {
+    backgroundColor: colors.chipSelected,
+    borderColor: colors.chipSelected,
+  },
+  optionChipAccent: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+  },
+  optionChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.chipText,
+    textAlign: 'center',
+  },
+  optionChipTextSelected: {
+    color: colors.textOnAccent,
+  },
+  optionChipTextAccent: {
+    color: colors.accentPressed,
+  },
   interestGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1914,13 +1957,15 @@ const styles = StyleSheet.create({
     flexBasis: '47%',
     maxWidth: '100%',
     minWidth: 0,
+    height: 36,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderSoft,
     backgroundColor: colors.surface,
-    paddingVertical: 8,
     paddingHorizontal: 8,
     overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   interestChipSelected: {
     borderColor: colors.accent,

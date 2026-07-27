@@ -90,7 +90,15 @@ def refine_attraction_category(
     Keeps lodging/food stamps untouched if caller passes those.
     """
     cat = str(stamped or row.get("category") or "").strip().lower()
-    if cat in {"restaurant", "home_restaurant", "cafe", "hotel", "hostel", "guesthouse"}:
+    if cat in {
+        "restaurant",
+        "home_restaurant",
+        "cafe",
+        "hotel",
+        "hostel",
+        "guesthouse",
+        "camping",
+    }:
         return cat
 
     name = str(row.get("name") or "")
@@ -126,7 +134,15 @@ def classify_attraction_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
     for row in rows:
         r = dict(row)
         cat = str(r.get("category") or "").strip().lower()
-        if cat in {"restaurant", "home_restaurant", "cafe", "hotel", "hostel", "guesthouse"}:
+        if cat in {
+            "restaurant",
+            "home_restaurant",
+            "cafe",
+            "hotel",
+            "hostel",
+            "guesthouse",
+            "camping",
+        }:
             out.append(r)
             continue
         r["category"] = refine_attraction_category(r)

@@ -5,6 +5,8 @@ import {
   StyleSheet,
   Text,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -14,10 +16,17 @@ import { nextSelectableHour } from '../lib/listingSchedule';
 interface SimpleDateTimeFieldProps {
   value: Date;
   onChange: (next: Date) => void;
-  mode?: 'datetime' | 'date';
+  mode?: 'datetime' | 'date' | 'time';
+  /** Optional caption above the value (e.g. "Çıxış"). */
+  label?: string;
   minimumDate?: Date;
   maximumDate?: Date;
   hasError?: boolean;
+  /** Tighter padding/fonts for dense forms. */
+  compact?: boolean;
+  /** Show all 24 hours (ignore "now" floor) — overnight return. */
+  anyHour?: boolean;
+  style?: StyleProp<ViewStyle>;
 }
 
 const MONTH_NAMES = [
@@ -55,7 +64,12 @@ function resolveFloor(minimumDate?: Date): Date {
   return minimumDate.getTime() > soonest.getTime() ? new Date(minimumDate) : soonest;
 }
 
-function formatTrigger(date: Date, mode: 'datetime' | 'date'): string {
+function formatTrigger(date: Date, mode: 'datetime' | 'date' | 'time'): string {
+  const h = String(date.getHours()).padStart(2, '0');
+  const m = String(date.getMinutes()).padStart(2, '0');
+  if (mode === 'time') {
+    return `${h}:${m}`;
+  }
   const d = date.toLocaleDateString('az-AZ', {
     day: '2-digit',
     month: 'short',
@@ -64,8 +78,6 @@ function formatTrigger(date: Date, mode: 'datetime' | 'date'): string {
   if (mode === 'date') {
     return d;
   }
-  const h = String(date.getHours()).padStart(2, '0');
-  const m = String(date.getMinutes()).padStart(2, '0');
   return `${d} · ${h}:${m}`;
 }
 
@@ -84,9 +96,13 @@ export function SimpleDateTimeField({
   value,
   onChange,
   mode = 'datetime',
+  label,
   minimumDate,
   maximumDate,
   hasError = false,
+  compact = false,
+  anyHour = false,
+  style,
 }: SimpleDateTimeFieldProps) {
   const insets = useSafeAreaInsets();
   const bottomSafe = Math.max(insets.bottom, 12);
@@ -129,6 +145,10 @@ export function SimpleDateTimeField({
   const availableHours = useMemo(() => {
     const hours: number[] = [];
     for (let hour = 0; hour < 24; hour += 1) {
+      if (anyHour) {
+        hours.push(hour);
+        continue;
+      }
       const probe = new Date(selectedDay);
       probe.setHours(hour, 0, 0, 0);
       if (probe.getTime() >= floor.getTime() && startOfDay(probe).getTime() <= maxDate.getTime()) {
@@ -136,7 +156,7 @@ export function SimpleDateTimeField({
       }
     }
     return hours;
-  }, [selectedDay, floor, maxDate]);
+  }, [selectedDay, floor, maxDate, anyHour]);
 
   function openPicker() {
     const nextFloor = resolveFloor(minimumDate);
@@ -146,7 +166,7 @@ export function SimpleDateTimeField({
     );
     setSelectedDay(safeDay);
     setCursorMonth(new Date(safeDay.getFullYear(), safeDay.getMonth(), 1));
-    setStep('date');
+    setStep(mode === 'time' ? 'time' : 'date');
     setOpen(true);
   }
 
@@ -181,7 +201,7 @@ export function SimpleDateTimeField({
   function onSelectHour(hour: number) {
     const next = new Date(selectedDay);
     next.setHours(hour, 0, 0, 0);
-    if (next.getTime() < floor.getTime()) {
+    if (!anyHour && next.getTime() < floor.getTime()) {
       return;
     }
     onChange(next);
@@ -191,10 +211,26 @@ export function SimpleDateTimeField({
   return (
     <>
       <Pressable
-        style={[styles.trigger, hasError && styles.triggerError]}
+        style={[
+          styles.trigger,
+          compact && styles.triggerCompact,
+          hasError && styles.triggerError,
+          style,
+        ]}
         onPress={openPicker}
       >
-        <Text style={[styles.triggerText, hasError && styles.triggerTextError]}>
+        {label ? (
+          <Text style={[styles.triggerLabel, compact && styles.triggerLabelCompact]}>
+            {label}
+          </Text>
+        ) : null}
+        <Text
+          style={[
+            styles.triggerText,
+            compact && styles.triggerTextCompact,
+            hasError && styles.triggerTextError,
+          ]}
+        >
           {hasError ? 'Boş ola bilməz' : formatTrigger(value, mode)}
         </Text>
       </Pressable>
@@ -205,7 +241,7 @@ export function SimpleDateTimeField({
             style={[styles.sheet, { paddingBottom: bottomSafe + 12 }]}
             onPress={(e) => e.stopPropagation()}
           >
-            {step === 'date' ? (
+            {step === 'date' && mode !== 'time' ? (
               <>
                 <Text style={styles.title}>Tarix</Text>
 
@@ -288,20 +324,26 @@ export function SimpleDateTimeField({
             ) : (
               <>
                 <View style={styles.timeHeader}>
-                  <Pressable onPress={() => setStep('date')} hitSlop={10}>
-                    <Text style={styles.backLink}>‹ Tarix</Text>
-                  </Pressable>
+                  {mode === 'time' ? (
+                    <View style={styles.backSpacer} />
+                  ) : (
+                    <Pressable onPress={() => setStep('date')} hitSlop={10}>
+                      <Text style={styles.backLink}>‹ Tarix</Text>
+                    </Pressable>
+                  )}
                   <Text style={styles.title}>Saat</Text>
                   <View style={styles.backSpacer} />
                 </View>
 
-                <Text style={styles.selectedDateLabel}>
-                  {selectedDay.toLocaleDateString('az-AZ', {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  })}
-                </Text>
+                {mode === 'time' ? null : (
+                  <Text style={styles.selectedDateLabel}>
+                    {selectedDay.toLocaleDateString('az-AZ', {
+                      day: 'numeric',
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </Text>
+                )}
 
                 {availableHours.length === 0 ? (
                   <Text style={styles.emptyHours}>Bu gün üçün uyğun saat yoxdur</Text>
@@ -341,14 +383,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     backgroundColor: colors.surface,
+    justifyContent: 'center',
+  },
+  triggerCompact: {
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 0,
+    height: 40,
   },
   triggerError: {
     borderColor: colors.danger,
   },
+  triggerLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginBottom: 2,
+  },
+  triggerLabelCompact: {
+    fontSize: 10,
+    marginBottom: 0,
+    lineHeight: 12,
+  },
   triggerText: {
     color: colors.text,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
+  },
+  triggerTextCompact: {
+    fontSize: 12,
+    lineHeight: 16,
   },
   triggerTextError: {
     color: colors.danger,

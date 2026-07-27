@@ -27,6 +27,7 @@ import { CategoryIcon } from '../../components/CategoryIcon';
 import { DropdownButton } from '../../components/DropdownButton';
 import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
+import { TripScheduleFields } from '../../components/TripScheduleFields';
 import { useResponsiveLayout } from '../../lib/layout';
 import { ShareAsTourModal } from '../../components/ShareAsTourModal';
 import { useInfoToast } from '../../components/InfoToastProvider';
@@ -58,6 +59,15 @@ import {
 import { openRouteInGoogleMaps } from '../../lib/openNavigation';
 import { shareRouteText } from '../../lib/shareRoute';
 import { supabase } from '../../lib/supabase';
+import {
+  defaultReturnAt,
+  defaultTripStartAt,
+  formatDateLabel,
+  formatHhMm,
+  isWithinWeatherForecast,
+  startDayOffsetFromDate,
+} from '../../lib/tripSchedule';
+import { fetchRegionWeather, formatWeatherLabel, type WeatherAdvice } from '../../lib/weather';
 import type { Poi } from '../../types/database';
 
 import { colors } from '../../constants/theme';
@@ -103,6 +113,12 @@ export default function AiKomekciScreen() {
   const [editMode, setEditMode] = useState<EditMode>({ type: 'append' });
   const [error, setError] = useState<string | null>(null);
   const [fromOrigin, setFromOrigin] = useState(false);
+  const [startAt, setStartAt] = useState(() => defaultTripStartAt());
+  const [returnAt, setReturnAt] = useState(() => defaultReturnAt());
+  const startDayOffset = startDayOffsetFromDate(startAt);
+  const departTime = formatHhMm(startAt);
+  const returnByTime = formatHhMm(returnAt);
+  const [weatherAdvice, setWeatherAdvice] = useState<WeatherAdvice | null>(null);
   const [userLocation, setUserLocation] = useState<{
     latitude: number;
     longitude: number;
@@ -266,6 +282,26 @@ export default function AiKomekciScreen() {
       400
     );
   }, [selectedRegion, regionMeta, loadRegionPois]);
+
+  useEffect(() => {
+    if (!selectedRegion) {
+      setWeatherAdvice(null);
+      return;
+    }
+    if (!isWithinWeatherForecast(startAt)) {
+      setWeatherAdvice(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchRegionWeather(selectedRegion, 1, startDayOffset).then((data) => {
+      if (!cancelled) {
+        setWeatherAdvice(data);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedRegion, startDayOffset, startAt]);
 
   useEffect(() => {
     return () => {
@@ -514,7 +550,8 @@ export default function AiKomekciScreen() {
           fromOrigin,
           legHint: originLegHint,
         }),
-        regionLabel
+        regionLabel,
+        formatWeatherLabel(weatherAdvice) ?? undefined
       );
     } catch (err) {
       Alert.alert('Paylaşım', getErrorMessage(err));
@@ -529,17 +566,22 @@ export default function AiKomekciScreen() {
     setSavingRoute(true);
     try {
       const title = `${regionLabel} · ${routeStops.length} nöqtə`;
+      const dayLabel = formatDateLabel(startAt);
+      const timeNote = fromOrigin
+        ? ` · çıxış ${departTime} · qayıdış ${returnByTime}`
+        : '';
       const result = await saveRoute({
         source: 'manual',
         title,
         summary: fromOrigin
-          ? `Cari məkandan · ${routeStops.map((s) => s.name).join(' → ')}`
-          : routeStops.map((s) => s.name).join(' → '),
+          ? `${dayLabel}${timeNote} · Cari məkandan · ${routeStops.map((s) => s.name).join(' → ')}`
+          : `${dayLabel} · ${routeStops.map((s) => s.name).join(' → ')}`,
         region: selectedRegion,
         daysCount: 1,
         fromOrigin,
         originLat: fromOrigin ? userLocation?.latitude ?? null : null,
         originLng: fromOrigin ? userLocation?.longitude ?? null : null,
+        bestTime: fromOrigin ? `${departTime}–${returnByTime}` : dayLabel,
         stops: manualStopsToSavedStops(routeStops),
       });
       if (result.error) {
@@ -625,9 +667,25 @@ export default function AiKomekciScreen() {
 
       <DropdownButton
         label="Region"
+        caption="Region"
+        compact
         value={selectedRegion}
         options={REGION_OPTIONS}
         onSelect={handleSelectRegion}
+      />
+
+      <TripScheduleFields
+        fromOrigin={fromOrigin}
+        startAt={startAt}
+        returnAt={returnAt}
+        onStartAtChange={setStartAt}
+        onReturnAtChange={setReturnAt}
+        tripDays={1}
+        allowOvernight
+        showStartDay
+        showTimes={false}
+        weather={weatherAdvice}
+        showWeather={Boolean(selectedRegion)}
       />
 
       <View style={styles.fromOriginRow}>
@@ -644,6 +702,19 @@ export default function AiKomekciScreen() {
           thumbColor={fromOrigin ? colors.accent : colors.textMuted}
         />
       </View>
+      <TripScheduleFields
+        fromOrigin={fromOrigin}
+        startAt={startAt}
+        returnAt={returnAt}
+        onStartAtChange={setStartAt}
+        onReturnAtChange={setReturnAt}
+        tripDays={1}
+        allowOvernight
+        showStartDay={false}
+        showTimes
+        weather={weatherAdvice}
+        showWeather={false}
+      />
 
       {fromOrigin && originLegHint ? (
         <Text style={styles.legHint}>{originLegHint}</Text>
@@ -1199,6 +1270,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    marginTop: 8,
+    minHeight: 40,
   },
   fromOriginTextWrap: {
     flex: 1,

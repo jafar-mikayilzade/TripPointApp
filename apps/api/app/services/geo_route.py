@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import random
 from typing import Any, Sequence
 
 EARTH_RADIUS_KM = 6371.0
@@ -642,6 +643,7 @@ def build_day_clusters(
     days: int,
     origin_lat: float,
     origin_lng: float,
+    rng: random.Random | None = None,
 ) -> list[list[dict[str, Any]]]:
     """
     Multi-day partition via global open tour + gap cuts.
@@ -684,6 +686,11 @@ def build_day_clusters(
                 ),
             )
         )
+        # Replan variety: reshuffle near-tied leftovers before filling
+        if rng is not None and len(rest) > 2:
+            head = rest[: min(12, len(rest))]
+            rng.shuffle(head)
+            rest = head + rest[len(head) :]
         pool = list(seeds)
         for p in rest:
             if len(pool) >= pool_limit:
@@ -691,6 +698,15 @@ def build_day_clusters(
             pool.append(p)
     else:
         pool = list(usable)
+        if rng is not None and len(pool) > 2:
+            rated = sorted(pool, key=lambda p: -float(p.get("rating") or 0))
+            top = rated[: min(6, len(rated))]
+            rng.shuffle(top)
+            seen = {str(p.get("id") or "") for p in top}
+            pool = top + [p for p in pool if str(p.get("id") or "") not in seen]
 
     tour = order_stops_geo(pool, start_lat=origin_lat, start_lng=origin_lng)
+    # Replan variety: flip tour direction so day cuts land on different segments
+    if rng is not None and len(tour) > 3 and rng.random() < 0.5:
+        tour = list(reversed(tour))
     return split_tour_at_largest_gaps(tour, days_n)

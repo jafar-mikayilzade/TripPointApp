@@ -1,4 +1,4 @@
-"""Ranked POI candidates for AI route planning (Google-first)."""
+"""Ranked POI candidates for AI route planning (DB pois table by default)."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ def route_candidates_endpoint(
         description="Comma-separated mobile interests, e.g. nature,food,history",
     ),
     source: Literal["google", "db"] = Query(
-        "google",
-        description="Candidate source preference (google falls back to db)",
+        "db",
+        description="Candidate source: db = Supabase pois table (default); google = live Places",
     ),
 ) -> JSONResponse:
     region_key = region.strip().lower()

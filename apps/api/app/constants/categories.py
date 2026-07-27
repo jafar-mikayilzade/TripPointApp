@@ -8,6 +8,7 @@ APP_CATEGORIES = {
     "hotel",
     "home_restaurant",
     "guesthouse",
+    "camping",
     "nature",
     "waterfall",
     "mountain",
@@ -28,6 +29,7 @@ HYBRID_GOOGLE_CATEGORIES = frozenset(
         "hostel",
         "guesthouse",
         "home_restaurant",
+        "camping",
     }
 )
 HYBRID_OSM_CATEGORIES = frozenset(
@@ -39,6 +41,7 @@ HYBRID_OSM_CATEGORIES = frozenset(
         "historical",
         "monument",
         "other",
+        "camping",
     }
 )
 
@@ -49,6 +52,7 @@ HYBRID_GOOGLE_SYNC_ORDER = [
     "hostel",
     "guesthouse",
     "home_restaurant",
+    "camping",
 ]
 HYBRID_OSM_SYNC_ORDER = [
     "nature",
@@ -67,6 +71,7 @@ GOOGLE_TYPE_MAP: dict[str, str] = {
     "hostel": "lodging",
     "home_restaurant": "restaurant",
     "guesthouse": "lodging",
+    "camping": "campground",
     "nature": "tourist_attraction",
     "waterfall": "tourist_attraction",
     "mountain": "tourist_attraction",
@@ -84,6 +89,7 @@ MOCK_CATEGORY_ALIAS: dict[str, str] = {
     "home_restaurant": "restaurant",
     "hostel": "hotel",
     "guesthouse": "hotel",
+    "camping": "hotel",
     "nature": "tourist_attraction",
     "waterfall": "tourist_attraction",
     "mountain": "tourist_attraction",

@@ -98,6 +98,7 @@ const CATEGORY_OPTIONS: { label: string; value: string | null }[] = [
   { label: 'Hostel', value: 'hostel' },
   { label: 'Ev restoranı', value: 'home_restaurant' },
   { label: 'Qonaq evi', value: 'guesthouse' },
+  { label: 'Kemping', value: 'camping' },
   { label: 'Təbiət', value: 'nature' },
   { label: 'Şəlalə', value: 'waterfall' },
   { label: 'Dağ', value: 'mountain' },
@@ -869,7 +870,7 @@ export default function HomeScreen() {
     });
   }
 
-  async function handleConfirmAdminInsert(category: PoiCategory, name: string) {
+  async function handleConfirmAdminInsert(categories: PoiCategory[], name: string) {
     if (!pendingGooglePoi) {
       return;
     }
@@ -877,6 +878,10 @@ export default function HomeScreen() {
     const trimmedName = name.trim();
     if (trimmedName.length < 2) {
       showToast('Məkan adı ən azı 2 simvol olmalıdır');
+      return;
+    }
+    if (!categories.length) {
+      showToast('Ən azı bir kateqoriya seçin');
       return;
     }
 
@@ -894,7 +899,8 @@ export default function HomeScreen() {
 
       const { data, error } = await insertApprovedPoiFromGoogle({
         name: trimmedName,
-        category,
+        category: categories[0],
+        categories,
         lat: pendingGooglePoi.latitude,
         lng: pendingGooglePoi.longitude,
         placeId: pendingGooglePoi.placeId || undefined,
@@ -1236,8 +1242,8 @@ export default function HomeScreen() {
               setPendingGooglePoi(null);
             }
           }}
-          onConfirm={(category, name) => {
-            void handleConfirmAdminInsert(category, name);
+          onConfirm={(categories, name) => {
+            void handleConfirmAdminInsert(categories, name);
           }}
         />
 

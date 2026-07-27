@@ -11,6 +11,7 @@ export const ADMIN_POI_CATEGORIES: PoiCategory[] = [
   'hotel',
   'home_restaurant',
   'guesthouse',
+  'camping',
   'nature',
   'waterfall',
   'mountain',
@@ -57,10 +58,10 @@ export function mapGoogleTypesToCategory(types: string[] | undefined): PoiCatego
     resort_hotel: 'hotel',
     hostel: 'hostel',
     guest_house: 'guesthouse',
-    campground: 'nature',
+    campground: 'camping',
     park: 'nature',
     natural_feature: 'nature',
-    rv_park: 'nature',
+    rv_park: 'camping',
     museum: 'historical',
     art_gallery: 'historical',
     church: 'historical',
@@ -223,6 +224,8 @@ export async function updatePoiCoordinates(
 export async function insertApprovedPoiFromGoogle(params: {
   name: string;
   category: PoiCategory;
+  /** Extra tags; primary is always `category`. */
+  categories?: PoiCategory[];
   lat: number;
   lng: number;
   placeId?: string;
@@ -244,11 +247,16 @@ export async function insertApprovedPoiFromGoogle(params: {
       ? params.ratingCount
       : null;
 
+  const categories = Array.from(
+    new Set([params.category, ...(params.categories ?? [])])
+  );
+
   const { data, error } = await supabase
     .from('pois')
     .insert({
       name: params.name.trim(),
       category: params.category,
+      categories,
       lat: params.lat,
       lng: params.lng,
       region,

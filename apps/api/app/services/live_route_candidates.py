@@ -1,7 +1,4 @@
-"""Live Google Places candidates for AI route planning (no DB upsert).
-
-Hub-driven fetch + tourism filter + curated seeds.
-"""
+"""Route candidates for AI planning — DB `pois` by default, optional Google live."""
 
 from __future__ import annotations
 
@@ -131,7 +128,7 @@ def _load_buckets_from_db(
     result = (
         supabase.table("pois")
         .select(
-            "id, name, category, description, lat, lng, region, rating, "
+            "id, name, category, categories, description, lat, lng, region, rating, "
             "rating_count, place_id"
         )
         .eq("status", "approved")
@@ -141,8 +138,8 @@ def _load_buckets_from_db(
         .execute()
     )
     rows = classify_attraction_rows(list(result.data or []))
-    seeds = seeds_for_region(region_key, db_region=db_region)
-    merged = filter_tourism_rows(seeds + rows, hubs=hubs)
+    # DB-only planning — use approved pois from our table (no hardcoded seeds).
+    merged = filter_tourism_rows(rows, hubs=hubs)
     return bucket_route_candidates(
         merged,
         per_bucket=per_bucket,
@@ -181,11 +178,11 @@ def load_live_route_candidates(
     *,
     per_bucket: int = 12,
     interests: list[str] | None = None,
-    source: Literal["google", "db"] = "google",
+    source: Literal["google", "db"] = "db",
 ) -> dict[str, Any]:
     """
-    Google-first candidate buckets for AI planning.
-    Does not upsert to Supabase.
+    Candidate buckets for AI planning.
+    Default source=db reads approved rows from Supabase `pois`.
     """
     region_key = region_key.strip().lower()
     if region_key not in REGION_COORDINATES:

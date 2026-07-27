@@ -127,7 +127,6 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
   const [loadingPois, setLoadingPois] = useState(false);
   const [poiPickerOpen, setPoiPickerOpen] = useState(false);
   const [regionOpen, setRegionOpen] = useState(false);
-  const [dateOpen, setDateOpen] = useState(false);
   const [poiPage, setPoiPage] = useState(0);
   const [serviceCategory, setServiceCategory] = useState<LocalServiceCategory>('private_guide');
   const [priceType, setPriceType] = useState<ListingPriceType>('per_person');
@@ -160,7 +159,6 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     setSelectedPoiIds([]);
     setPoiPickerOpen(false);
     setRegionOpen(false);
-    setDateOpen(false);
     setPoiPage(0);
     setServiceCategory('private_guide');
     setPriceType('per_person');
@@ -220,7 +218,6 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
   }, [regionId]);
 
   const regionLabel = REGIONS.find((item) => item.id === regionId)?.label ?? regionId;
-  const departureLabel = formatDepartureLabel(departureAt);
 
   const poiTotalPages = Math.max(1, Math.ceil(approvedPois.length / POI_PAGE_SIZE));
   const pagedPois = useMemo(() => {
@@ -660,29 +657,17 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   placeholderTextColor={colors.textMuted}
                 />
 
-                <CollapseToggle
-                  open={dateOpen}
-                  label="Tarix və saat"
-                  value={departureLabel}
-                  required
-                  hasError={!!fieldErrors.departure}
-                  onPress={() => {
-                    setDateOpen((open) => !open);
-                    setRegionOpen(false);
+                <FieldLabel text="Tarix və saat" required />
+                <SimpleDateTimeField
+                  value={departureAt}
+                  onChange={(next) => {
+                    clearFieldError('departure');
+                    setMinDeparture(nextSelectableHour());
+                    setDepartureAt(next);
                   }}
+                  minimumDate={minDeparture}
+                  hasError={!!fieldErrors.departure}
                 />
-                {dateOpen ? (
-                  <SimpleDateTimeField
-                    value={departureAt}
-                    onChange={(next) => {
-                      clearFieldError('departure');
-                      setMinDeparture(nextSelectableHour());
-                      setDepartureAt(next);
-                    }}
-                    minimumDate={minDeparture}
-                    hasError={!!fieldErrors.departure}
-                  />
-                ) : null}
 
                 <FieldLabel text="Yer sayı" required />
                 <View style={styles.chipRow}>
@@ -750,7 +735,6 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   value={regionLabel}
                   onPress={() => {
                     setRegionOpen((open) => !open);
-                    setDateOpen(false);
                   }}
                 />
                 {regionOpen ? (
@@ -877,7 +861,6 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   required
                   onPress={() => {
                     setRegionOpen((open) => !open);
-                    setDateOpen(false);
                   }}
                 />
                 {regionOpen ? (
@@ -902,29 +885,17 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   </View>
                 ) : null}
 
-                <CollapseToggle
-                  open={dateOpen}
-                  label="Tarix"
-                  value={departureLabel}
-                  required
-                  hasError={!!fieldErrors.departure}
-                  onPress={() => {
-                    setDateOpen((open) => !open);
-                    setRegionOpen(false);
+                <FieldLabel text="Tarix" required />
+                <SimpleDateTimeField
+                  value={departureAt}
+                  onChange={(next) => {
+                    clearFieldError('departure');
+                    setMinDeparture(nextSelectableHour());
+                    setDepartureAt(next);
                   }}
+                  minimumDate={minDeparture}
+                  hasError={!!fieldErrors.departure}
                 />
-                {dateOpen ? (
-                  <SimpleDateTimeField
-                    value={departureAt}
-                    onChange={(next) => {
-                      clearFieldError('departure');
-                      setMinDeparture(nextSelectableHour());
-                      setDepartureAt(next);
-                    }}
-                    minimumDate={minDeparture}
-                    hasError={!!fieldErrors.departure}
-                  />
-                ) : null}
 
                 <FieldLabel text="Nəfər sayı" required />
                 <TextInput
@@ -1084,7 +1055,6 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   required
                   onPress={() => {
                     setRegionOpen((open) => !open);
-                    setDateOpen(false);
                   }}
                 />
                 {regionOpen ? (
@@ -1197,7 +1167,6 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   setFieldErrors({});
                   setPoiPickerOpen(false);
                   setRegionOpen(false);
-                  setDateOpen(false);
                 }}
                 disabled={loading}
               >
@@ -1220,16 +1189,6 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
       </KeyboardAvoidingView>
     </Modal>
   );
-}
-
-function formatDepartureLabel(date: Date): string {
-  const d = date.toLocaleDateString('az-AZ', {
-    day: '2-digit',
-    month: 'short',
-  });
-  const h = String(date.getHours()).padStart(2, '0');
-  const m = String(date.getMinutes()).padStart(2, '0');
-  return `${d} · ${h}:${m}`;
 }
 
 function FieldLabel({ text, required }: { text: string; required?: boolean }) {

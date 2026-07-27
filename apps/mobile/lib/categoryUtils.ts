@@ -8,6 +8,7 @@ export function getCategoryLabel(cat: string): string {
     hostel: 'Hostel',
     home_restaurant: 'Ev restoranı',
     guesthouse: 'Qonaq evi',
+    camping: 'Kemping',
     nature: 'Təbiət',
     waterfall: 'Şəlalə',
     mountain: 'Dağ',

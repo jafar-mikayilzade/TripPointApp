@@ -89,7 +89,6 @@ export function ShareAsTourModal({
   const [regionId, setRegionId] = useState(DEFAULT_REGION_ID);
   const [description, setDescription] = useState('');
   const [regionOpen, setRegionOpen] = useState(false);
-  const [dateOpen, setDateOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
@@ -123,19 +122,11 @@ export function ShareAsTourModal({
     // Marşrut yalnız route_stops sütununda; təsvirdə təkrar göstərmə (UI düymə altında)
     setDescription(defaultDescription?.trim() || '');
     setRegionOpen(false);
-    setDateOpen(false);
     setFieldErrors({});
     setLoading(false);
   }, [visible, defaultTitle, defaultDescription, initialRegionId]);
 
   const regionLabel = REGIONS.find((r) => r.id === regionId)?.label ?? regionId;
-  const departureLabel = departureAt.toLocaleString('az-AZ', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 
   function clearFieldError(key: keyof FieldErrors) {
     setFieldErrors((prev) => {
@@ -411,7 +402,6 @@ export function ShareAsTourModal({
               style={styles.collapse}
               onPress={() => {
                 setRegionOpen((o) => !o);
-                setDateOpen(false);
               }}
             >
               <Text style={styles.collapseLabel}>
@@ -443,37 +433,19 @@ export function ShareAsTourModal({
               </View>
             ) : null}
 
-            <Pressable
-              style={styles.collapse}
-              onPress={() => {
-                setDateOpen((o) => !o);
-                setRegionOpen(false);
+            <Text style={styles.label}>
+              Tarix <Text style={styles.req}>*</Text>
+            </Text>
+            <SimpleDateTimeField
+              value={departureAt}
+              onChange={(next) => {
+                clearFieldError('departure');
+                setMinDeparture(nextSelectableHour());
+                setDepartureAt(next);
               }}
-            >
-              <Text style={styles.collapseLabel}>
-                Tarix <Text style={styles.req}>*</Text>
-              </Text>
-              <Text
-                style={[
-                  styles.collapseValue,
-                  fieldErrors.departure ? styles.collapseValueError : null,
-                ]}
-              >
-                {dateOpen ? '▾' : '▸'} {departureLabel}
-              </Text>
-            </Pressable>
-            {dateOpen ? (
-              <SimpleDateTimeField
-                value={departureAt}
-                onChange={(next) => {
-                  clearFieldError('departure');
-                  setMinDeparture(nextSelectableHour());
-                  setDepartureAt(next);
-                }}
-                minimumDate={minDeparture}
-                hasError={!!fieldErrors.departure}
-              />
-            ) : null}
+              minimumDate={minDeparture}
+              hasError={!!fieldErrors.departure}
+            />
 
             <Text style={styles.label}>
               Nəfər sayı <Text style={styles.req}>*</Text>

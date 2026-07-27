@@ -67,13 +67,13 @@ def run_plan_route(
         region_key,
         per_bucket=16,
         interests=interest_list or None,
-        source="google",
+        source="db",
     )
     buckets = loaded["buckets"]
     restaurants = buckets["restaurants"]
     accommodations = buckets["accommodations"]
     attractions = buckets["attractions"]
-    candidate_source = str(loaded.get("source") or "google")
+    candidate_source = str(loaded.get("source") or "db")
 
     if not (restaurants or accommodations or attractions):
         raise ValueError("Bu bölgədə yer tapılmadı")

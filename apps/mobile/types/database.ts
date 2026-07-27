@@ -33,6 +33,7 @@ export type PoiCategory =
   | 'hostel'
   | 'home_restaurant'
   | 'guesthouse'
+  | 'camping'
   | 'nature'
   | 'waterfall'
   | 'mountain'
@@ -70,6 +71,8 @@ export type Poi = {
   name: string;
   description: string | null;
   category: PoiCategory;
+  /** Multi-tag categories; primary remains `category`. */
+  categories?: PoiCategory[] | null;
   status: PoiStatus;
   region: string;
   lat: number;

@@ -36,6 +36,7 @@ from app.services.geo_route import (
     trim_cluster_diameter,
 )
 from app.services.rank_pois import (
+    poi_categories,
     prefer_high_rated,
     public_poi_fields,
     rating_sort_key,
@@ -54,6 +55,7 @@ DURATION_MINUTES: dict[str, int] = {
     "hotel": 25,
     "hostel": 25,
     "guesthouse": 25,
+    "camping": 25,
     # Denser day packing — still realistic visit windows
     "nature": 75,
     "waterfall": 60,
@@ -65,7 +67,7 @@ DURATION_MINUTES: dict[str, int] = {
 }
 
 FOOD_CATS = frozenset({"restaurant", "home_restaurant", "cafe"})
-HOTEL_CATS = frozenset({"hotel", "hostel", "guesthouse"})
+HOTEL_CATS = frozenset({"hotel", "hostel", "guesthouse", "camping"})
 NATURE_CATS = frozenset({"nature", "waterfall", "mountain", "lake"})
 HISTORICAL_CATS = frozenset({"historical", "monument"})
 
@@ -85,7 +87,8 @@ TRAVEL_DAY_ADD_FROM_PATH_KM = 4.5
 DAY_FOOTPRINT_CLEARANCE_KM = 4.0
 # Food/hotel only if they barely bend the path
 MAX_FOOD_DETOUR_KM = 2.0
-MAX_HOTEL_FROM_PATH_END_KM = 8.0
+MAX_FOOD_DETOUR_RELAXED_KM = 8.0
+MAX_HOTEL_FROM_PATH_END_KM = 25.0
 
 # Fixed daypart anchors (minutes from midnight) — overridden by travel window
 BREAKFAST_AT = 9 * 60  # 09:00
@@ -145,24 +148,27 @@ def _prioritize_attractions_for_interests(
         return str(p.get("id") or p.get("place_id") or "")
 
     fresh = [p for p in classified if pid(p) and pid(p) not in exclude]
-    pool = fresh if len(fresh) >= 4 else classified
+    # Hard-prefer unused POIs on replan; only fall back when pool is empty
+    pool = fresh if fresh else classified
 
     if not interest_cats:
         rng.shuffle(pool)
         return pool
 
     preferred = [
-        p for p in pool if str(p.get("category") or "") in interest_cats
+        p for p in pool if poi_categories(p) & interest_cats
     ]
     others = [
-        p for p in pool if str(p.get("category") or "") not in interest_cats
+        p for p in pool if not (poi_categories(p) & interest_cats)
     ]
     rng.shuffle(preferred)
     rng.shuffle(others)
 
     if len(preferred) >= 3:
-        # Keep a thin filler so geo corridors still work
-        filler = others[: max(2, len(preferred) // 4)]
+        # Keep a thin filler so geo corridors still work — shuffle which fillers
+        filler_n = max(2, len(preferred) // 4)
+        filler = others[:filler_n]
+        rng.shuffle(filler)
         return preferred + filler
     return preferred + others
 
@@ -266,10 +272,12 @@ def _take_along_tour(
     used: set[str],
     limit: int,
     prefer_categories: set[str] | None,
+    rng: random.Random | None = None,
 ) -> list[dict[str, Any]]:
     """
     Keep tour-segment order (contiguous geography). Never cherry-pick
     non-contiguous POIs from the segment — that recreates day zigzags.
+    With rng: rotate the contiguous window slightly for replan variety.
     """
     available = [
         p
@@ -279,6 +287,15 @@ def _take_along_tour(
     if not available or limit <= 0:
         return []
 
+    def contiguous_slice(items: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
+        if len(items) <= n:
+            return list(items)
+        offset = 0
+        if rng is not None and len(items) > n:
+            # Shift start by 0..2 stops so replans differ without breaking order
+            offset = rng.randint(0, min(2, len(items) - n))
+        return items[offset : offset + n]
+
     if prefer_categories:
         chosen: list[dict[str, Any]] = []
         for p in available:
@@ -287,8 +304,7 @@ def _take_along_tour(
             if str(p.get("category") or "") in prefer_categories:
                 chosen.append(p)
         if len(chosen) < min(2, limit):
-            # Not enough interest hits — fall back to contiguous prefix
-            return available[:limit]
+            return contiguous_slice(available, limit)
         if len(chosen) < limit:
             chosen_ids = {str(p.get("id") or "") for p in chosen}
             for p in available:
@@ -301,7 +317,7 @@ def _take_along_tour(
         chosen.sort(key=lambda p: order.get(str(p.get("id") or ""), 10**9))
         return chosen
 
-    return available[:limit]
+    return contiguous_slice(available, limit)
 
 
 def pick_day_pieces(
@@ -327,7 +343,6 @@ def pick_day_pieces(
     and only for POIs clear of earlier days.
     """
     del restaurants  # lunch/breakfast deferred to assemble (detour-gated)
-    del rng
     limit = attraction_limit if attraction_limit is not None else ATTRACTIONS_PER_DAY
     diameter = max_diameter_km if max_diameter_km is not None else MAX_DAY_DIAMETER_KM
     add_km = (
@@ -354,6 +369,7 @@ def pick_day_pieces(
         used=used,
         limit=limit,
         prefer_categories=interest_cats or None,
+        rng=rng,
     )
     if interest_cats and len(attractions) < min(2, limit):
         attractions = _take_along_tour(
@@ -361,6 +377,7 @@ def pick_day_pieces(
             used=used,
             limit=limit,
             prefer_categories=None,
+            rng=rng,
         )
 
     # Empty/thin segment only — never raid another day's neighbourhood
@@ -382,7 +399,7 @@ def pick_day_pieces(
             max_diameter_km=diameter,
             max_add_from_path_km=add_km,
             prefer_categories=interest_cats or None,
-            rng=None,
+            rng=rng,
         )
         attractions = attractions + extra
 
@@ -468,6 +485,33 @@ def assemble_day_stops(
             index_max=min(len(path), mid + 1),
             max_detour_km=MAX_FOOD_DETOUR_KM,
         )
+        if lunch is None:
+            path, lunch = _try_add_food(
+                path,
+                restaurants,
+                used_ids=used_ids,
+                index_min=max(0, mid - 1),
+                index_max=min(len(path), mid + 1),
+                max_detour_km=MAX_FOOD_DETOUR_RELAXED_KM,
+            )
+        if lunch is None and restaurants:
+            # Last resort: nearest restaurant to path midpoint (must have a meal)
+            mid_poi = path[min(len(path) - 1, len(path) // 2)]
+            mid_c = poi_coord(mid_poi)
+            if mid_c:
+                lunch = _nearest_food(
+                    restaurants,
+                    lat=mid_c[0],
+                    lng=mid_c[1],
+                    used=used_ids,
+                    max_km=20.0,
+                )
+                if lunch is not None:
+                    lid = _role_id(lunch)
+                    if lid:
+                        used_ids.add(lid)
+                    insert_at = min(len(path), max(1, len(path) // 2))
+                    path = list(path[:insert_at]) + [lunch] + list(path[insert_at:])
         # Breakfast only if day starts early enough (before ~11:00)
         if start_anchor <= 11 * 60:
             path, breakfast = _try_add_food(
@@ -476,7 +520,7 @@ def assemble_day_stops(
                 used_ids=used_ids,
                 index_min=0,
                 index_max=min(1, len(path)),
-                max_detour_km=MAX_FOOD_DETOUR_KM,
+                max_detour_km=MAX_FOOD_DETOUR_RELAXED_KM,
             )
         path = order_stops_geo(path)
         if breakfast is not None and path:
@@ -488,7 +532,6 @@ def assemble_day_stops(
     breakfast_id = _role_id(breakfast) if breakfast else ""
 
     stops: list[dict[str, Any]] = []
-    last_poi: dict[str, Any] | None = None
     t = start_anchor
     if breakfast is not None and start_anchor <= BREAKFAST_AT + 30:
         t = max(start_anchor, BREAKFAST_AT)
@@ -511,21 +554,22 @@ def assemble_day_stops(
             else:
                 time_min = t
 
-        # Must finish this stop before leaving the region
+        # Skip overflow attractions; keep trying later meals (geo-order can put lunch last)
         if time_min + dur > end_anchor:
-            break
+            if daypart in {"lunch", "breakfast"}:
+                time_min = max(start_anchor, end_anchor - dur)
+                if time_min + dur > end_anchor:
+                    continue
+            else:
+                continue
 
         stops.append(_stop_payload(poi, time_min=time_min, daypart=daypart))
         # Short transfer buffer so more stops fit a normal day window
-        t = time_min + dur + 15
-        last_poi = poi
+        t = time_min + dur + 12
 
-    if allow_hotel and hotel is not None and last_poi is not None:
-        end = poi_coord(last_poi)
-        h = poi_coord(hotel)
-        if end and h and haversine_km(end[0], end[1], h[0], h[1]) <= MAX_HOTEL_FROM_PATH_END_KM:
-            hotel_time = max(EVENING_HOTEL_AT, t)
-            stops.append(_stop_payload(hotel, time_min=hotel_time, daypart="hotel"))
+    if allow_hotel and hotel is not None:
+        hotel_time = max(EVENING_HOTEL_AT, t if stops else start_anchor)
+        stops.append(_stop_payload(hotel, time_min=hotel_time, daypart="hotel"))
 
     return stops
 
@@ -627,8 +671,27 @@ def build_skeleton(
     restaurants = sorted(restaurants, key=rating_sort_key, reverse=True)
     accommodations = sorted(accommodations, key=rating_sort_key, reverse=True)
 
-    interest_cats = _interest_sets(interests)
     exclude = {str(x) for x in (exclude_poi_ids or []) if str(x).strip()}
+    # Also rotate food/lodging away from the previous plan when alternatives exist
+    if exclude:
+        fresh_r = [r for r in restaurants if str(r.get("id") or "") not in exclude]
+        if fresh_r:
+            restaurants = fresh_r
+        fresh_h = [h for h in accommodations if str(h.get("id") or "") not in exclude]
+        if fresh_h:
+            accommodations = fresh_h
+
+    # Replan variety among near-tied food/lodging
+    if len(restaurants) > 1:
+        top = restaurants[: min(8, len(restaurants))]
+        rng.shuffle(top)
+        restaurants = top + restaurants[len(top) :]
+    if len(accommodations) > 1:
+        top_h = accommodations[: min(6, len(accommodations))]
+        rng.shuffle(top_h)
+        accommodations = top_h + accommodations[len(top_h) :]
+
+    interest_cats = _interest_sets(interests)
     attractions = _prioritize_attractions_for_interests(
         attractions,
         interest_cats,
@@ -653,6 +716,7 @@ def build_skeleton(
         days=days_n,
         origin_lat=start_lat,
         origin_lng=start_lng,
+        rng=rng,
     )
 
     allow_hotel = bool(travel.get("allow_hotel"))
@@ -751,7 +815,7 @@ def build_skeleton(
             attraction_limit=limit,
             max_diameter_km=diameter,
             max_add_from_path_km=add_km,
-            global_pool=unassigned if len(cluster) < 2 else [],
+            global_pool=unassigned if len(cluster) < limit else [],
             avoid_coords=day_footprints,
         )
 

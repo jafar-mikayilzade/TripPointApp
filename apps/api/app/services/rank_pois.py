@@ -10,7 +10,7 @@ from app.services.geo_route import haversine_km
 MIN_USEFUL_RATING = 3.5
 
 RESTAURANT_CATS = frozenset({"restaurant", "home_restaurant", "cafe"})
-ACCOMMODATION_CATS = frozenset({"hotel", "hostel", "guesthouse"})
+ACCOMMODATION_CATS = frozenset({"hotel", "hostel", "guesthouse", "camping"})
 ATTRACTION_CATS = frozenset(
     {
         "nature",
@@ -34,11 +34,31 @@ _TYPE_WEIGHT: dict[str, float] = {
     "hotel": 1.0,
     "hostel": 0.95,
     "guesthouse": 0.95,
+    "camping": 1.05,
     "restaurant": 0.75,
     "home_restaurant": 0.8,
     "cafe": 0.2,
     "other": 0.55,
 }
+
+
+def poi_categories(row: dict[str, Any]) -> set[str]:
+    """All categories on a POI (array + primary scalar fallback)."""
+    raw = row.get("categories")
+    out: set[str] = set()
+    if isinstance(raw, (list, tuple)):
+        for item in raw:
+            c = str(item or "").strip()
+            if c:
+                out.add(c)
+    primary = str(row.get("category") or "").strip()
+    if primary:
+        out.add(primary)
+    return out
+
+
+def row_in_cats(row: dict[str, Any], allowed: frozenset[str] | set[str]) -> bool:
+    return bool(poi_categories(row) & set(allowed))
 
 # Home live mix targets (of total limit)
 MIX_ATTRACTION_RATIO = 0.50
@@ -226,22 +246,18 @@ def bucket_route_candidates(
     hubs: list[dict[str, Any]] | None = None,
     prefer_attraction_cats: set[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    restaurants = [r for r in rows if str(r.get("category") or "") in RESTAURANT_CATS]
-    accommodations = [
-        r for r in rows if str(r.get("category") or "") in ACCOMMODATION_CATS
-    ]
-    attractions = [r for r in rows if str(r.get("category") or "") in ATTRACTION_CATS]
+    restaurants = [r for r in rows if row_in_cats(r, RESTAURANT_CATS)]
+    accommodations = [r for r in rows if row_in_cats(r, ACCOMMODATION_CATS)]
+    attractions = [r for r in rows if row_in_cats(r, ATTRACTION_CATS)]
 
     if prefer_attraction_cats:
         preferred = [
-            r
-            for r in attractions
-            if str(r.get("category") or "") in prefer_attraction_cats
+            r for r in attractions if poi_categories(r) & prefer_attraction_cats
         ]
         others = [
             r
             for r in attractions
-            if str(r.get("category") or "") not in prefer_attraction_cats
+            if not (poi_categories(r) & prefer_attraction_cats)
         ]
         # ~85% interest match, fill remainder so geo still has options
         n_pref = max(1, int(per_bucket * 0.85))
@@ -277,12 +293,15 @@ def bucket_route_candidates(
 
 def public_poi_fields(row: dict[str, Any]) -> dict[str, Any]:
     place_id = row.get("place_id")
+    cats = sorted(poi_categories(row))
+    primary = str(row.get("category") or (cats[0] if cats else "other"))
     row_id = row.get("id") or place_id
     out: dict[str, Any] = {
         "id": row_id,
         "place_id": place_id or row_id,
         "name": row.get("name"),
-        "category": row.get("category"),
+        "category": primary,
+        "categories": cats,
         "description": row.get("description"),
         "lat": row.get("lat"),
         "lng": row.get("lng"),
