@@ -49,21 +49,21 @@ from app.services.places_tourism_filter import (
 logger = logging.getLogger(__name__)
 
 DURATION_MINUTES: dict[str, int] = {
-    "restaurant": 60,
-    "home_restaurant": 60,
-    "cafe": 40,
-    "hotel": 25,
-    "hostel": 25,
-    "guesthouse": 25,
-    "camping": 25,
+    "restaurant": 55,
+    "home_restaurant": 55,
+    "cafe": 35,
+    "hotel": 20,
+    "hostel": 20,
+    "guesthouse": 20,
+    "camping": 20,
     # Denser day packing — still realistic visit windows
-    "nature": 75,
-    "waterfall": 60,
-    "mountain": 75,
-    "lake": 60,
-    "historical": 55,
-    "monument": 35,
-    "other": 45,
+    "nature": 55,
+    "waterfall": 50,
+    "mountain": 55,
+    "lake": 50,
+    "historical": 45,
+    "monument": 30,
+    "other": 40,
 }
 
 FOOD_CATS = frozenset({"restaurant", "home_restaurant", "cafe"})
@@ -71,24 +71,25 @@ HOTEL_CATS = frozenset({"hotel", "hostel", "guesthouse", "camping"})
 NATURE_CATS = frozenset({"nature", "waterfall", "mountain", "lake"})
 HISTORICAL_CATS = frozenset({"historical", "monument"})
 
-MAX_RESTAURANT_KM = 10.0
+MAX_RESTAURANT_KM = 12.0
 ATTRACTIONS_PER_DAY = 5
 # Full (middle) days pack denser; travel days still aim for a full walk day
 ATTRACTIONS_PER_FULL_DAY = 6
 ATTRACTIONS_PER_TRAVEL_DAY = 5
-MAX_DAY_DIAMETER_KM = 12.0
-MAX_ADD_FROM_PATH_KM = 5.0
+MAX_DAY_DIAMETER_KM = 18.0
+MAX_ADD_FROM_PATH_KM = 9.0
 # Compact day bubbles — multi-day must not sprawl into another day's zone
-FULL_DAY_DIAMETER_KM = 14.0
-FULL_DAY_ADD_FROM_PATH_KM = 5.0
-TRAVEL_DAY_DIAMETER_KM = 12.0
-TRAVEL_DAY_ADD_FROM_PATH_KM = 4.5
+FULL_DAY_DIAMETER_KM = 18.0
+FULL_DAY_ADD_FROM_PATH_KM = 9.0
+TRAVEL_DAY_DIAMETER_KM = 18.0
+TRAVEL_DAY_ADD_FROM_PATH_KM = 9.0
 # Later days stay clear of earlier days' visited area
-DAY_FOOTPRINT_CLEARANCE_KM = 4.0
+DAY_FOOTPRINT_CLEARANCE_KM = 3.0
 # Food/hotel only if they barely bend the path
 MAX_FOOD_DETOUR_KM = 2.0
-MAX_FOOD_DETOUR_RELAXED_KM = 8.0
+MAX_FOOD_DETOUR_RELAXED_KM = 10.0
 MAX_HOTEL_FROM_PATH_END_KM = 25.0
+MAX_LUNCH_FALLBACK_KM = 35.0
 
 # Fixed daypart anchors (minutes from midnight) — overridden by travel window
 BREAKFAST_AT = 9 * 60  # 09:00
@@ -165,11 +166,8 @@ def _prioritize_attractions_for_interests(
     rng.shuffle(others)
 
     if len(preferred) >= 3:
-        # Keep a thin filler so geo corridors still work — shuffle which fillers
-        filler_n = max(2, len(preferred) // 4)
-        filler = others[:filler_n]
-        rng.shuffle(filler)
-        return preferred + filler
+        # Keep FULL geo pool (preferred first) so multi-day clustering is not starved
+        return preferred + others
     return preferred + others
 
 
@@ -380,8 +378,8 @@ def pick_day_pieces(
             rng=rng,
         )
 
-    # Empty/thin segment only — never raid another day's neighbourhood
-    if pool and len(attractions) < min(2, limit):
+    # Top up until day limit — a 2-POI gap segment must still grow to a full day
+    if pool and len(attractions) < limit:
         already = {str(p.get("id") or "") for p in attractions}
         fill_used = set(used) | already
         seed_lat, seed_lng = _seed_away_from_footprint(
@@ -396,12 +394,28 @@ def pick_day_pieces(
             origin_lng=seed_lng,
             used=fill_used,
             limit=limit - len(attractions),
-            max_diameter_km=diameter,
-            max_add_from_path_km=add_km,
+            max_diameter_km=max(diameter, 22.0),
+            max_add_from_path_km=max(add_km, 10.0),
             prefer_categories=interest_cats or None,
             rng=rng,
         )
         attractions = attractions + extra
+        # Still thin? one more pass without interest filter / wider radius
+        if len(attractions) < min(4, limit):
+            already = {str(p.get("id") or "") for p in attractions}
+            fill_used = set(used) | already
+            extra2 = grow_compact_tour(
+                pool,
+                origin_lat=seed_lat,
+                origin_lng=seed_lng,
+                used=fill_used,
+                limit=limit - len(attractions),
+                max_diameter_km=28.0,
+                max_add_from_path_km=14.0,
+                prefer_categories=None,
+                rng=rng,
+            )
+            attractions = attractions + extra2
 
     for poi in attractions:
         pid = str(poi.get("id") or "")
@@ -504,7 +518,7 @@ def assemble_day_stops(
                     lat=mid_c[0],
                     lng=mid_c[1],
                     used=used_ids,
-                    max_km=20.0,
+                    max_km=MAX_LUNCH_FALLBACK_KM,
                 )
                 if lunch is not None:
                     lid = _role_id(lunch)
@@ -512,8 +526,29 @@ def assemble_day_stops(
                         used_ids.add(lid)
                     insert_at = min(len(path), max(1, len(path) // 2))
                     path = list(path[:insert_at]) + [lunch] + list(path[insert_at:])
-        # Breakfast only if day starts early enough (before ~11:00)
-        if start_anchor <= 11 * 60:
+            if lunch is None:
+                # Absolute last resort: nearest restaurant to any path stop
+                for poi in path:
+                    c = poi_coord(poi)
+                    if not c:
+                        continue
+                    lunch = _nearest_food(
+                        restaurants,
+                        lat=c[0],
+                        lng=c[1],
+                        used=used_ids,
+                        max_km=MAX_LUNCH_FALLBACK_KM,
+                    )
+                    if lunch is not None:
+                        lid = _role_id(lunch)
+                        if lid:
+                            used_ids.add(lid)
+                        insert_at = min(len(path), max(1, len(path) // 2))
+                        path = list(path[:insert_at]) + [lunch] + list(path[insert_at:])
+                        break
+        # Breakfast only if day starts early and the visit window is long enough
+        # (short last-day windows prioritize sightseeing + lunch)
+        if start_anchor <= 11 * 60 and (end_anchor - start_anchor) >= 7 * 60 + 30:
             path, breakfast = _try_add_food(
                 path,
                 restaurants,
@@ -793,17 +828,27 @@ def build_skeleton(
                     rng=rng,
                 )
 
-        # Tour segments are exclusive — do not top up from other days' POIs.
-        # Only unassigned leftovers (not in any cluster) may fill a thin day.
+        # Tour segments are exclusive for ownership, but unused leftovers may fill
+        # a thin day. After rebalance, clusters should already be sized fairly.
         owned_elsewhere = foreign_ids
+        own_ids = cluster_ids[day_i - 1] if day_i - 1 < len(cluster_ids) else set()
         unassigned = [
             p
             for p in attractions
             if str(p.get("id") or "") not in used
             and str(p.get("id") or "") not in owned_elsewhere
-            and str(p.get("id") or "")
-            not in (cluster_ids[day_i - 1] if day_i - 1 < len(cluster_ids) else set())
+            and str(p.get("id") or "") not in own_ids
         ]
+        # Earlier days may leave unused cluster members — allow day N to absorb them
+        earlier_leftovers: list[dict[str, Any]] = []
+        if day_i > 1:
+            for j in range(day_i - 1):
+                ids = cluster_ids[j] if j < len(cluster_ids) else set()
+                for p in attractions:
+                    pid = str(p.get("id") or "")
+                    if pid and pid in ids and pid not in used:
+                        earlier_leftovers.append(p)
+        fill_pool = unassigned + earlier_leftovers
         pieces = pick_day_pieces(
             cluster=cluster,
             restaurants=restaurants,
@@ -815,7 +860,7 @@ def build_skeleton(
             attraction_limit=limit,
             max_diameter_km=diameter,
             max_add_from_path_km=add_km,
-            global_pool=unassigned if len(cluster) < limit else [],
+            global_pool=fill_pool,
             avoid_coords=day_footprints,
         )
 
@@ -823,17 +868,8 @@ def build_skeleton(
             coord = poi_coord(poi)
             if coord:
                 day_footprints.append(coord)
-        # Soft-claim unused neighbours of this day's stops so the next day
-        # cannot park 50m from yesterday's last café
-        if pieces["attractions"]:
-            for p in attractions:
-                pid = str(p.get("id") or "")
-                if not pid or pid in used:
-                    continue
-                if min_km_to_coords(p, day_footprints[-len(pieces["attractions"]) :]) < (
-                    DAY_FOOTPRINT_CLEARANCE_KM * 0.75
-                ):
-                    used.add(pid)
+        # Do NOT soft-claim other days' cluster members — that collapses day 2+.
+        # Spatial separation uses avoid_coords / day_footprints only.
 
         # Time windows
         if day_i == 1:

@@ -589,6 +589,54 @@ def farthest_point_sample(
     )
 
 
+def rebalance_contiguous_clusters(
+    clusters: list[list[dict[str, Any]]],
+    *,
+    min_size: int,
+) -> list[list[dict[str, Any]]]:
+    """
+    After gap cuts, move POIs across adjacent cut edges so no day is left with
+    only 1–2 stops while a neighbour holds the rest of the tour.
+    Contiguity is preserved (steal only from neighbour edges).
+    """
+    if not clusters:
+        return clusters
+    out = [list(c) for c in clusters]
+    target = max(1, int(min_size))
+    # Cap target so tiny pools still distribute
+    total = sum(len(c) for c in out)
+    if total == 0:
+        return out
+    target = min(target, max(1, total // len(out)))
+
+    for _ in range(total * 2):
+        thin_i = next((i for i, c in enumerate(out) if len(c) < target), None)
+        if thin_i is None:
+            break
+        stole = False
+        # Prefer stealing from the fattest adjacent neighbour
+        candidates: list[tuple[int, int]] = []
+        if thin_i > 0:
+            candidates.append((thin_i - 1, len(out[thin_i - 1])))
+        if thin_i + 1 < len(out):
+            candidates.append((thin_i + 1, len(out[thin_i + 1])))
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        for neigh_i, neigh_len in candidates:
+            if neigh_len <= target:
+                continue
+            if neigh_i < thin_i:
+                # left neighbour → move its last POI to start of thin
+                out[thin_i].insert(0, out[neigh_i].pop())
+            else:
+                # right neighbour → move its first POI to end of thin
+                out[thin_i].append(out[neigh_i].pop(0))
+            stole = True
+            break
+        if not stole:
+            break
+    return out
+
+
 def split_tour_at_largest_gaps(
     tour: Sequence[dict[str, Any]],
     days: int,
@@ -709,4 +757,6 @@ def build_day_clusters(
     # Replan variety: flip tour direction so day cuts land on different segments
     if rng is not None and len(tour) > 3 and rng.random() < 0.5:
         tour = list(reversed(tour))
-    return split_tour_at_largest_gaps(tour, days_n)
+    clusters = split_tour_at_largest_gaps(tour, days_n)
+    min_per = max(3, min(5, len(tour) // max(days_n, 1)))
+    return rebalance_contiguous_clusters(clusters, min_size=min_per)

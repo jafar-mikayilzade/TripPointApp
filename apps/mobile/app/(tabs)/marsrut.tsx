@@ -308,7 +308,6 @@ export default function MarsrutScreen() {
     latitude: number;
     longitude: number;
   } | null>(null);
-  const [mapSize, setMapSize] = useState<{ width: number; height: number } | null>(null);
   /** Forma: xəritə gizli; plan: ~yarı yarı — istifadəçi yenə sürükləyə bilər */
   const [splitRatio, setSplitRatio] = useState(MARSRUT_FORM_SPLIT);
   const [savingRoute, setSavingRoute] = useState(false);
@@ -337,12 +336,13 @@ export default function MarsrutScreen() {
       if (alive) {
         setTracksMarkers(false);
       }
-    }, 2200);
+    }, 600);
     return () => {
       alive = false;
       clearTimeout(t);
     };
-  }, [plan, mapSize?.width, mapSize?.height, routeSegments.length]);
+    // Only when plan identity changes — not on map resize / polyline updates
+  }, [plan]);
 
   const canSubmit = useMemo(
     () => Boolean(regionId && days && budget && interests.length > 0),
@@ -475,9 +475,9 @@ export default function MarsrutScreen() {
     return out;
   }, [plan]);
 
-  // After plan + map layout: fit every day's pins (day-1 included)
+  // After plan: fit every day's pins (day-1 included)
   useEffect(() => {
-    if (!plan || !mapSize || planMapMarkers.length === 0) {
+    if (!plan || planMapMarkers.length === 0) {
       return;
     }
     const coords = planMapMarkers.map((m) => ({
@@ -491,7 +491,7 @@ export default function MarsrutScreen() {
       });
     }, 400);
     return () => clearTimeout(t);
-  }, [plan, mapSize, planMapMarkers]);
+  }, [plan, planMapMarkers]);
 
   useEffect(() => {
     if (!loading) {
@@ -644,94 +644,114 @@ export default function MarsrutScreen() {
         stops.map((s) => ({ latitude: s.lat, longitude: s.lng }))
       );
 
-      if (!GOOGLE_MAPS_KEY) {
-        const segments: RouteSegment[] = [];
-        dayStopLists.forEach((stops, dayIdx) => {
-          const color = DAY_COLORS[dayIdx % DAY_COLORS.length];
-          for (let i = 0; i < stops.length - 1; i++) {
-            segments.push({
-              coordinates: [
-                { latitude: stops[i].lat, longitude: stops[i].lng },
-                { latitude: stops[i + 1].lat, longitude: stops[i + 1].lng },
-              ],
-              color,
-            });
-          }
-        });
-        setRouteSegments(segments);
-        if (fitCoords.length > 0 && mapRef.current) {
-          mapRef.current.fitToCoordinates(fitCoords, {
-            edgePadding: { top: 60, right: 40, bottom: 40, left: 40 },
-            animated: true,
-          });
-        }
-        return;
-      }
-
-      const segments: RouteSegment[] = [];
-      const durations: Record<string, StopDuration> = {};
-      const allCoords: LatLng[] = [];
-
-      for (let dayIdx = 0; dayIdx < dayStopLists.length; dayIdx++) {
-        const stops = dayStopLists[dayIdx];
+      // Instant straight segments so UI stays responsive while Directions loads
+      const straightSegments: RouteSegment[] = [];
+      dayStopLists.forEach((stops, dayIdx) => {
         const color = DAY_COLORS[dayIdx % DAY_COLORS.length];
         for (let i = 0; i < stops.length - 1; i++) {
-          const origin = stops[i];
-          const dest = stops[i + 1];
-          const url =
-            'https://maps.googleapis.com/maps/api/directions/json?' +
-            `origin=${origin.lat},${origin.lng}` +
-            `&destination=${dest.lat},${dest.lng}` +
-            '&mode=driving&language=az&key=' +
-            GOOGLE_MAPS_KEY;
-
-          const response = await fetch(url);
-          const data = await response.json();
-
-          if (data.status === 'OK' && data.routes?.[0]) {
-            const route = data.routes[0];
-            const leg = route.legs?.[0];
-            const points = decodePolyline(route.overview_polyline.points);
-            const segmentCoords: LatLng[] = [
-              { latitude: origin.lat, longitude: origin.lng },
-              ...points,
-              { latitude: dest.lat, longitude: dest.lng },
-            ];
-            segments.push({ coordinates: segmentCoords, color });
-            allCoords.push(...segmentCoords);
-            durations[legKey(dayIdx, i)] = {
-              duration: leg?.duration?.text || '',
-              distance: leg?.distance?.text || '',
-            };
-          } else {
-            const fallback: LatLng[] = [
-              { latitude: origin.lat, longitude: origin.lng },
-              { latitude: dest.lat, longitude: dest.lng },
-            ];
-            segments.push({ coordinates: fallback, color });
-            allCoords.push(...fallback);
-          }
+          straightSegments.push({
+            coordinates: [
+              { latitude: stops[i].lat, longitude: stops[i].lng },
+              { latitude: stops[i + 1].lat, longitude: stops[i + 1].lng },
+            ],
+            color,
+          });
         }
-      }
+      });
+      setRouteSegments(straightSegments);
 
-      setRouteSegments(segments);
-      setStopDurations(durations);
-
-      // Always fit ALL day stop pins (not only polyline samples) so day-1 stays in view
-      const toFit = fitCoords.length > 0 ? fitCoords : allCoords;
-      if (toFit.length > 0 && mapRef.current) {
-        // Defer until split layout settles
+      if (fitCoords.length > 0 && mapRef.current) {
         if (fitTimerRef.current) {
           clearTimeout(fitTimerRef.current);
         }
         fitTimerRef.current = setTimeout(() => {
           fitTimerRef.current = null;
-          mapRef.current?.fitToCoordinates(toFit, {
+          mapRef.current?.fitToCoordinates(fitCoords, {
             edgePadding: { top: 72, right: 48, bottom: 48, left: 48 },
             animated: true,
           });
         }, 350);
       }
+
+      if (!GOOGLE_MAPS_KEY) {
+        return;
+      }
+
+      type LegJob = {
+        dayIdx: number;
+        legIdx: number;
+        origin: { lat: number; lng: number };
+        dest: { lat: number; lng: number };
+        color: string;
+      };
+      const jobs: LegJob[] = [];
+      dayStopLists.forEach((stops, dayIdx) => {
+        const color = DAY_COLORS[dayIdx % DAY_COLORS.length];
+        for (let i = 0; i < stops.length - 1; i++) {
+          jobs.push({
+            dayIdx,
+            legIdx: i,
+            origin: stops[i],
+            dest: stops[i + 1],
+            color,
+          });
+        }
+      });
+
+      const durations: Record<string, StopDuration> = {};
+      const enriched: RouteSegment[] = new Array(jobs.length);
+
+      const fetchLeg = async (job: LegJob, index: number) => {
+        const url =
+          'https://maps.googleapis.com/maps/api/directions/json?' +
+          `origin=${job.origin.lat},${job.origin.lng}` +
+          `&destination=${job.dest.lat},${job.dest.lng}` +
+          '&mode=driving&language=az&key=' +
+          GOOGLE_MAPS_KEY;
+        try {
+          const response = await fetch(url);
+          const data = await response.json();
+          if (data.status === 'OK' && data.routes?.[0]) {
+            const route = data.routes[0];
+            const leg = route.legs?.[0];
+            const raw = decodePolyline(route.overview_polyline.points);
+            const points =
+              raw.length > 40 ? raw.filter((_, i) => i % 3 === 0 || i === raw.length - 1) : raw;
+            enriched[index] = {
+              coordinates: [
+                { latitude: job.origin.lat, longitude: job.origin.lng },
+                ...points,
+                { latitude: job.dest.lat, longitude: job.dest.lng },
+              ],
+              color: job.color,
+            };
+            durations[legKey(job.dayIdx, job.legIdx)] = {
+              duration: leg?.duration?.text || '',
+              distance: leg?.distance?.text || '',
+            };
+            return;
+          }
+        } catch {
+          // fall through
+        }
+        enriched[index] = {
+          coordinates: [
+            { latitude: job.origin.lat, longitude: job.origin.lng },
+            { latitude: job.dest.lat, longitude: job.dest.lng },
+          ],
+          color: job.color,
+        };
+      };
+
+      const CONCURRENCY = 4;
+      for (let i = 0; i < jobs.length; i += CONCURRENCY) {
+        await Promise.all(
+          jobs.slice(i, i + CONCURRENCY).map((job, offset) => fetchLeg(job, i + offset))
+        );
+      }
+
+      setRouteSegments(enriched.filter(Boolean));
+      setStopDurations(durations);
     } catch (err) {
       console.log('Route fetch xətası:', err);
     }
@@ -770,7 +790,7 @@ export default function MarsrutScreen() {
       let accommodations: any[] = [];
       let attractions: any[] = [];
 
-      const ranked = await fetchRouteCandidates(regionId, 16, {
+      const ranked = await fetchRouteCandidates(regionId, Math.max(28, days * 10), {
         interests,
       });
       if (
@@ -833,11 +853,11 @@ export default function MarsrutScreen() {
         restaurants = pois
           .filter((p) => hasAny(p, ['restaurant', 'home_restaurant', 'cafe']))
           .sort(byRating)
-          .slice(0, 12);
+          .slice(0, 20);
         accommodations = pois
           .filter((p) => hasAny(p, ['hotel', 'hostel', 'guesthouse', 'camping']))
           .sort(byRating)
-          .slice(0, 12);
+          .slice(0, 16);
         attractions = preferAttractionsForInterests(
           pois
             .filter((p) =>
@@ -853,7 +873,7 @@ export default function MarsrutScreen() {
             )
             .sort(byRating),
           interests
-        ).slice(0, 16);
+        ).slice(0, Math.max(28, days * 10));
       }
 
       if (restaurants.length + accommodations.length + attractions.length === 0) {
@@ -1029,40 +1049,26 @@ export default function MarsrutScreen() {
         minTopRatio={0}
         maxTopRatio={0.85}
         top={
-          <View
-            style={styles.mapSection}
-            onLayout={(e) => {
-              const { width, height } = e.nativeEvent.layout;
-              if (width > 0 && height > 0) {
-                setMapSize((prev) =>
-                  prev && prev.width === width && prev.height === height
-                    ? prev
-                    : { width, height }
-                );
-              }
-            }}
-          >
-            {mapSize ? (
-              <MapView
-                key={plan ? `marsrut-plan-${plan.regionLabel}-${plan.daysCount}` : 'marsrut-form'}
-                ref={mapRef as never}
-                style={{ width: mapSize.width, height: mapSize.height }}
-                provider={PROVIDER_GOOGLE}
-                {...(Platform.OS === 'web'
-                  ? {
-                      googleMapsApiKey:
-                        process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY || undefined,
-                    }
-                  : {})}
-                initialRegion={{
-                  latitude: regionMeta.latitude,
-                  longitude: regionMeta.longitude,
-                  latitudeDelta: regionMeta.latitudeDelta,
-                  longitudeDelta: regionMeta.longitudeDelta,
-                }}
-                showsUserLocation={false}
-                showsMyLocationButton={false}
-              >
+          <View style={styles.mapSection}>
+            <MapView
+              ref={mapRef as never}
+              style={StyleSheet.absoluteFillObject}
+              provider={PROVIDER_GOOGLE}
+              {...(Platform.OS === 'web'
+                ? {
+                    googleMapsApiKey:
+                      process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY || undefined,
+                  }
+                : {})}
+              initialRegion={{
+                latitude: regionMeta.latitude,
+                longitude: regionMeta.longitude,
+                latitudeDelta: regionMeta.latitudeDelta,
+                longitudeDelta: regionMeta.longitudeDelta,
+              }}
+              showsUserLocation={false}
+              showsMyLocationButton={false}
+            >
                   {fromOrigin && userLocation ? (
                     <Marker
                       coordinate={userLocation}
@@ -1141,11 +1147,6 @@ export default function MarsrutScreen() {
                     ) : null
                   )}
                 </MapView>
-              ) : (
-                <View style={styles.mapPlaceholder}>
-                  <Text style={styles.mapPlaceholderText}>Xəritə yüklənir…</Text>
-                </View>
-              )}
 
               {plan ? (
                 <TouchableOpacity onPress={handleReset} style={styles.resetBadge}>
