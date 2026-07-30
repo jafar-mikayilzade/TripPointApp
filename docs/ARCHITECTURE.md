@@ -28,22 +28,37 @@ Mobile → `{API_URL}/api/sync-places?region=&category=`
 
 ### Auth
 
-Yalnız Supabase Auth (email / Google). Python auth etmir.
+Yalnız Supabase Auth (email / Google). FastAPI istifadəçi yaratmır — gələn
+`Authorization: Bearer <session token>`-i Supabase-də yoxlayır (`app/auth.py`).
+
+Service role ilə yazan / pullu API yandıran endpoint-lər sessiya tələb edir:
+
+| Endpoint | Tələb |
+|----------|-------|
+| `POST /api/plan-route` | Supabase sessiya (Claude/weather kvotası) |
+| `POST /api/pois/upsert-google-place` | Supabase sessiya |
+| `GET /api/sync-places` | Supabase sessiya **və ya** `X-Cron-Secret` |
+| `POST /api/telegram/notify` | Sessiya və ya `X-Notify-Secret`; moderasiya düymələri yalnız DB-də açıq (`pending`/`open`) sətir üçün əlavə olunur |
+| `POST /api/jobs/*` | Yalnız `X-Cron-Secret` |
 
 `SUPABASE_SERVICE_KEY` / Places API key **heç vaxt** mobile `EXPO_PUBLIC_*` içində olmamalıdır.
+
+`profiles` UPDATE RLS istifadəçiyə `role`, `is_verified`, `telegram_chat_id`
+dəyişməyə icazə vermir (`20260731_profiles_update_rls.sql`).
 
 ### AI marşrut (plan-route)
 
 | Priority | Endpoint | Notes |
 |----------|----------|--------|
 | **Only** | FastAPI `POST /api/plan-route` | Geo itinerary (Haversine NN), optional Claude tips, **DB `pois` candidates** (OSM live opt-in only), `varietySeed` / travel window |
-| ~~Edge~~ | Supabase Edge `plan-route` | **Deprecated** — mobile çağırmır (parity riski). Emergency reference only. |
+
+Köhnə Supabase Edge `plan-route` funksiyası silinib (auth-suz Anthropic proxy idi).
 
 Mobile: `apps/mobile/lib/planRoute.ts` — FastAPI + bir retry; API yoxdursa açıq xəta.
 
 ### Rate limit + live cache
 
-- In-memory IP limits: `plan-route` 5/min, `live-places` 30/min, `sync-places` 10/min, `pois/upsert-google-place` 20/min (`app/rate_limit.py`).
+- In-memory IP limits: `plan-route` 5/min, `live-places` 30/min, `sync-places` 10/min, `pois/upsert-google-place` 20/min, `telegram/notify` 10/min, `telegram/webhook` 120/min, `notify/dispatch` 30/min (`app/rate_limit.py`).
 - `live-places` DB-only (`pois` + seeds); Overpass yoxdur. Viewport/region TTL ~12 dəq. OSM yalnız `sync-places` background.
 
 ### Live places / cafe
