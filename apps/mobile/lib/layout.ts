@@ -51,8 +51,6 @@ export const layout = StyleSheet.create({
   },
 });
 
-export type ResponsiveLayout = ReturnType<typeof useResponsiveLayout>;
-
 /** Kiçik / qısa telefonlar üçün dinamik ölçü — bütün ekranlarda istifadə et. */
 export function useResponsiveLayout() {
   const { width, height } = useWindowDimensions();

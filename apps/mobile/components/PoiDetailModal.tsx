@@ -24,10 +24,8 @@ import { notifyAdmins } from '../lib/adminNotify';
 import { getErrorMessage } from '../lib/errors';
 import { isDatabasePoiId } from '../lib/livePlaces';
 import { isPoiSponsored, summarizeOpeningHours } from '../lib/openingHours';
-import {
-  getCategoryColor,
-  getCategoryLabel,
-} from '../lib/poi';
+import { getCategoryLabel } from '../lib/categoryUtils';
+import { getCategoryColor } from '../lib/poi';
 import { pickPhotoUrl } from '../lib/photoUrls';
 import { supabase } from '../lib/supabase';
 import { uploadImageVariants } from '../lib/uploadImage';

@@ -17,29 +17,8 @@ const CATEGORY_COLORS: Record<PoiCategory, string> = {
   other: '#9A9AA0',
 };
 
-const CATEGORY_LABELS: Record<PoiCategory, string> = {
-  restaurant: 'Restoran',
-  cafe: 'Kafe',
-  home_restaurant: 'Ev restoranı',
-  hotel: 'Otel',
-  hostel: 'Hostel',
-  guesthouse: 'Qonaq evi',
-  camping: 'Kemping',
-  nature: 'Təbiət',
-  waterfall: 'Şəlalə',
-  mountain: 'Dağ',
-  lake: 'Göl',
-  historical: 'Tarixi yer',
-  monument: 'Abidə',
-  other: 'Digər',
-};
-
 export function getCategoryColor(category: PoiCategory): string {
   return CATEGORY_COLORS[category] ?? CATEGORY_COLORS.other;
-}
-
-export function getCategoryLabel(category: PoiCategory): string {
-  return CATEGORY_LABELS[category] ?? CATEGORY_LABELS.other;
 }
 
 const EARTH_RADIUS_KM = 6371;
@@ -48,18 +27,25 @@ function toRadians(degrees: number): number {
   return (degrees * Math.PI) / 180;
 }
 
+/** Great-circle distance in km — single implementation for the whole app. */
+export function haversineKm(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number
+): number {
+  const dLat = toRadians(lat2 - lat1);
+  const dLng = toRadians(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLng / 2) ** 2;
+  return EARTH_RADIUS_KM * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 export function getDistanceKm(
   from: { latitude: number; longitude: number },
   to: { latitude: number; longitude: number }
 ): number {
-  const dLat = toRadians(to.latitude - from.latitude);
-  const dLng = toRadians(to.longitude - from.longitude);
-  const lat1 = toRadians(from.latitude);
-  const lat2 = toRadians(to.latitude);
-
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return EARTH_RADIUS_KM * c;
+  return haversineKm(from.latitude, from.longitude, to.latitude, to.longitude);
 }
 

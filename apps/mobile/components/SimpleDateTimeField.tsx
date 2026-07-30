@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, space } from '../constants/theme';
 import { nextSelectableHour } from '../lib/listingSchedule';
+import { startOfDay } from '../lib/tripSchedule';
 
 interface SimpleDateTimeFieldProps {
   value: Date;
@@ -45,12 +46,6 @@ const MONTH_NAMES = [
 ];
 
 const WEEKDAYS = ['B.e', 'Ç.a', 'Ç', 'C.a', 'C', 'Ş', 'B'];
-
-function startOfDay(date: Date): Date {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return next;
-}
 
 function sameDay(a: Date, b: Date): boolean {
   return startOfDay(a).getTime() === startOfDay(b).getTime();

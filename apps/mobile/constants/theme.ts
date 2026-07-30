@@ -35,7 +35,6 @@ export const colors = {
   overlay: 'rgba(26, 26, 28, 0.35)',
   whatsapp: '#25D366',
   skeleton: '#E8E9ED',
-  mapAccent: '#4A8FE8',
   /** Bookmark / sevimli accent (matches FavoriteButton) */
   favorite: '#E8B84A',
 } as const;
@@ -64,13 +63,6 @@ export const shadows = {
     shadowOpacity: 0.05,
     shadowRadius: 14,
     elevation: 2,
-  },
-  fab: {
-    shadowColor: '#4A8FE8',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.22,
-    shadowRadius: 10,
-    elevation: 5,
   },
   bar: {
     shadowColor: '#1A1A1C',

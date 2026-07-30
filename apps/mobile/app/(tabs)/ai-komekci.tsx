@@ -33,12 +33,12 @@ import { ShareAsTourModal } from '../../components/ShareAsTourModal';
 import { useInfoToast } from '../../components/InfoToastProvider';
 import { REGIONS } from '../../constants/regions';
 import { getErrorMessage } from '../../lib/errors';
+import { haversineKm } from '../../lib/poi';
 import { saveRoute, manualStopsToSavedStops } from '../../lib/savedRoutes';
 import {
   POI_PAGE_SIZE,
   createManualStop,
   formatOriginToFirstLeg,
-  haversineKm,
   insertStopAfter,
   manualStopsToNavStops,
   manualStopsToShareRoute,

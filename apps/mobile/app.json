@@ -97,7 +97,6 @@
       "expo-dev-client",
       "expo-font",
       "@react-native-google-signin/google-signin",
-      "expo-image",
       "expo-sharing",
       [
         "expo-notifications",
