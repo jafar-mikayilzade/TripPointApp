@@ -1,7 +1,6 @@
-"""Live OSM places for home/Qur map (no DB upsert).
+"""Home / Qur map places from Supabase `pois` (no live Overpass).
 
-Hub-driven region load + optional viewport (lat/lng/radius) merge.
-Tourism filter + curated seeds + bucket mix. Google Nearby disabled by default.
+OSM fills the table via background `/api/sync-places` only.
 """
 
 from __future__ import annotations
@@ -16,20 +15,12 @@ from app.constants.tourism_hubs import hub_as_center, hubs_for_region
 from app.constants.tourism_seeds import seeds_for_region
 from app.db import supabase
 from app.services.geo_route import haversine_km
-from app.services.live_route_candidates import (
-    LIVE_PLAN_RADIUS_METERS,
-    OSM_MAX_CENTERS,
-    _fetch_osm_bundle,
-)
+from app.services.live_route_candidates import LIVE_PLAN_RADIUS_METERS
 from app.services.places_tourism_filter import filter_tourism_rows
 from app.services.rank_pois import mix_home_places, public_poi_fields
 
-# How-to expand: add hubs in tourism_hubs.py, seeds in tourism_seeds.py,
-# blacklist in places_tourism_filter.py
-
 logger = logging.getLogger(__name__)
 
-# In-memory viewport/region TTL cache (per process — use Redis if multi-worker)
 _LIVE_CACHE_TTL_SECONDS = 12 * 60
 _LIVE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _LIVE_CACHE_LOCK = Lock()
@@ -45,12 +36,11 @@ def _cache_key(
 ) -> str:
     cat = (category or "all").strip().lower()
     if lat is None or lng is None:
-        return f"osm|{region_key}|{cat}|{limit}|region"
-    # Round to ~100m buckets to absorb tiny pans
+        return f"db|{region_key}|{cat}|{limit}|region"
     lat_r = round(float(lat), 3)
     lng_r = round(float(lng), 3)
     rad_r = int(round((radius or 8000) / 500.0) * 500)
-    return f"osm|{region_key}|{cat}|{limit}|{lat_r}|{lng_r}|{rad_r}"
+    return f"db|{region_key}|{cat}|{limit}|{lat_r}|{lng_r}|{rad_r}"
 
 
 def _centers_for_region(region_key: str) -> list[dict[str, Any]]:
@@ -68,15 +58,6 @@ def _centers_for_region(region_key: str) -> list[dict[str, Any]]:
             "weight": 0.6,
         }
     ]
-
-
-def _cap_centers(centers: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if len(centers) <= OSM_MAX_CENTERS:
-        return centers
-    ranked = sorted(
-        centers, key=lambda c: float(c.get("weight") or 0), reverse=True
-    )
-    return ranked[:OSM_MAX_CENTERS]
 
 
 def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -102,6 +83,9 @@ def _load_db_places(
     category: str | None,
     limit: int,
     hubs: list[dict[str, Any]],
+    lat: float | None = None,
+    lng: float | None = None,
+    radius: int | None = None,
 ) -> list[dict[str, Any]]:
     db_region = REGION_DB_ID.get(region_key, region_key)
     query = (
@@ -113,7 +97,7 @@ def _load_db_places(
         .eq("status", "approved")
         .ilike("region", db_region)
         .neq("category", "cafe")
-        .limit(max(limit * 3, 80))
+        .limit(max(limit * 4, 120))
     )
     if category and category not in {"all", ""}:
         query = query.eq("category", category)
@@ -122,36 +106,30 @@ def _load_db_places(
     seeds = seeds_for_region(region_key, db_region=db_region)
     if category and category not in {"all", ""}:
         seeds = [s for s in seeds if str(s.get("category") or "") == category]
-    merged = filter_tourism_rows(_dedupe_rows(seeds + rows), hubs=hubs)
-    return mix_home_places(merged, limit=limit, hubs=hubs)
 
+    merged = _dedupe_rows(seeds + rows)
 
-def _fetch_centers(
-    centers: list[dict[str, Any]],
-    *,
-    db_region: str,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """One Overpass tourism bundle per center (no category×hub fan-out)."""
-    warnings: list[str] = []
-    capped = _cap_centers(centers)
-    if not capped:
-        return [], warnings
+    if lat is not None and lng is not None:
+        r_km = (float(radius or 8_000) / 1000.0) * 1.4
+        near: list[dict[str, Any]] = []
+        for row in merged:
+            try:
+                if (
+                    haversine_km(
+                        float(lat),
+                        float(lng),
+                        float(row["lat"]),
+                        float(row["lng"]),
+                    )
+                    <= r_km
+                ):
+                    near.append(row)
+            except (KeyError, TypeError, ValueError):
+                continue
+        merged = near
 
-    out: list[dict[str, Any]] = []
-    for center in capped:
-        rows, batch_warnings = _fetch_osm_bundle(
-            latitude=float(center["lat"]),
-            longitude=float(center["lng"]),
-            region=db_region,
-            hub_id=str(center.get("id") or ""),
-            hub_weight=float(center.get("weight") or 0.5),
-            radius_meters=int(center.get("radius_m") or LIVE_PLAN_RADIUS_METERS),
-        )
-        warnings.extend(batch_warnings)
-        out.extend(rows)
-        if not rows and batch_warnings:
-            break
-    return out, warnings
+    filtered = filter_tourism_rows(merged, hubs=hubs)
+    return mix_home_places(filtered, limit=limit, hubs=hubs)
 
 
 def load_live_home_places(
@@ -163,10 +141,7 @@ def load_live_home_places(
     lng: float | None = None,
     radius: int | None = None,
 ) -> dict[str, Any]:
-    """
-    Region overview: fetch tourism hubs via OSM.
-    Viewport mode (lat/lng set): fetch viewport center (+ nearby strong hubs).
-    """
+    """DB-only home places. Overpass is never called here."""
     region_key = region_key.strip().lower()
     if region_key not in REGION_COORDINATES:
         raise KeyError(region_key)
@@ -192,7 +167,6 @@ def load_live_home_places(
     )
     with _LIVE_CACHE_LOCK:
         _LIVE_CACHE[key] = (now, loaded)
-        # Bound memory: drop oldest if huge
         if len(_LIVE_CACHE) > 200:
             oldest = sorted(_LIVE_CACHE.items(), key=lambda kv: kv[1][0])[:50]
             for old_key, _ in oldest:
@@ -212,100 +186,28 @@ def _load_live_home_places_uncached(
     radius: int | None = None,
 ) -> dict[str, Any]:
     db_region = REGION_DB_ID.get(region_key, region_key)
-    warnings: list[str] = []
-    region_hubs = _centers_for_region(region_key)
     viewport_mode = lat is not None and lng is not None
+    rank_hubs = _centers_for_region(region_key)
 
     if viewport_mode:
-        r_m = int(radius or 8_000)
-        r_m = max(2_000, min(r_m, 25_000))
-        centers: list[dict[str, Any]] = [
-            {
-                "id": "viewport",
-                "name": "viewport",
-                "lat": float(lat),
-                "lng": float(lng),
-                "radius_m": r_m,
-                "weight": 1.0,
-            }
-        ]
-        rank_hubs = region_hubs
+        hubs_used = ["viewport"]
     else:
-        # One stable region center — avoid hub fan-out on public Overpass
-        coords = REGION_COORDINATES[region_key]
-        centers = [
-            {
-                "id": "region_center",
-                "name": region_key,
-                "lat": float(coords["latitude"]),
-                "lng": float(coords["longitude"]),
-                "radius_m": LIVE_PLAN_RADIUS_METERS,
-                "weight": 1.0,
-            }
-        ]
-        rank_hubs = region_hubs
+        hubs_used = ["region_center"]
 
-    # DB-first (fast). Optional OSM enrich only when DB is thin.
-    db_rows = _load_db_places(
-        region_key, category=category, limit=limit, hubs=rank_hubs
-    )
-    if len(db_rows) >= max(8, limit // 3):
-        return {
-            "region": db_region,
-            "places": [public_poi_fields(r) for r in db_rows],
-            "source": "db",
-            "warnings": warnings,
-            "viewport": viewport_mode,
-            "hubs_used": [c.get("id") for c in centers],
-        }
-
-    osm_rows, ow = _fetch_centers(centers, db_region=db_region)
-    warnings.extend(ow)
-
-    seeds = seeds_for_region(region_key, db_region=db_region)
-    if category and category not in {"all", ""}:
-        seeds = [s for s in seeds if str(s.get("category") or "") == category]
-        osm_rows = [
-            r for r in osm_rows if str(r.get("category") or "") == category
-        ]
-
-    if viewport_mode:
-        near_seeds: list[dict[str, Any]] = []
-        for s in seeds:
-            try:
-                if (
-                    haversine_km(
-                        float(lat), float(lng), float(s["lat"]), float(s["lng"])
-                    )
-                    <= (float(radius or 8_000) / 1000.0) * 1.4
-                ):
-                    near_seeds.append(s)
-            except (KeyError, TypeError, ValueError):
-                continue
-        seeds = near_seeds
-
-    merged = filter_tourism_rows(
-        _dedupe_rows(seeds + osm_rows + db_rows),
+    rows = _load_db_places(
+        region_key,
+        category=category,
+        limit=limit,
         hubs=rank_hubs,
+        lat=lat,
+        lng=lng,
+        radius=radius,
     )
-    ranked = mix_home_places(merged, limit=limit, hubs=rank_hubs)
-
-    if ranked:
-        return {
-            "region": db_region,
-            "places": [public_poi_fields(r) for r in ranked],
-            "source": "mixed" if db_rows and osm_rows else ("osm" if osm_rows else "db"),
-            "warnings": warnings,
-            "viewport": viewport_mode,
-            "hubs_used": [c.get("id") for c in centers],
-        }
-
-    warnings.append("osm+db: empty")
     return {
         "region": db_region,
-        "places": [],
+        "places": [public_poi_fields(r) for r in rows],
         "source": "db",
-        "warnings": warnings,
+        "warnings": [],
         "viewport": viewport_mode,
-        "hubs_used": [c.get("id") for c in centers],
+        "hubs_used": hubs_used,
     }

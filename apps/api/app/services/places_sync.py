@@ -21,7 +21,7 @@ from app.services.places_clean import clean_place, to_db_region
 from app.services.places_google import fetch_places_from_google
 from app.services.places_hybrid import fetch_places_from_hybrid, iter_hybrid_all_batches
 from app.services.places_mock import fetch_places_from_mock
-from app.services.places_osm import fetch_places_from_osm
+from app.services.places_osm import _overpass_in_cooldown, fetch_places_from_osm
 
 # One sync at a time — concurrent mobile/all+filter calls stampede Overpass
 _SYNC_LOCK = threading.Lock()
@@ -81,6 +81,20 @@ def sync_places(region: str, category: str) -> JSONResponse:
                     f"Category '{category_key}' is curated manually / Google upsert; "
                     "OSM sync skipped. Use category=all for attractions."
                 ),
+            }
+        )
+
+    if DATA_SOURCE == "osm" and _overpass_in_cooldown():
+        return JSONResponse(
+            content={
+                "success": True,
+                "data_source": DATA_SOURCE,
+                "region": to_db_region(region_key),
+                "category": category_key,
+                "fetched": 0,
+                "inserted": 0,
+                "skipped": 0,
+                "message": "Overpass cooldown active — sync skipped; use existing pois.",
             }
         )
 

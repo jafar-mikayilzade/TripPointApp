@@ -44,7 +44,7 @@ Mobile: `apps/mobile/lib/planRoute.ts` — FastAPI + bir retry; API yoxdursa aç
 ### Rate limit + live cache
 
 - In-memory IP limits: `plan-route` 5/min, `live-places` 30/min, `sync-places` 10/min, `pois/upsert-google-place` 20/min (`app/rate_limit.py`).
-- `live-places` viewport/region TTL ~12 dəq (`live_home_places.py`). Multi-worker üçün sonra Redis.
+- `live-places` DB-only (`pois` + seeds); Overpass yoxdur. Viewport/region TTL ~12 dəq. OSM yalnız `sync-places` background.
 
 ### Live places / cafe
 

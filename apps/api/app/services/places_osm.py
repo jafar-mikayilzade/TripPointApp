@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import Any
 
@@ -12,13 +11,12 @@ import requests
 from app.config import (
     OSM_CACHE_TTL_SECONDS,
     OSM_HTTP_TIMEOUT_SECONDS,
-    OSM_PER_CATEGORY_LIMIT,
     OSM_RESULT_LIMIT,
     OSM_RESULT_LIMIT_ALL,
     OSM_SEARCH_RADIUS_METERS,
     OVERPASS_ENDPOINTS,
 )
-from app.constants.categories import APP_CATEGORIES, OSM_SYNC_ATTRACTION_ORDER
+from app.constants.categories import OSM_SYNC_ATTRACTION_ORDER
 from app.constants.osm import OSM_CATEGORY_FILTERS
 from app.services.places_clean import category_from_osm_tags
 
@@ -348,44 +346,24 @@ def _fetch_all_categories_balanced(
     longitude: float,
 ) -> list[dict[str, Any]]:
     """
-    Fetch each app category with its own quota so restaurants don't crowd out
-    hotels / nature / monuments in a single merge limit.
+    One Overpass tourism bundle for sync (no per-category fan-out).
+    Tag-derived categories; food/lodging filtered later in places_sync.
     """
-    per_cat = OSM_PER_CATEGORY_LIMIT
-    merged: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
-    counts: dict[str, int] = {}
-
-    cats = [c for c in ALL_SYNC_CATEGORIES if c in APP_CATEGORIES]
-
-    def _one_category(cat: str) -> tuple[str, list[dict[str, Any]]]:
-        try:
-            # Selectors sequential here; categories run in parallel outer pool
-            return cat, _fetch_single_category(
-                latitude, longitude, cat, per_cat, selector_parallel=False
-            )
-        except Exception as exc:
-            print(f"[osm] category {cat} failed: {exc}")
-            return cat, []
-
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = [pool.submit(_one_category, cat) for cat in cats]
-        for future in as_completed(futures):
-            cat, places = future.result()
-            kept = 0
-            for place in places:
-                place_id = place["place_id"]
-                if place_id in seen_ids:
-                    continue
-                place["category"] = cat
-                seen_ids.add(place_id)
-                merged.append(place)
-                kept += 1
-            counts[cat] = kept
-            print(f"[osm] category={cat} kept={kept}")
-
-    print(f"[osm] all-sync totals={counts} total={len(merged)}")
-    return merged[:OSM_RESULT_LIMIT_ALL]
+    if _overpass_in_cooldown():
+        print("[osm] all-sync skipped — cooldown active")
+        return []
+    places = fetch_tourism_bundle_from_osm(
+        latitude,
+        longitude,
+        result_limit=OSM_RESULT_LIMIT_ALL,
+        radius_meters=OSM_SEARCH_RADIUS_METERS,
+        # Background sync can wait a bit longer than live UI
+        timeout_seconds=20.0,
+        max_mirrors=3,
+        cache_key=f"sync-bundle:{latitude:.4f}:{longitude:.4f}",
+    )
+    print(f"[osm] all-sync bundle total={len(places)}")
+    return places
 
 
 def fetch_places_from_osm(
@@ -394,10 +372,9 @@ def fetch_places_from_osm(
     category: str,
     cache_key: str | None = None,
 ) -> list[dict[str, Any]]:
-    # v2: balanced all-sync (invalidate old restaurant-heavy cache)
-    key = cache_key or f"v2:{latitude:.4f}:{longitude:.4f}:{category}"
-    if not key.startswith("v2:"):
-        key = f"v2:{key}"
+    key = cache_key or f"v3:{latitude:.4f}:{longitude:.4f}:{category}"
+    if not key.startswith("v3:"):
+        key = f"v3:{key}"
 
     cached = _OSM_CACHE.get(key)
     now = time.time()
@@ -405,11 +382,21 @@ def fetch_places_from_osm(
         print(f"[osm] cache hit {key} ({len(cached[1])} places)")
         return list(cached[1])
 
+    if _overpass_in_cooldown():
+        print(f"[osm] skip fetch {category} — cooldown active")
+        return []
+
     if category == "all":
         merged = _fetch_all_categories_balanced(latitude, longitude)
     else:
         merged = _fetch_single_category(
-            latitude, longitude, category, OSM_RESULT_LIMIT
+            latitude,
+            longitude,
+            category,
+            OSM_RESULT_LIMIT,
+            selector_parallel=False,
+            timeout_seconds=20.0,
+            max_mirrors=3,
         )
 
     _OSM_CACHE[key] = (now + OSM_CACHE_TTL_SECONDS, merged)
