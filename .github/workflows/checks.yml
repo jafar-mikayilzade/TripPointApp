@@ -29,6 +29,9 @@ jobs:
           SUPABASE_SERVICE_KEY: dummy-for-ci
         run: python -c "import main"
 
+      - name: Lint (unused imports / dead locals)
+        run: ruff check --select F app tests main.py
+
       - name: Unit tests
         env:
           SUPABASE_URL: https://example.supabase.co
