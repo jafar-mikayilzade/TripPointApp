@@ -11,12 +11,12 @@ from threading import Lock
 from typing import Any
 
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
-from app.constants.tourism_hubs import hub_as_center, hubs_for_region
 from app.constants.tourism_seeds import seeds_for_region
 from app.db import supabase
 from app.services.geo_route import haversine_km
 from app.services.live_route_candidates import LIVE_PLAN_RADIUS_METERS
 from app.services.places_tourism_filter import filter_tourism_rows
+from app.services.poi_rows import centers_for_region, dedupe_poi_rows
 from app.services.rank_pois import mix_home_places, public_poi_fields
 
 logger = logging.getLogger(__name__)
@@ -44,37 +44,9 @@ def _cache_key(
 
 
 def _centers_for_region(region_key: str) -> list[dict[str, Any]]:
-    hubs = hubs_for_region(region_key)
-    if hubs:
-        return [hub_as_center(h) for h in hubs]
-    coords = REGION_COORDINATES[region_key]
-    return [
-        {
-            "id": "region_center",
-            "name": region_key,
-            "lat": float(coords["latitude"]),
-            "lng": float(coords["longitude"]),
-            "radius_m": LIVE_PLAN_RADIUS_METERS,
-            "weight": 0.6,
-        }
-    ]
-
-
-def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    by_id: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        pid = str(row.get("place_id") or row.get("id") or "")
-        if not pid:
-            continue
-        prev = by_id.get(pid)
-        if prev is None:
-            by_id[pid] = row
-            continue
-        if row.get("is_seed") and not prev.get("is_seed"):
-            by_id[pid] = row
-        elif float(row.get("hub_weight") or 0) > float(prev.get("hub_weight") or 0):
-            by_id[pid] = {**prev, **row}
-    return list(by_id.values())
+    return centers_for_region(
+        region_key, fallback_radius_m=LIVE_PLAN_RADIUS_METERS
+    )
 
 
 def _load_db_places(
@@ -107,7 +79,7 @@ def _load_db_places(
     if category and category not in {"all", ""}:
         seeds = [s for s in seeds if str(s.get("category") or "") == category]
 
-    merged = _dedupe_rows(seeds + rows)
+    merged = dedupe_poi_rows(seeds + rows)
 
     if lat is not None and lng is not None:
         r_km = (float(radius or 8_000) / 1000.0) * 1.4

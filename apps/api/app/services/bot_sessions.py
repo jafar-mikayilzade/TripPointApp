@@ -10,8 +10,6 @@ from app.db import supabase
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SESSION: dict[str, Any] = {"mode": "idle", "step": None, "data": {}}
-
 
 def load_session(chat_id: str | int) -> dict[str, Any]:
     key = str(chat_id)

@@ -4,20 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
+from app.constants.regions import REGION_COORDINATES, REGION_DB_ID, REGION_LABELS
 from app.services.live_route_candidates import load_live_route_candidates
 from app.services.plan_itinerary import build_skeleton, enrich_with_claude
-
-REGION_LABELS: dict[str, str] = {
-    "quba": "Quba",
-    "qusar": "Qusar",
-    "seki": "Şəki",
-    "sheki": "Şəki",
-    "qabala": "Qəbələ",
-    "gabala": "Qəbələ",
-    "lerik": "Lerik",
-    "baku": "Bakı",
-}
 
 REGION_EMOJI: dict[str, str] = {
     "quba": "🏔",

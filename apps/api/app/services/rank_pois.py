@@ -6,9 +6,6 @@ from typing import Any
 
 from app.services.geo_route import haversine_km
 
-# Soft floor: below this, treat as weak even if present
-MIN_USEFUL_RATING = 3.5
-
 RESTAURANT_CATS = frozenset({"restaurant", "home_restaurant", "cafe"})
 ACCOMMODATION_CATS = frozenset({"hotel", "hostel", "guesthouse", "camping"})
 ATTRACTION_CATS = frozenset(
@@ -83,10 +80,6 @@ def rating_sort_key(row: dict[str, Any]) -> tuple[float, int]:
     return (rating, count)
 
 
-def sort_pois_by_rating(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(rows, key=rating_sort_key, reverse=True)
-
-
 def _hub_proximity_weight(
     row: dict[str, Any],
     hubs: list[dict[str, Any]] | None,
@@ -158,7 +151,6 @@ def prefer_high_rated(
     rows: list[dict[str, Any]],
     *,
     limit: int,
-    min_rating: float = MIN_USEFUL_RATING,
     hubs: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """

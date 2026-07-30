@@ -83,14 +83,6 @@ HYBRID_OSM_CATEGORIES = frozenset(
 )
 
 # Stable order for hybrid "all" sync
-HYBRID_GOOGLE_SYNC_ORDER = [
-    "restaurant",
-    "hotel",
-    "hostel",
-    "guesthouse",
-    "home_restaurant",
-    "camping",
-]
 HYBRID_OSM_SYNC_ORDER = [
     "nature",
     "waterfall",

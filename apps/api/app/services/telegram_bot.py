@@ -76,11 +76,6 @@ LISTING_TYPE_EMOJI: dict[str, str] = {
     "local_service": "🛎",
 }
 
-FLOW_KEYBOARD: dict[str, Any] = {
-    "keyboard": [[{"text": BTN_CANCEL}]],
-    "resize_keyboard": True,
-}
-
 MANUAL_KEYBOARD: dict[str, Any] = {
     "keyboard": [[{"text": BTN_DONE}, {"text": BTN_CANCEL}]],
     "resize_keyboard": True,

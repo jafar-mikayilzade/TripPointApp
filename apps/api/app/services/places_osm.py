@@ -16,7 +16,6 @@ from app.config import (
     OSM_SEARCH_RADIUS_METERS,
     OVERPASS_ENDPOINTS,
 )
-from app.constants.categories import OSM_SYNC_ATTRACTION_ORDER
 from app.constants.osm import OSM_CATEGORY_FILTERS
 from app.services.places_clean import category_from_osm_tags
 
@@ -46,9 +45,6 @@ def _trip_overpass_cooldown(reason: str) -> None:
         )
     except UnicodeEncodeError:
         print("[osm] cooldown active after Overpass failure")
-
-# Attractions-only "all" sync — food/lodging curated separately
-ALL_SYNC_CATEGORIES: list[str] = list(OSM_SYNC_ATTRACTION_ORDER)
 
 
 def build_address_from_tags(tags: dict[str, Any]) -> str | None:
@@ -274,11 +270,13 @@ def _fetch_selectors(
     selectors: list[str],
     per_query_limit: int,
     *,
-    parallel: bool = True,
     timeout_seconds: float | None = None,
     max_mirrors: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Run Overpass selectors and merge unique places."""
+    """Run Overpass selectors sequentially and merge unique places.
+
+    Sequential on purpose: parallel selectors amplify Overpass 429s.
+    """
 
     def _one(selector: str) -> list[dict[str, Any]]:
         query = build_overpass_query(
@@ -300,7 +298,6 @@ def _fetch_selectors(
             seen_ids.add(place_id)
             merged.append(place)
 
-    # Sync path: always sequential — parallel selectors amplify 429s
     for selector in selectors:
         if _overpass_in_cooldown():
             print("[osm] skip remaining selectors — cooldown active")
@@ -311,7 +308,6 @@ def _fetch_selectors(
             print(f"[osm] selector failed: {exc}")
             # One hard failure is enough; don't walk the rest of the filters
             break
-    del parallel  # kept for call-site compat; unused on purpose
     return merged
 
 
@@ -321,7 +317,6 @@ def _fetch_single_category(
     category: str,
     limit: int,
     *,
-    selector_parallel: bool = True,
     timeout_seconds: float | None = None,
     max_mirrors: int | None = None,
 ) -> list[dict[str, Any]]:
@@ -331,7 +326,6 @@ def _fetch_single_category(
         longitude,
         selectors,
         per_query_limit=min(25, limit),
-        parallel=selector_parallel,
         timeout_seconds=timeout_seconds,
         max_mirrors=max_mirrors,
     )
@@ -394,7 +388,6 @@ def fetch_places_from_osm(
             longitude,
             category,
             OSM_RESULT_LIMIT,
-            selector_parallel=False,
             timeout_seconds=20.0,
             max_mirrors=3,
         )

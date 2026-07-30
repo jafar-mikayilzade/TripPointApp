@@ -7,7 +7,6 @@ from app.services.rank_pois import (
     mix_home_places,
     public_poi_fields,
     rating_sort_key,
-    sort_pois_by_rating,
     tourism_score,
 )
 
@@ -42,11 +41,9 @@ class TestRatingSortKey:
         rated = _poi("b", rating=3.0)
         assert rating_sort_key(rated) > rating_sort_key(null)
 
-
-class TestSortPoisByRating:
     def test_orders_descending(self):
         rows = [_poi("a", rating=3.0), _poi("b", rating=5.0), _poi("c", rating=4.0)]
-        ordered = sort_pois_by_rating(rows)
+        ordered = sorted(rows, key=rating_sort_key, reverse=True)
         assert [r["id"] for r in ordered] == ["b", "c", "a"]
 
 

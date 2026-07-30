@@ -14,7 +14,6 @@ import requests
 from app.config import ANTHROPIC_API_KEY
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
 from app.services.attraction_classify import (
-    INTEREST_ATTRACTION_CATS,
     classify_attraction_rows,
     interest_attraction_cats,
 )
@@ -32,12 +31,10 @@ from app.services.geo_route import (
     order_stops_geo,
     pick_poi_min_insert,
     poi_coord,
-    tour_length_km,
     trim_cluster_diameter,
 )
 from app.services.rank_pois import (
     poi_categories,
-    prefer_high_rated,
     public_poi_fields,
     rating_sort_key,
 )
@@ -88,7 +85,6 @@ DAY_FOOTPRINT_CLEARANCE_KM = 3.0
 # Food/hotel only if they barely bend the path
 MAX_FOOD_DETOUR_KM = 2.0
 MAX_FOOD_DETOUR_RELAXED_KM = 10.0
-MAX_HOTEL_FROM_PATH_END_KM = 25.0
 MAX_LUNCH_FALLBACK_KM = 35.0
 
 # Fixed daypart anchors (minutes from midnight) — overridden by travel window
@@ -169,24 +165,6 @@ def _prioritize_attractions_for_interests(
         # Keep FULL geo pool (preferred first) so multi-day clustering is not starved
         return preferred + others
     return preferred + others
-
-
-def _pick_unique(
-    pool: list[dict[str, Any]],
-    *,
-    used: set[str],
-    limit: int,
-) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    for poi in prefer_high_rated(pool, limit=len(pool) or 1):
-        pid = str(poi.get("id") or "")
-        if not pid or pid in used:
-            continue
-        used.add(pid)
-        out.append(poi)
-        if len(out) >= limit:
-            break
-    return out
 
 
 def _stop_payload(
@@ -1040,29 +1018,6 @@ def _is_travel_stop(stop: dict[str, Any]) -> bool:
     cat = str(stop.get("category") or "").strip().lower()
     daypart = str(stop.get("daypart") or "").strip().lower()
     return cat == "travel" or daypart.startswith("travel")
-
-
-def _tip_for_stop(stop: dict[str, Any]) -> str:
-    """Category/daypart tip. Unknown/travel → empty (no generic 'must visit')."""
-    if _is_travel_stop(stop):
-        return ""
-
-    name = (stop.get("name") or "Bu yer").strip()
-    daypart = str(stop.get("daypart") or "").strip().lower()
-    cat = str(stop.get("category") or "").strip().lower()
-    time_s = str(stop.get("time") or "")
-
-    if daypart == "hotel" or cat in HOTEL_CATS:
-        return f"{name} — axşam istirahət və gecələmə."
-
-    # Food / generic tips — empty (UI shows time + duration only)
-    if cat in FOOD_CATS or daypart in {"breakfast", "lunch"}:
-        return ""
-
-    if cat in NATURE_CATS or cat in HISTORICAL_CATS:
-        return ""
-
-    return ""
 
 
 def _claude_tip_mismatch(stop: dict[str, Any], tip: str) -> bool:

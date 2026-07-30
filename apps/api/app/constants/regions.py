@@ -21,3 +21,15 @@ MOCK_REGION_ALIAS: dict[str, str] = {
     "seki": "sheki",
     "qabala": "gabala",
 }
+
+# Display names (app + Telegram bot share one source)
+REGION_LABELS: dict[str, str] = {
+    "quba": "Quba",
+    "qusar": "Qusar",
+    "seki": "Şəki",
+    "sheki": "Şəki",
+    "qabala": "Qəbələ",
+    "gabala": "Qəbələ",
+    "lerik": "Lerik",
+    "baku": "Bakı",
+}

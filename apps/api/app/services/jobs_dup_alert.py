@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-import math
-import re
 from typing import Any
 
 from app.db import supabase
+from app.services.geo_route import haversine_m as _haversine_m
+from app.services.poi_rows import normalize_place_name as _normalize_name
 from app.services.telegram_notify import notify_all_admins
 
 logger = logging.getLogger(__name__)
@@ -15,24 +15,6 @@ logger = logging.getLogger(__name__)
 DUP_RADIUS_M = 80
 MAX_PAIRS_ALERT = 25
 FETCH_LIMIT = 800
-
-
-def _normalize_name(name: str) -> str:
-    text = (name or "").casefold().strip()
-    text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
-    text = re.sub(r"\s+", " ", text)
-    return text
-
-
-def _haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
-    lat1, lon1 = a
-    lat2, lon2 = b
-    r = 6371000.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlmb = math.radians(lon2 - lon1)
-    h = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
-    return 2 * r * math.asin(min(1.0, math.sqrt(h)))
 
 
 def find_duplicate_poi_pairs() -> list[dict[str, Any]]:

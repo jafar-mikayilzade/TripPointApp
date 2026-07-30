@@ -21,6 +21,11 @@ def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return 2 * EARTH_RADIUS_KM * math.asin(min(1.0, math.sqrt(a)))
 
 
+def haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Great-circle distance in meters between (lat, lng) pairs."""
+    return haversine_km(a[0], a[1], b[0], b[1]) * 1000.0
+
+
 def _coord(poi: dict[str, Any]) -> tuple[float, float] | None:
     try:
         lat = float(poi["lat"])

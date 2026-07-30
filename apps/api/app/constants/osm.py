@@ -63,18 +63,4 @@ OSM_CATEGORY_FILTERS: dict[str, list[str]] = {
         'nwr["tourism"="museum"]["name"]',
         'nwr["historic"="monument"]["name"]',
     ],
-    # Legacy bulk selector — unused by balanced all-sync, kept for tooling
-    "all": [
-        'node["amenity"="restaurant"]["name"]',
-        'nwr["tourism"="hotel"]["name"]',
-        'nwr["tourism"="hostel"]["name"]',
-        'nwr["tourism"="guest_house"]["name"]',
-        'nwr["tourism"="viewpoint"]["name"]',
-        'nwr["tourism"="attraction"]["name"]',
-        'nwr["tourism"="museum"]["name"]',
-        'nwr["waterway"="waterfall"]["name"]',
-        'node["natural"="peak"]["name"]',
-        'nwr["natural"="water"]["name"]',
-        'nwr["historic"]["name"]',
-    ],
 }

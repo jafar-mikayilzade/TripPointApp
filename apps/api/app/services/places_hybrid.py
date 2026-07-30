@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-import re
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -14,8 +12,10 @@ from app.constants.categories import (
     HYBRID_OSM_CATEGORIES,
     HYBRID_OSM_SYNC_ORDER,
 )
+from app.services.geo_route import haversine_m as _haversine_m
 from app.services.places_google import fetch_places_from_google
 from app.services.places_osm import _fetch_single_category
+from app.services.poi_rows import normalize_place_name as _normalize_name
 
 # "all" sync: one call per Google type (lodging covers hotel/hostel/guesthouse)
 HYBRID_GOOGLE_ALL_ORDER = ("restaurant", "hotel")
@@ -25,13 +25,6 @@ OSM_GAP_SECONDS = 4.5
 HYBRID_OSM_ALL_ORDER = tuple(
     c for c in HYBRID_OSM_SYNC_ORDER if c not in {"other"}
 )
-
-
-def _normalize_name(name: str) -> str:
-    text = name.casefold().strip()
-    text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
-    text = re.sub(r"\s+", " ", text)
-    return text
 
 
 def _place_lat_lng(place: dict[str, Any]) -> tuple[float, float] | None:
@@ -45,20 +38,6 @@ def _place_lat_lng(place: dict[str, Any]) -> tuple[float, float] | None:
         return float(lat), float(lng)
     except (TypeError, ValueError):
         return None
-
-
-def _haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
-    lat1, lng1 = a
-    lat2, lng2 = b
-    r = 6371000.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = math.radians(lat2 - lat1)
-    dl = math.radians(lng2 - lng1)
-    x = (
-        math.sin(dp / 2) ** 2
-        + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    )
-    return 2 * r * math.atan2(math.sqrt(x), math.sqrt(1 - x))
 
 
 def _source_rank(place: dict[str, Any]) -> int:
@@ -143,7 +122,6 @@ def _fetch_osm_safe(
             longitude,
             category,
             OSM_PER_CATEGORY_LIMIT,
-            selector_parallel=False,
         )
         print(f"[hybrid] osm category={category} n={len(places)}")
         return places

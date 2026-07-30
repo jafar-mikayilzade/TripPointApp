@@ -7,7 +7,6 @@ from typing import Any, Literal
 
 from app.config import GOOGLE_PLACES_API_KEY
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
-from app.constants.tourism_hubs import hub_as_center, hubs_for_region
 from app.constants.tourism_seeds import seeds_for_region
 from app.db import supabase
 from app.services.attraction_classify import (
@@ -18,9 +17,10 @@ from app.services.places_clean import clean_place
 from app.services.places_google import fetch_places_from_google
 from app.services.places_osm import fetch_tourism_bundle_from_osm
 from app.services.places_tourism_filter import filter_tourism_rows
+from app.services.poi_rows import centers_for_region, dedupe_poi_rows
 from app.services.rank_pois import bucket_route_candidates, public_poi_fields
 
-SourceKind = Literal["osm", "google", "db", "mixed"]
+SourceKind = Literal["osm", "google", "db"]
 
 # Wider than sync default — regional tourism spots sit outside 5km often
 LIVE_PLAN_RADIUS_METERS = 15_000
@@ -145,20 +145,9 @@ def _fetch_osm_bundle(
 
 
 def _centers_for_region(region_key: str) -> list[dict[str, Any]]:
-    hubs = hubs_for_region(region_key)
-    if hubs:
-        return [hub_as_center(h) for h in hubs]
-    coords = REGION_COORDINATES[region_key]
-    return [
-        {
-            "id": "region_center",
-            "name": region_key,
-            "lat": float(coords["latitude"]),
-            "lng": float(coords["longitude"]),
-            "radius_m": LIVE_PLAN_RADIUS_METERS,
-            "weight": 0.6,
-        }
-    ]
+    return centers_for_region(
+        region_key, fallback_radius_m=LIVE_PLAN_RADIUS_METERS
+    )
 
 
 def _cap_centers_for_osm(centers: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -211,24 +200,6 @@ def _bucket_counts(buckets: dict[str, list[dict[str, Any]]]) -> int:
     )
 
 
-def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    by_id: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        pid = str(row.get("place_id") or row.get("id") or "")
-        if not pid:
-            continue
-        prev = by_id.get(pid)
-        if prev is None:
-            by_id[pid] = row
-            continue
-        # Prefer seed / higher hub weight
-        if row.get("is_seed") and not prev.get("is_seed"):
-            by_id[pid] = row
-        elif float(row.get("hub_weight") or 0) > float(prev.get("hub_weight") or 0):
-            by_id[pid] = {**prev, **row}
-    return list(by_id.values())
-
-
 def _load_buckets_from_osm(
     region_key: str,
     *,
@@ -272,7 +243,7 @@ def _load_buckets_from_osm(
             break
 
     seeds = seeds_for_region(region_key, db_region=db_region)
-    classified = classify_attraction_rows(_dedupe_rows(seeds + merged_raw))
+    classified = classify_attraction_rows(dedupe_poi_rows(seeds + merged_raw))
     merged = filter_tourism_rows(classified, hubs=hubs)
     buckets = bucket_route_candidates(
         merged,
@@ -391,7 +362,7 @@ def load_live_route_candidates(
             merged_raw.extend(rows)
 
     seeds = seeds_for_region(region_key, db_region=db_region)
-    classified = classify_attraction_rows(_dedupe_rows(seeds + merged_raw))
+    classified = classify_attraction_rows(dedupe_poi_rows(seeds + merged_raw))
     merged = filter_tourism_rows(classified, hubs=centers)
     google_buckets = bucket_route_candidates(
         merged,
