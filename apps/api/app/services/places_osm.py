@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from typing import Any
 
 import requests
@@ -23,6 +24,30 @@ from app.services.places_clean import category_from_osm_tags
 
 # region+category -> (expires_at_epoch, places)
 _OSM_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+# After 429 / total mirror failure, stop hitting public Overpass for a while
+_OVERPASS_COOLDOWN_UNTIL = 0.0
+_OVERPASS_COOLDOWN_SECONDS = 300
+_OVERPASS_COOLDOWN_LOCK = Lock()
+
+
+def _overpass_in_cooldown() -> bool:
+    return time.time() < _OVERPASS_COOLDOWN_UNTIL
+
+
+def _trip_overpass_cooldown(reason: str) -> None:
+    global _OVERPASS_COOLDOWN_UNTIL
+    with _OVERPASS_COOLDOWN_LOCK:
+        until = time.time() + _OVERPASS_COOLDOWN_SECONDS
+        if until > _OVERPASS_COOLDOWN_UNTIL:
+            _OVERPASS_COOLDOWN_UNTIL = until
+    try:
+        print(
+            f"[osm] cooldown {_OVERPASS_COOLDOWN_SECONDS}s — {reason} "
+            f"(use DB fallback; check OVERPASS_API_URL mirrors)"
+        )
+    except UnicodeEncodeError:
+        print("[osm] cooldown active after Overpass failure")
 
 # Stable order for balanced "all" sync
 ALL_SYNC_CATEGORIES: list[str] = [
@@ -87,6 +112,42 @@ def build_overpass_query(
     )
 
 
+def build_tourism_bundle_query(
+    latitude: float,
+    longitude: float,
+    *,
+    result_limit: int = 80,
+    radius_meters: int | None = None,
+) -> str:
+    """
+    One Overpass round-trip for live AI/home maps.
+    Avoids N category×hub calls that hammer public mirrors.
+    """
+    radius = int(radius_meters or OSM_SEARCH_RADIUS_METERS)
+    around = f"(around:{radius},{latitude},{longitude})"
+    return (
+        f"[out:json][timeout:20];\n"
+        f"(\n"
+        f'  node["amenity"="restaurant"]["name"]{around};\n'
+        f'  nwr["tourism"="hotel"]["name"]{around};\n'
+        f'  nwr["tourism"="hostel"]["name"]{around};\n'
+        f'  nwr["tourism"="guest_house"]["name"]{around};\n'
+        f'  nwr["tourism"="chalet"]["name"]{around};\n'
+        f'  nwr["tourism"="camp_site"]["name"]{around};\n'
+        f'  nwr["tourism"="viewpoint"]["name"]{around};\n'
+        f'  nwr["tourism"="attraction"]["name"]{around};\n'
+        f'  nwr["tourism"="museum"]["name"]{around};\n'
+        f'  nwr["waterway"="waterfall"]["name"]{around};\n'
+        f'  node["natural"="peak"]["name"]{around};\n'
+        f'  nwr["historic"="castle"]["name"]{around};\n'
+        f'  nwr["historic"="ruins"]["name"]{around};\n'
+        f'  nwr["historic"="monument"]["name"]{around};\n'
+        f'  nwr["historic"="memorial"]["name"]{around};\n'
+        f");\n"
+        f"out center {int(result_limit)};"
+    )
+
+
 def osm_element_to_place(element: dict[str, Any]) -> dict[str, Any] | None:
     element_type = element.get("type")
     element_id = element.get("id")
@@ -141,17 +202,29 @@ def _overpass_get(
     timeout_seconds: float | None = None,
     max_mirrors: int | None = None,
 ) -> dict[str, Any]:
+    if _overpass_in_cooldown():
+        raise requests.RequestException(
+            "Overpass cooldown active — skipping mirrors"
+        )
+
     headers = {
         "Accept": "application/json",
         "User-Agent": "TripPoint/1.0 (sync-places; contact=dev@trippoint.local)",
     }
     errors: list[str] = []
-    timeout = (
+    saw_rate_limit = False
+    read_timeout = (
         float(timeout_seconds)
         if timeout_seconds is not None
         else float(OSM_HTTP_TIMEOUT_SECONDS)
     )
+    # (connect, read) — don't wait forever on dead mirrors
+    timeout: float | tuple[float, float] = (5.0, read_timeout)
     endpoints = list(OVERPASS_ENDPOINTS)
+    # Rotate start mirror so one busy host doesn't always fail first
+    if endpoints:
+        start = int(time.time() / 120) % len(endpoints)
+        endpoints = endpoints[start:] + endpoints[:start]
     if max_mirrors is not None and max_mirrors > 0:
         endpoints = endpoints[:max_mirrors]
 
@@ -171,6 +244,8 @@ def _overpass_get(
                 timeout=timeout,
             )
             if response.status_code in {429, 502, 503, 504}:
+                if response.status_code == 429:
+                    saw_rate_limit = True
                 errors.append(f"{endpoint} -> HTTP {response.status_code}")
                 _log(f"[osm] mirror busy: {errors[-1]}")
                 continue
@@ -203,6 +278,8 @@ def _overpass_get(
             _log(f"[osm] mirror failed: {errors[-1]}")
             continue
 
+    reason = "HTTP 429 rate limit" if saw_rate_limit else "all mirrors failed"
+    _trip_overpass_cooldown(reason)
     raise requests.RequestException(
         "All Overpass mirrors failed: " + "; ".join(errors)
     )
@@ -240,22 +317,18 @@ def _fetch_selectors(
             seen_ids.add(place_id)
             merged.append(place)
 
-    if not parallel or len(selectors) <= 1:
-        for selector in selectors:
-            try:
-                _absorb(_one(selector))
-            except Exception as exc:
-                print(f"[osm] selector failed: {exc}")
-        return merged
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(_one, selector) for selector in selectors]
-        for future in as_completed(futures):
-            try:
-                _absorb(future.result())
-            except Exception as exc:
-                print(f"[osm] selector failed: {exc}")
-
+    # Sync path: always sequential — parallel selectors amplify 429s
+    for selector in selectors:
+        if _overpass_in_cooldown():
+            print("[osm] skip remaining selectors — cooldown active")
+            break
+        try:
+            _absorb(_one(selector))
+        except Exception as exc:
+            print(f"[osm] selector failed: {exc}")
+            # One hard failure is enough; don't walk the rest of the filters
+            break
+    del parallel  # kept for call-site compat; unused on purpose
     return merged
 
 
@@ -356,3 +429,48 @@ def fetch_places_from_osm(
 
     _OSM_CACHE[key] = (now + OSM_CACHE_TTL_SECONDS, merged)
     return merged
+
+
+def fetch_tourism_bundle_from_osm(
+    latitude: float,
+    longitude: float,
+    *,
+    result_limit: int = 80,
+    radius_meters: int | None = None,
+    timeout_seconds: float = 22.0,
+    max_mirrors: int = 4,
+    cache_key: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Single-query tourism pack for live map / AI candidates.
+    Uses tag-derived categories (not stamped filters).
+    """
+    key = (
+        cache_key
+        or f"bundle:{latitude:.4f}:{longitude:.4f}:{int(radius_meters or OSM_SEARCH_RADIUS_METERS)}:{result_limit}"
+    )
+    cached = _OSM_CACHE.get(key)
+    now = time.time()
+    if cached and cached[0] > now:
+        print(f"[osm] cache hit {key} ({len(cached[1])} places)")
+        return list(cached[1])
+
+    query = build_tourism_bundle_query(
+        latitude,
+        longitude,
+        result_limit=result_limit,
+        radius_meters=radius_meters,
+    )
+    payload = _overpass_get(
+        query,
+        timeout_seconds=timeout_seconds,
+        max_mirrors=max_mirrors,
+    )
+    places = _parse_overpass_places(payload, result_limit=result_limit)
+    # Drop cafes — noisy for tourism UI
+    places = [
+        p for p in places if str(p.get("category") or "").lower() != "cafe"
+    ]
+    print(f"[osm] bundle kept={len(places)} key={key}")
+    _OSM_CACHE[key] = (now + OSM_CACHE_TTL_SECONDS, places)
+    return places

@@ -5,7 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Literal
 
-from app.config import GOOGLE_PLACES_API_KEY, OSM_PER_CATEGORY_LIMIT
+from app.config import GOOGLE_PLACES_API_KEY
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
 from app.constants.tourism_hubs import hub_as_center, hubs_for_region
 from app.constants.tourism_seeds import seeds_for_region
@@ -16,7 +16,7 @@ from app.services.attraction_classify import (
 )
 from app.services.places_clean import clean_place
 from app.services.places_google import fetch_places_from_google
-from app.services.places_osm import _fetch_single_category
+from app.services.places_osm import fetch_tourism_bundle_from_osm
 from app.services.places_tourism_filter import filter_tourism_rows
 from app.services.rank_pois import bucket_route_candidates, public_poi_fields
 
@@ -25,27 +25,12 @@ SourceKind = Literal["osm", "google", "db", "mixed"]
 # Wider than sync default — regional tourism spots sit outside 5km often
 LIVE_PLAN_RADIUS_METERS = 15_000
 GOOGLE_CALL_TIMEOUT_SECONDS = 12
-# Cap Overpass fan-out (public mirrors rate-limit hard)
-OSM_MAX_CENTERS = 2
-OSM_CATEGORY_LIMIT = max(12, OSM_PER_CATEGORY_LIMIT)
-
-# Tourism buckets for live OSM planning (kept lean — Overpass is slow/rate-limited)
-_BASE_OSM_CATS = (
-    "restaurant",
-    "hotel",
-    "guesthouse",
-    "nature",
-    "waterfall",
-    "historical",
-)
+# One center + one Overpass bundle (public mirrors cannot take hub×category fan-out)
+OSM_MAX_CENTERS = 1
+OSM_BUNDLE_LIMIT = 90
 
 # Legacy Google path (opt-in via source=google)
 _BASE_GOOGLE_CATS = ("restaurant", "hotel", "nature")
-
-
-def _interest_osm_categories(interests: list[str] | None) -> list[str]:
-    del interests  # applied at bucket/rank time after classify
-    return list(_BASE_OSM_CATS)
 
 
 def _interest_google_categories(interests: list[str] | None) -> list[str]:
@@ -119,37 +104,38 @@ def _fetch_google_category(
     return rows, warnings
 
 
-def _fetch_osm_category(
+def _fetch_osm_bundle(
     *,
     latitude: float,
     longitude: float,
-    category: str,
     region: str,
     hub_id: str | None = None,
     hub_weight: float | None = None,
+    radius_meters: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
+    """One Overpass call for food + lodging + attractions around a center."""
     warnings: list[str] = []
     try:
-        raw = _fetch_single_category(
+        raw = fetch_tourism_bundle_from_osm(
             latitude,
             longitude,
-            category,
-            OSM_CATEGORY_LIMIT,
-            selector_parallel=False,
-            # Fail fast on public mirrors so empty→DB fallback is usable
-            timeout_seconds=12,
-            max_mirrors=2,
+            result_limit=OSM_BUNDLE_LIMIT,
+            radius_meters=radius_meters or LIVE_PLAN_RADIUS_METERS,
+            # Cap worst-case wait: ~3×18s then DB fallback
+            timeout_seconds=18.0,
+            max_mirrors=3,
         )
     except Exception as exc:  # noqa: BLE001
-        warnings.append(f"osm:{category}: {exc}")
+        warnings.append(f"osm:bundle: {exc}")
         return [], warnings
 
     rows: list[dict[str, Any]] = []
     for place in raw:
+        cat = str(place.get("category") or "other")
         row = _row_from_place(
             place,
             region=region,
-            category=category,
+            category=cat,
             hub_id=hub_id,
             hub_weight=hub_weight,
         )
@@ -251,33 +237,39 @@ def _load_buckets_from_osm(
     interests: list[str] | None,
     prefer_attraction_cats: set[str] | None,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[str], int]:
+    del interests  # ranking uses prefer_attraction_cats
     db_region = REGION_DB_ID.get(region_key, region_key)
     warnings: list[str] = []
     centers = _cap_centers_for_osm(hubs)
-    categories = _interest_osm_categories(interests)
-    jobs: list[tuple[dict[str, Any], str]] = [
-        (center, cat) for center in centers for cat in categories
-    ]
-    merged_raw: list[dict[str, Any]] = []
-
-    # Sequential-ish: max 3 workers to be kinder to public Overpass
-    with ThreadPoolExecutor(max_workers=min(3, max(1, len(jobs)))) as pool:
-        futures = [
-            pool.submit(
-                _fetch_osm_category,
-                latitude=float(center["lat"]),
-                longitude=float(center["lng"]),
-                category=cat,
-                region=db_region,
-                hub_id=str(center.get("id") or ""),
-                hub_weight=float(center.get("weight") or 0.5),
-            )
-            for center, cat in jobs
+    # Prefer official region center when available (more stable than a random hub)
+    coords = REGION_COORDINATES.get(region_key)
+    if coords:
+        centers = [
+            {
+                "id": "region_center",
+                "name": region_key,
+                "lat": float(coords["latitude"]),
+                "lng": float(coords["longitude"]),
+                "radius_m": LIVE_PLAN_RADIUS_METERS,
+                "weight": 1.0,
+            }
         ]
-        for fut in as_completed(futures):
-            rows, batch_warnings = fut.result()
-            warnings.extend(batch_warnings)
-            merged_raw.extend(rows)
+
+    merged_raw: list[dict[str, Any]] = []
+    for center in centers:
+        rows, batch_warnings = _fetch_osm_bundle(
+            latitude=float(center["lat"]),
+            longitude=float(center["lng"]),
+            region=db_region,
+            hub_id=str(center.get("id") or ""),
+            hub_weight=float(center.get("weight") or 0.5),
+            radius_meters=int(center.get("radius_m") or LIVE_PLAN_RADIUS_METERS),
+        )
+        warnings.extend(batch_warnings)
+        merged_raw.extend(rows)
+        # One bundle is enough; don't fan out if the first mirror path failed
+        if not rows and batch_warnings:
+            break
 
     seeds = seeds_for_region(region_key, db_region=db_region)
     classified = classify_attraction_rows(_dedupe_rows(seeds + merged_raw))

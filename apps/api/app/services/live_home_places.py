@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import Any
 
-from app.constants.categories import APP_CATEGORIES
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
 from app.constants.tourism_hubs import hub_as_center, hubs_for_region
 from app.constants.tourism_seeds import seeds_for_region
@@ -21,20 +19,10 @@ from app.services.geo_route import haversine_km
 from app.services.live_route_candidates import (
     LIVE_PLAN_RADIUS_METERS,
     OSM_MAX_CENTERS,
-    _fetch_osm_category,
+    _fetch_osm_bundle,
 )
 from app.services.places_tourism_filter import filter_tourism_rows
 from app.services.rank_pois import mix_home_places, public_poi_fields
-
-# Tourism-focused OSM categories for "all" (lean set for Overpass latency)
-HOME_ALL_OSM_CATS = (
-    "restaurant",
-    "hotel",
-    "guesthouse",
-    "nature",
-    "waterfall",
-    "historical",
-)
 
 # How-to expand: add hubs in tourism_hubs.py, seeds in tourism_seeds.py,
 # blacklist in places_tourism_filter.py
@@ -63,15 +51,6 @@ def _cache_key(
     lng_r = round(float(lng), 3)
     rad_r = int(round((radius or 8000) / 500.0) * 500)
     return f"osm|{region_key}|{cat}|{limit}|{lat_r}|{lng_r}|{rad_r}"
-
-
-def _osm_cats_for_filter(category: str | None) -> list[str]:
-    if not category or category == "all":
-        return list(HOME_ALL_OSM_CATS)
-    cat = category.strip().lower()
-    if cat not in APP_CATEGORIES or cat == "cafe":
-        return list(HOME_ALL_OSM_CATS)
-    return [cat]
 
 
 def _centers_for_region(region_key: str) -> list[dict[str, Any]]:
@@ -150,33 +129,28 @@ def _load_db_places(
 def _fetch_centers(
     centers: list[dict[str, Any]],
     *,
-    cats: list[str],
     db_region: str,
 ) -> tuple[list[dict[str, Any]], list[str]]:
+    """One Overpass tourism bundle per center (no category×hub fan-out)."""
     warnings: list[str] = []
     capped = _cap_centers(centers)
-    jobs = [(c, cat) for c in capped for cat in cats]
-    if not jobs:
+    if not capped:
         return [], warnings
 
     out: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=min(3, len(jobs))) as pool:
-        futures = [
-            pool.submit(
-                _fetch_osm_category,
-                latitude=float(center["lat"]),
-                longitude=float(center["lng"]),
-                category=cat,
-                region=db_region,
-                hub_id=str(center.get("id") or ""),
-                hub_weight=float(center.get("weight") or 0.5),
-            )
-            for center, cat in jobs
-        ]
-        for fut in as_completed(futures):
-            rows, batch_warnings = fut.result()
-            warnings.extend(batch_warnings)
-            out.extend(rows)
+    for center in capped:
+        rows, batch_warnings = _fetch_osm_bundle(
+            latitude=float(center["lat"]),
+            longitude=float(center["lng"]),
+            region=db_region,
+            hub_id=str(center.get("id") or ""),
+            hub_weight=float(center.get("weight") or 0.5),
+            radius_meters=int(center.get("radius_m") or LIVE_PLAN_RADIUS_METERS),
+        )
+        warnings.extend(batch_warnings)
+        out.extend(rows)
+        if not rows and batch_warnings:
+            break
     return out, warnings
 
 
@@ -240,7 +214,6 @@ def _load_live_home_places_uncached(
     db_region = REGION_DB_ID.get(region_key, region_key)
     warnings: list[str] = []
     region_hubs = _centers_for_region(region_key)
-    cats = _osm_cats_for_filter(category)
     viewport_mode = lat is not None and lng is not None
 
     if viewport_mode:
@@ -256,22 +229,23 @@ def _load_live_home_places_uncached(
                 "weight": 1.0,
             }
         ]
-        for hub in region_hubs:
-            if len(centers) >= OSM_MAX_CENTERS:
-                break
-            if float(hub.get("weight") or 0) < 0.85:
-                continue
-            dist_km = haversine_km(
-                float(lat), float(lng), float(hub["lat"]), float(hub["lng"])
-            )
-            if dist_km <= (r_m / 1000.0) + (float(hub["radius_m"]) / 1000.0):
-                centers.append(hub)
         rank_hubs = region_hubs
     else:
-        centers = _cap_centers(region_hubs)
+        # One stable region center — avoid hub fan-out on public Overpass
+        coords = REGION_COORDINATES[region_key]
+        centers = [
+            {
+                "id": "region_center",
+                "name": region_key,
+                "lat": float(coords["latitude"]),
+                "lng": float(coords["longitude"]),
+                "radius_m": LIVE_PLAN_RADIUS_METERS,
+                "weight": 1.0,
+            }
+        ]
         rank_hubs = region_hubs
 
-    osm_rows, ow = _fetch_centers(centers, cats=cats, db_region=db_region)
+    osm_rows, ow = _fetch_centers(centers, db_region=db_region)
     warnings.extend(ow)
 
     seeds = seeds_for_region(region_key, db_region=db_region)
