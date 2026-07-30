@@ -1,7 +1,9 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    // Metro picks AppMap.native.tsx / AppMap.web.tsx; teach tsc the same order.
+    "moduleSuffixes": [".native", ""]
   },
   "include": [
     "**/*.ts",

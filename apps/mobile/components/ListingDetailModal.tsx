@@ -23,6 +23,7 @@ import { FavoriteButton } from './FavoriteButton';
 import { SubscribeMenuButton } from './SubscribeMenuButton';
 import { TransientHint } from './TransientHint';
 import { notifyAdmins } from '../lib/adminNotify';
+import { getErrorMessage } from '../lib/errors';
 import { resolveSplitBillParamsForListing } from '../lib/expenseGroups';
 import {
   buildListingWhatsAppUrl,

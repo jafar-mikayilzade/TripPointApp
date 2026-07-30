@@ -604,7 +604,7 @@ export default function HomeScreen() {
   };
 
   /** İlk siyahı seçimi — rahat yaxınlıq, ətrafdakılar da görünsün */
-  function centerMapOnPoi(poi: { id: string; lat: number; lng: number }) {
+  function centerMapOnPoi(poi: { lat: number; lng: number }) {
     const next = {
       latitude: poi.lat,
       longitude: poi.lng,
@@ -1181,7 +1181,7 @@ export default function HomeScreen() {
                   ) : errorMessage ? (
                     <Text style={styles.errorText}>{errorMessage}</Text>
                   ) : (
-                    <FlatList
+                    <FlatList<PoiListItem>
                       ref={listRef}
                       data={pois}
                       keyExtractor={(item) => item.id}
@@ -1206,10 +1206,9 @@ export default function HomeScreen() {
                         }, 100);
                       }}
                       renderItem={({ item }) => {
-                        const isSelected =
-                          selectedPoi?.id === item.id || highlightedPoiId === item.id;
-                        const hasSelection =
-                          selectedPoi != null || highlightedPoiId != null;
+                        // This branch only renders while no POI panel is open.
+                        const isSelected = highlightedPoiId === item.id;
+                        const hasSelection = highlightedPoiId != null;
                         return (
                         <MemoPoiListCard
                           item={item}

@@ -2,7 +2,7 @@
  * Clustered map for dense POI sets (native).
  * Uzaq: rəqəmli cluster · yaxın: tək-tək custom marker (ikon).
  */
-import type { ComponentType, ReactElement } from 'react';
+import type { ComponentType, ReactElement, Ref } from 'react';
 import MapView, {
   Marker,
   Polyline,
@@ -19,6 +19,8 @@ export type {
 } from 'react-native-maps';
 
 type ClusteredProps = MapViewProps & {
+  /** react-native-map-clustering forwards the ref to the inner MapView. */
+  ref?: Ref<MapView>;
   radius?: number;
   extent?: number;
   minPoints?: number;

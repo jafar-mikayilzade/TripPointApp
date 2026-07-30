@@ -392,7 +392,16 @@ export type Database = {
         Insert: Pick<PoiPhoto, 'poi_id' | 'photo_url'> &
           Partial<Omit<PoiPhoto, 'poi_id' | 'photo_url'>>;
         Update: Partial<PoiPhoto>;
-        Relationships: [];
+        // Declared so `pois` selects can embed `poi_photos (...)` with types.
+        Relationships: [
+          {
+            foreignKeyName: 'poi_photos_poi_id_fkey';
+            columns: ['poi_id'];
+            isOneToOne: false;
+            referencedRelation: 'pois';
+            referencedColumns: ['id'];
+          },
+        ];
       };
       listing_reports: {
         Row: ListingReport;

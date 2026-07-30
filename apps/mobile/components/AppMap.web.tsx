@@ -42,7 +42,10 @@ const GOOGLE_MAPS_KEY =
 /** places — Place class (New); marker kept for GMMarker until Map ID + AdvancedMarker */
 const MAP_LIBRARIES: ('places')[] = ['places'];
 
-type WebMapProps = MapViewProps & {
+type WebMapProps = Omit<MapViewProps, 'region' | 'initialRegion'> & {
+  // Web has no AnimatedRegion — keep the plain shape the helpers expect.
+  region?: Region | null;
+  initialRegion?: Region | null;
   googleMapsApiKey?: string;
   radius?: number;
   extent?: number;
@@ -212,7 +215,7 @@ const MapView = forwardRef(function AppMapWeb(
     }
     const next = readMapRegion(map);
     if (next) {
-      onRegionChangeComplete(next);
+      onRegionChangeComplete(next, { isGesture: true });
     }
   }, [onRegionChangeComplete]);
 

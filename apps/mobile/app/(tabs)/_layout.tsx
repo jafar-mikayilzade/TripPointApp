@@ -1,14 +1,14 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Tabs } from 'expo-router';
-import { View } from 'react-native';
+import { View, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, shadows } from '../../constants/theme';
 import { useResponsiveLayout } from '../../lib/layout';
 
 /** Ana səhifə: nazik dairə + mərkəz nöqtə (referans navbar) */
-function HomeTabIcon({ color, size }: { color: string; size: number }) {
+function HomeTabIcon({ color, size }: { color: ColorValue; size: number }) {
   const outer = size;
   const inner = Math.max(5, Math.round(size * 0.28));
   return (

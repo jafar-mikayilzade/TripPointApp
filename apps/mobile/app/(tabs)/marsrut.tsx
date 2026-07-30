@@ -106,6 +106,8 @@ type GeneratedPlan = {
     distance_km?: number;
     depart_origin_at?: string;
     arrive_region_at?: string;
+    leave_region_by?: string;
+    return_origin_by?: string;
   } | null;
   lodging?: {
     name?: string;
