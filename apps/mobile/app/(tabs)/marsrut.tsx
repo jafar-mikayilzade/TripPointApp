@@ -37,6 +37,7 @@ import { fetchRouteCandidates } from '../../lib/routeCandidates';
 import { saveRoute, planDaysToSavedStops } from '../../lib/savedRoutes';
 import { shareRouteText } from '../../lib/shareRoute';
 import { supabase } from '../../lib/supabase';
+import { triggerRegionPlacesSync } from '../../lib/syncPlaces';
 import {
   defaultReturnAt,
   defaultTripStartAt,
@@ -529,6 +530,11 @@ export default function MarsrutScreen() {
       cancelled = true;
     };
   }, [regionId, days, startDayOffset, startAt, plan]);
+
+  // Background: OSM attractions → pois (insert-if-missing); AI still reads DB
+  useEffect(() => {
+    triggerRegionPlacesSync(regionId);
+  }, [regionId]);
 
   useEffect(() => {
     setReturnAt((prev) => syncReturnForTrip(startAt, prev, days, false));

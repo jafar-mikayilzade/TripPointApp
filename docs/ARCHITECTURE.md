@@ -36,7 +36,7 @@ Yalnız Supabase Auth (email / Google). Python auth etmir.
 
 | Priority | Endpoint | Notes |
 |----------|----------|--------|
-| **Only** | FastAPI `POST /api/plan-route` | Geo itinerary (Haversine NN), optional Claude tips, live OSM candidates (DB fallback), `varietySeed` / travel window |
+| **Only** | FastAPI `POST /api/plan-route` | Geo itinerary (Haversine NN), optional Claude tips, **DB `pois` candidates** (OSM live opt-in only), `varietySeed` / travel window |
 | ~~Edge~~ | Supabase Edge `plan-route` | **Deprecated** — mobile çağırmır (parity riski). Emergency reference only. |
 
 Mobile: `apps/mobile/lib/planRoute.ts` — FastAPI + bir retry; API yoxdursa açıq xəta.
@@ -96,7 +96,10 @@ Monorepo root-da `Dockerfile` + `railway.toml` API-ni Docker ilə build edir (Ra
 EXPO_PUBLIC_API_URL=https://YOUR-SERVICE.up.railway.app
 ```
 
-Server env: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `DATA_SOURCE=osm` (default; Google Places lazım deyil). Alternativ: `hybrid` / `google` → `GOOGLE_PLACES_API_KEY`. AI route candidates və live home places də OSM-first (boşdursa DB).  
+Server env: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `DATA_SOURCE=osm` (default; Google Places lazım deyil). Alternativ: `hybrid` / `google` → `GOOGLE_PLACES_API_KEY`.  
+
+**AI planlama = DB-first:** `plan-route` / Telegram / `route-candidates` default `source=db` (`pois` cədvəli). Canlı Overpass AI yolunda yoxdur.  
+**OSM = sync filler:** `GET /api/sync-places?region=…&category=all` Overpass-dən attractions (waterfall/nature/historical/…) gətirir; `place_id` varsa **pass**, yoxdursa **insert**. Hotel/restaurant OSM sync-dən çıxarılıb (əl / admin Google upsert). Mobile rayon seçəndə `triggerRegionPlacesSync` non-blocking çağırır.  
 Service role key yalnız Railway Variables-də — heç vaxt `EXPO_PUBLIC_*` içində olmamalıdır.
 
 Əgər `Railpack could not determine...` / `start.sh not found` görürsənsə: root `Dockerfile` push olunmayıb və ya Builder hələ Railpack-dir — Settings → Build → **Dockerfile** seç və Redeploy et.

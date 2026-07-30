@@ -245,6 +245,20 @@ def _load_live_home_places_uncached(
         ]
         rank_hubs = region_hubs
 
+    # DB-first (fast). Optional OSM enrich only when DB is thin.
+    db_rows = _load_db_places(
+        region_key, category=category, limit=limit, hubs=rank_hubs
+    )
+    if len(db_rows) >= max(8, limit // 3):
+        return {
+            "region": db_region,
+            "places": [public_poi_fields(r) for r in db_rows],
+            "source": "db",
+            "warnings": warnings,
+            "viewport": viewport_mode,
+            "hubs_used": [c.get("id") for c in centers],
+        }
+
     osm_rows, ow = _fetch_centers(centers, db_region=db_region)
     warnings.extend(ow)
 
@@ -271,7 +285,7 @@ def _load_live_home_places_uncached(
         seeds = near_seeds
 
     merged = filter_tourism_rows(
-        _dedupe_rows(seeds + osm_rows),
+        _dedupe_rows(seeds + osm_rows + db_rows),
         hubs=rank_hubs,
     )
     ranked = mix_home_places(merged, limit=limit, hubs=rank_hubs)
@@ -280,19 +294,16 @@ def _load_live_home_places_uncached(
         return {
             "region": db_region,
             "places": [public_poi_fields(r) for r in ranked],
-            "source": "osm",
+            "source": "mixed" if db_rows and osm_rows else ("osm" if osm_rows else "db"),
             "warnings": warnings,
             "viewport": viewport_mode,
             "hubs_used": [c.get("id") for c in centers],
         }
 
-    warnings.append("osm: empty — falling back to db")
-    rows = _load_db_places(
-        region_key, category=category, limit=limit, hubs=rank_hubs
-    )
+    warnings.append("osm+db: empty")
     return {
         "region": db_region,
-        "places": [public_poi_fields(r) for r in rows],
+        "places": [],
         "source": "db",
         "warnings": warnings,
         "viewport": viewport_mode,

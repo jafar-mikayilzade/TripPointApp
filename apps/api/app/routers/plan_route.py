@@ -89,13 +89,13 @@ def plan_route_endpoint(body: PlanRouteIn) -> JSONResponse:
             region_key,
             per_bucket=16,
             interests=interests or None,
-            source="osm",
+            source="db",
         )
         buckets = loaded["buckets"]
         restaurants = buckets["restaurants"]
         accommodations = buckets["accommodations"]
         attractions = buckets["attractions"]
-        candidate_source = str(loaded.get("source") or "osm")
+        candidate_source = str(loaded.get("source") or "db")
 
     if not (restaurants or accommodations or attractions):
         raise HTTPException(

@@ -1,4 +1,4 @@
-"""Ranked POI candidates for AI route planning (OSM-first)."""
+"""Ranked POI candidates for AI route planning (DB-first)."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ def route_candidates_endpoint(
         description="Comma-separated mobile interests, e.g. nature,food,history",
     ),
     source: Literal["osm", "db", "google"] = Query(
-        "osm",
-        description="Candidate source: osm (default, Overpass) → db fallback; google opt-in",
+        "db",
+        description="Candidate source: db (default, pois table); osm/google opt-in debug",
     ),
 ) -> JSONResponse:
     region_key = region.strip().lower()

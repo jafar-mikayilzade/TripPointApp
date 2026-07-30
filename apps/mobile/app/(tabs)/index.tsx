@@ -45,6 +45,7 @@ import {
   fetchGooglePlaceRating,
   type GoogleMapPoiPayload,
 } from '../../lib/adminMap';
+import { triggerRegionPlacesSync } from '../../lib/syncPlaces';
 import {
   getCategoryLabel,
   type HomeCategoryFilterId,
@@ -493,6 +494,8 @@ export default function HomeScreen() {
       setRegionWeather(null);
       return;
     }
+    // Lazy fill pois (OSM attractions insert-if-missing) — non-blocking
+    triggerRegionPlacesSync(selectedRegionId);
     void fetchRegionWeather(selectedRegionId, 1).then((data) => {
       if (!cancelled) {
         setRegionWeather(data);

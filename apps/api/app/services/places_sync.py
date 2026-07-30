@@ -1,4 +1,4 @@
-"""Orchestrate place sync: fetch → clean → upsert."""
+"""Orchestrate place sync: fetch → clean → insert-if-missing."""
 
 from __future__ import annotations
 
@@ -10,7 +10,11 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
 from app.config import DATA_SOURCE
-from app.constants.categories import ALLOWED_CATEGORIES
+from app.constants.categories import (
+    ALLOWED_CATEGORIES,
+    OSM_SKIP_SYNC_CATEGORIES,
+    OSM_SYNC_ATTRACTION_CATEGORIES,
+)
 from app.constants.regions import REGION_COORDINATES
 from app.db import supabase
 from app.services.places_clean import clean_place, to_db_region
@@ -56,8 +60,27 @@ def sync_places(region: str, category: str) -> JSONResponse:
                 "region": to_db_region(region_key),
                 "category": category_key,
                 "fetched": 0,
-                "upserted": 0,
+                "inserted": 0,
+                "skipped": 0,
                 "message": "Category 'cafe' is temporarily disabled.",
+            }
+        )
+
+    # OSM: food/lodging are curated (admin/Google) — do not sync from Overpass
+    if DATA_SOURCE == "osm" and category_key in OSM_SKIP_SYNC_CATEGORIES:
+        return JSONResponse(
+            content={
+                "success": True,
+                "data_source": DATA_SOURCE,
+                "region": to_db_region(region_key),
+                "category": category_key,
+                "fetched": 0,
+                "inserted": 0,
+                "skipped": 0,
+                "message": (
+                    f"Category '{category_key}' is curated manually / Google upsert; "
+                    "OSM sync skipped. Use category=all for attractions."
+                ),
             }
         )
 
@@ -82,7 +105,7 @@ def sync_places(region: str, category: str) -> JSONResponse:
         raw_places, fetch_warnings = _fetch_raw_places(
             coordinates, region_key, category_key, db_region
         )
-        return _upsert_and_respond(
+        return _insert_missing_and_respond(
             raw_places=raw_places,
             region_key=region_key,
             db_region=db_region,
@@ -132,6 +155,61 @@ def sync_places(region: str, category: str) -> JSONResponse:
         _SYNC_LOCK.release()
 
 
+def _existing_place_ids(place_ids: list[str]) -> set[str]:
+    """Lookup which place_ids already exist (chunked for PostgREST limits)."""
+    found: set[str] = set()
+    chunk_size = 80
+    for i in range(0, len(place_ids), chunk_size):
+        chunk = place_ids[i : i + chunk_size]
+        if not chunk:
+            continue
+        result = (
+            supabase.table("pois")
+            .select("place_id")
+            .in_("place_id", chunk)
+            .execute()
+        )
+        for row in result.data or []:
+            pid = str(row.get("place_id") or "").strip()
+            if pid:
+                found.add(pid)
+    return found
+
+
+def _insert_if_missing(cleaned_places: list[dict[str, Any]]) -> tuple[int, int]:
+    """
+    Insert rows whose place_id is not in pois yet.
+    Existing rows (manual/Google/prior OSM) are left untouched — pass.
+    Returns (inserted, skipped).
+    """
+    if not cleaned_places:
+        return 0, 0
+
+    place_ids = [
+        str(row["place_id"]).strip()
+        for row in cleaned_places
+        if row.get("place_id")
+    ]
+    existing = _existing_place_ids(place_ids)
+    to_insert = [
+        row
+        for row in cleaned_places
+        if str(row.get("place_id") or "").strip() not in existing
+    ]
+    skipped = len(cleaned_places) - len(to_insert)
+    if not to_insert:
+        return 0, skipped
+
+    # Insert in batches
+    inserted = 0
+    batch_size = 50
+    for i in range(0, len(to_insert), batch_size):
+        batch = to_insert[i : i + batch_size]
+        result = supabase.table("pois").insert(batch).execute()
+        inserted += len(result.data) if result.data else len(batch)
+    return inserted, skipped
+
+
 def _sync_hybrid_all_progressive(
     coordinates: dict[str, float],
     region_key: str,
@@ -139,12 +217,14 @@ def _sync_hybrid_all_progressive(
 ) -> JSONResponse:
     """
     Write Google food/lodging first so the app has POIs even if OSM times out later.
+    Google batches upsert; OSM batches insert-if-missing only.
     """
     lat = coordinates["latitude"]
     lng = coordinates["longitude"]
     all_warnings: list[str] = []
     total_fetched = 0
-    total_upserted = 0
+    total_inserted = 0
+    total_skipped = 0
     category_counts: dict[str, int] = {}
     seen_place_ids: set[str] = set()
 
@@ -152,7 +232,6 @@ def _sync_hybrid_all_progressive(
         all_warnings.extend(warnings)
         total_fetched += len(raw_places)
 
-        # Dedupe across batches by place_id within this sync run
         unique_batch: list[dict[str, Any]] = []
         for place in raw_places:
             place_id = str(place.get("place_id") or "").strip()
@@ -170,22 +249,40 @@ def _sync_hybrid_all_progressive(
             print(f"[hybrid] progressive skip empty batch={label}")
             continue
 
-        result = (
-            supabase.table("pois")
-            .upsert(cleaned, on_conflict="place_id")
-            .execute()
-        )
-        batch_upserted = len(result.data) if result.data else len(cleaned)
-        total_upserted += batch_upserted
+        is_osm_batch = str(label).startswith("osm")
+        if is_osm_batch:
+            # Attractions only from OSM; never touch existing rows
+            cleaned = [
+                row
+                for row in cleaned
+                if str(row.get("category") or "") in OSM_SYNC_ATTRACTION_CATEGORIES
+            ]
+            inserted, skipped = _insert_if_missing(cleaned)
+            total_inserted += inserted
+            total_skipped += skipped
+            print(
+                f"[hybrid] progressive insert-if-missing batch={label} "
+                f"cleaned={len(cleaned)} inserted={inserted} skipped={skipped}"
+            )
+        else:
+            # Google food/lodging: upsert so admin refresh can update
+            result = (
+                supabase.table("pois")
+                .upsert(cleaned, on_conflict="place_id")
+                .execute()
+            )
+            batch_n = len(result.data) if result.data else len(cleaned)
+            total_inserted += batch_n
+            print(
+                f"[hybrid] progressive upsert batch={label} "
+                f"cleaned={len(cleaned)} upserted={batch_n}"
+            )
+
         for row in cleaned:
             cat = str(row.get("category") or "other")
             category_counts[cat] = category_counts.get(cat, 0) + 1
-        print(
-            f"[hybrid] progressive upsert batch={label} "
-            f"cleaned={len(cleaned)} upserted={batch_upserted}"
-        )
 
-    if total_upserted == 0:
+    if total_inserted == 0 and total_skipped == 0:
         return JSONResponse(
             content={
                 "success": True,
@@ -193,7 +290,8 @@ def _sync_hybrid_all_progressive(
                 "region": db_region,
                 "category": "all",
                 "fetched": total_fetched,
-                "upserted": 0,
+                "inserted": 0,
+                "skipped": 0,
                 "warnings": all_warnings,
                 "message": "No places found for the given region and category.",
             }
@@ -206,14 +304,15 @@ def _sync_hybrid_all_progressive(
             "region": db_region,
             "category": "all",
             "fetched": total_fetched,
-            "upserted": total_upserted,
+            "inserted": total_inserted,
+            "skipped": total_skipped,
             "category_counts": category_counts,
             "warnings": all_warnings,
         }
     )
 
 
-def _upsert_and_respond(
+def _insert_missing_and_respond(
     *,
     raw_places: list[dict[str, Any]],
     region_key: str,
@@ -227,6 +326,14 @@ def _upsert_and_respond(
         if (cleaned := clean_place(place, region_key, category_key)) is not None
     ]
 
+    # When syncing OSM "all" or a single attraction cat, drop food/lodging rows
+    if DATA_SOURCE == "osm":
+        cleaned_places = [
+            row
+            for row in cleaned_places
+            if str(row.get("category") or "") not in OSM_SKIP_SYNC_CATEGORIES
+        ]
+
     if not cleaned_places:
         return JSONResponse(
             content={
@@ -234,19 +341,15 @@ def _upsert_and_respond(
                 "data_source": DATA_SOURCE,
                 "region": db_region,
                 "category": category_key,
-                "fetched": 0,
-                "upserted": 0,
+                "fetched": len(raw_places),
+                "inserted": 0,
+                "skipped": 0,
                 "warnings": fetch_warnings,
                 "message": "No places found for the given region and category.",
             }
         )
 
-    result = (
-        supabase.table("pois")
-        .upsert(cleaned_places, on_conflict="place_id")
-        .execute()
-    )
-    upserted_count = len(result.data) if result.data else len(cleaned_places)
+    inserted, skipped = _insert_if_missing(cleaned_places)
     category_counts: dict[str, int] = {}
     for row in cleaned_places:
         cat = str(row.get("category") or "other")
@@ -259,10 +362,10 @@ def _upsert_and_respond(
             "region": db_region,
             "category": category_key,
             "fetched": len(raw_places),
-            "upserted": upserted_count,
+            "inserted": inserted,
+            "skipped": skipped,
             "category_counts": category_counts,
             "warnings": fetch_warnings,
-            "data": result.data or cleaned_places,
         }
     )
 
@@ -290,12 +393,13 @@ def _fetch_raw_places(
             [],
         )
     if DATA_SOURCE == "osm":
+        # "all" → attractions-only balanced fetch inside places_osm
         return (
             fetch_places_from_osm(
                 latitude=coordinates["latitude"],
                 longitude=coordinates["longitude"],
                 category=category_key,
-                cache_key=f"{db_region}:{category_key}",
+                cache_key=f"v3attr:{db_region}:{category_key}",
             ),
             [],
         )

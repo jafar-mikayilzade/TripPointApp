@@ -18,7 +18,7 @@ from app.config import (
     OSM_SEARCH_RADIUS_METERS,
     OVERPASS_ENDPOINTS,
 )
-from app.constants.categories import APP_CATEGORIES
+from app.constants.categories import APP_CATEGORIES, OSM_SYNC_ATTRACTION_ORDER
 from app.constants.osm import OSM_CATEGORY_FILTERS
 from app.services.places_clean import category_from_osm_tags
 
@@ -49,23 +49,8 @@ def _trip_overpass_cooldown(reason: str) -> None:
     except UnicodeEncodeError:
         print("[osm] cooldown active after Overpass failure")
 
-# Stable order for balanced "all" sync
-ALL_SYNC_CATEGORIES: list[str] = [
-    "restaurant",
-    # cafe ignored for now — noisy OSM amenity=cafe (tea houses, etc.)
-    "hotel",
-    "hostel",
-    "guesthouse",
-    "home_restaurant",
-    "camping",
-    "nature",
-    "waterfall",
-    "mountain",
-    "lake",
-    "historical",
-    "monument",
-    "other",
-]
+# Attractions-only "all" sync — food/lodging curated separately
+ALL_SYNC_CATEGORIES: list[str] = list(OSM_SYNC_ATTRACTION_ORDER)
 
 
 def build_address_from_tags(tags: dict[str, Any]) -> str | None:

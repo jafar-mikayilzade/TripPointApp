@@ -14,9 +14,10 @@ router = APIRouter(prefix="/api", tags=["sync"])
 def sync_places_endpoint(
     region: str = Query(..., description="Tourism region key, e.g. quba"),
     category: str = Query(
-        ...,
+        "all",
         description=(
-            "POI category (restaurant, cafe, hotel, …) or 'all' for region-wide sync"
+            "Use 'all' for OSM attractions sync (insert-if-missing). "
+            "Food/lodging categories are skipped when DATA_SOURCE=osm."
         ),
     ),
 ) -> JSONResponse:

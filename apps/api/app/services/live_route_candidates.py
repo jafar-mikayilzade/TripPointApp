@@ -288,12 +288,12 @@ def load_live_route_candidates(
     *,
     per_bucket: int = 12,
     interests: list[str] | None = None,
-    source: Literal["osm", "google", "db"] = "osm",
+    source: Literal["osm", "google", "db"] = "db",
 ) -> dict[str, Any]:
     """
     Candidate buckets for AI planning.
-    Default source=osm (Overpass), falls back to Supabase `pois` when empty.
-    source=google kept for opt-in A/B only.
+    Default source=db (Supabase `pois`) — fast/stable for plan-route + Telegram.
+    source=osm|google are opt-in debug only (Overpass is slow/rate-limited).
     """
     region_key = region_key.strip().lower()
     if region_key not in REGION_COORDINATES:
@@ -357,12 +357,12 @@ def load_live_route_candidates(
 
     # source == google (opt-in)
     if not GOOGLE_PLACES_API_KEY:
-        warnings.append("google: missing GOOGLE_PLACES_API_KEY — using osm")
+        warnings.append("google: missing GOOGLE_PLACES_API_KEY — using db")
         return load_live_route_candidates(
             region_key,
             per_bucket=per_bucket,
             interests=interests,
-            source="osm",
+            source="db",
         )
 
     categories = _interest_google_categories(interests)
@@ -403,12 +403,12 @@ def load_live_route_candidates(
         source_used = "google"
         buckets = google_buckets
     else:
-        warnings.append("google: empty results — falling back to osm")
+        warnings.append("google: empty results — falling back to db")
         return load_live_route_candidates(
             region_key,
             per_bucket=per_bucket,
             interests=interests,
-            source="osm",
+            source="db",
         )
 
     return {

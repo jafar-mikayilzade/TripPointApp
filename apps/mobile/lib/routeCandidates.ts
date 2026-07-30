@@ -1,4 +1,4 @@
-/** Fetch rating-ranked POI buckets from FastAPI (OSM Overpass by default). */
+/** Fetch rating-ranked POI buckets from FastAPI (DB `pois` by default). */
 
 import { getApiBaseUrl } from './apiBase';
 
@@ -40,7 +40,7 @@ export async function fetchRouteCandidates(
     const qs = new URLSearchParams({
       region: region.toLowerCase(),
       per_bucket: String(perBucket),
-      source: 'osm',
+      source: 'db',
     });
     if (interests.length > 0) {
       qs.set('interests', interests.join(','));
@@ -48,8 +48,7 @@ export async function fetchRouteCandidates(
 
     const url = `${base}/api/route-candidates?${qs.toString()}`;
     const controller = new AbortController();
-    // Overpass + mirrors can be slower than Google Nearby
-    const timer = setTimeout(() => controller.abort(), 45_000);
+    const timer = setTimeout(() => controller.abort(), 15_000);
     const res = await fetch(url, {
       method: 'GET',
       headers: { Accept: 'application/json' },
