@@ -44,7 +44,7 @@ def _trip_overpass_cooldown(reason: str) -> None:
     try:
         print(
             f"[osm] cooldown {_OVERPASS_COOLDOWN_SECONDS}s — {reason} "
-            f"(use DB fallback; check OVERPASS_API_URL mirrors)"
+            f"(DB fallback)"
         )
     except UnicodeEncodeError:
         print("[osm] cooldown active after Overpass failure")
@@ -437,8 +437,8 @@ def fetch_tourism_bundle_from_osm(
     *,
     result_limit: int = 80,
     radius_meters: int | None = None,
-    timeout_seconds: float = 22.0,
-    max_mirrors: int = 4,
+    timeout_seconds: float = 8.0,
+    max_mirrors: int = 2,
     cache_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """

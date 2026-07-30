@@ -121,9 +121,9 @@ def _fetch_osm_bundle(
             longitude,
             result_limit=OSM_BUNDLE_LIMIT,
             radius_meters=radius_meters or LIVE_PLAN_RADIUS_METERS,
-            # Cap worst-case wait: ~3×18s then DB fallback
-            timeout_seconds=18.0,
-            max_mirrors=3,
+            # Fail fast from Railway → DB; public Overpass is often slow/429
+            timeout_seconds=8.0,
+            max_mirrors=2,
         )
     except Exception as exc:  # noqa: BLE001
         warnings.append(f"osm:bundle: {exc}")
