@@ -1,6 +1,7 @@
 /** Fire-and-forget OSM attractions → pois insert-if-missing (lazy region fill). */
 
 import { getApiBaseUrl } from './apiBase';
+import { getAuthHeaders } from './authHeaders';
 
 const recentSyncAt = new Map<string, number>();
 const SYNC_COOLDOWN_MS = 10 * 60 * 1000;
@@ -27,11 +28,17 @@ export function triggerRegionPlacesSync(region: string | null | undefined): void
 
   void (async () => {
     try {
+      const authHeaders = await getAuthHeaders();
+      if (!authHeaders) {
+        // Guests just read whatever is already in `pois`
+        recentSyncAt.delete(key);
+        return;
+      }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 90_000);
       const res = await fetch(url, {
         method: 'GET',
-        headers: { Accept: 'application/json' },
+        headers: { Accept: 'application/json', ...authHeaders },
         signal: controller.signal,
       });
       clearTimeout(timer);

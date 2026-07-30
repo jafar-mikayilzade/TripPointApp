@@ -1,4 +1,5 @@
 import { getApiBaseUrl } from './apiBase';
+import { getAuthHeaders } from './authHeaders';
 import type { PoiCategory } from '../types/database';
 
 export type UpsertGooglePlaceInput = {
@@ -26,6 +27,11 @@ export async function upsertGooglePlace(
     throw new Error('API ünvanı yoxdur (EXPO_PUBLIC_API_URL).');
   }
 
+  const authHeaders = await getAuthHeaders();
+  if (!authHeaders) {
+    throw new Error('Daxil olmaq lazımdır.');
+  }
+
   const category =
     input.category && String(input.category).toLowerCase() === 'cafe'
       ? 'restaurant'
@@ -35,7 +41,7 @@ export async function upsertGooglePlace(
     method: 'POST',
     headers: {
       Accept: 'application/json',
-      'Content-Type': 'application/json',
+      ...authHeaders,
     },
     body: JSON.stringify({
       place_id: input.place_id,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any
 
@@ -22,6 +23,8 @@ from app.services.places_google import fetch_places_from_google
 from app.services.places_hybrid import fetch_places_from_hybrid, iter_hybrid_all_batches
 from app.services.places_mock import fetch_places_from_mock
 from app.services.places_osm import _overpass_in_cooldown, fetch_places_from_osm
+
+logger = logging.getLogger(__name__)
 
 # One sync at a time — concurrent mobile/all+filter calls stampede Overpass
 _SYNC_LOCK = threading.Lock()
@@ -126,21 +129,18 @@ def sync_places(region: str, category: str) -> JSONResponse:
             category_key=category_key,
             fetch_warnings=fetch_warnings,
         )
-    except RuntimeError as exc:
+    except RuntimeError:
+        logger.exception("sync-places upstream error (source=%s)", DATA_SOURCE)
         return JSONResponse(
             status_code=502,
             content={
                 "success": False,
                 "error": "upstream_error",
-                "data_source": DATA_SOURCE,
-                "message": str(exc),
-                "hint": (
-                    "Check Railway GOOGLE_PLACES_API_KEY: Places API enabled, "
-                    "billing on, key unrestricted for server (or IP), no extra spaces/quotes."
-                ),
+                "message": "Upstream place provider rejected the request.",
             },
         )
-    except requests.RequestException as exc:
+    except requests.RequestException:
+        logger.exception("sync-places network error (source=%s)", DATA_SOURCE)
         source_label = {
             "google": "Google Places API",
             "osm": "OpenStreetMap Overpass API",
@@ -152,17 +152,16 @@ def sync_places(region: str, category: str) -> JSONResponse:
                 "success": False,
                 "error": "network_error",
                 "message": f"Failed to reach {source_label}.",
-                "details": str(exc),
             },
         )
-    except Exception as exc:
+    except Exception:
+        logger.exception("sync-places failed (source=%s)", DATA_SOURCE)
         return JSONResponse(
             status_code=500,
             content={
                 "success": False,
                 "error": "sync_failed",
                 "message": "Failed to sync places due to an external API or database error.",
-                "details": str(exc),
             },
         )
     finally:
