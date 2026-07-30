@@ -41,7 +41,7 @@ function getGoogleMapsKey(): string {
 }
 
 /** Google Place type → TripPoint kateqoriyası (tapılmasa null). */
-export function mapGoogleTypesToCategory(types: string[] | undefined): PoiCategory | null {
+function mapGoogleTypesToCategory(types: string[] | undefined): PoiCategory | null {
   if (!types?.length) return null;
 
   const TYPE_TO_CATEGORY: Record<string, PoiCategory> = {
@@ -168,7 +168,7 @@ export async function fetchGooglePlaceRating(placeId: string): Promise<GooglePla
 }
 
 /** Koordinata ən yaxın region id (məs. seki, quba). */
-export function inferRegionFromCoords(lat: number, lng: number): string {
+function inferRegionFromCoords(lat: number, lng: number): string {
   let bestId = DEFAULT_REGION_ID;
   let bestDistance = Number.POSITIVE_INFINITY;
 

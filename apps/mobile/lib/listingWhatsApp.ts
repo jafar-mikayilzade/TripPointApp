@@ -1,7 +1,7 @@
 /** WhatsApp deep-link helpers for İcma listings. */
 
 /** Digits only, suitable for https://wa.me/<digits> */
-export function toWhatsAppDigits(phone: string | null | undefined): string {
+function toWhatsAppDigits(phone: string | null | undefined): string {
   if (!phone) {
     return '';
   }

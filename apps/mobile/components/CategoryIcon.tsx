@@ -11,7 +11,7 @@ type IoniconName = ComponentProps<typeof Ionicons>['name'];
  * Bütün kateqoriyalar eyni dil: Ionicons outline, nazik xətt, oxunaqlı siluet.
  * Ölçü parent-dan gəlir — minimal UI ilə uyğun.
  */
-export const CATEGORY_IONICONS: Record<PoiCategory | 'all', IoniconName> = {
+const CATEGORY_IONICONS: Record<PoiCategory | 'all', IoniconName> = {
   all: 'grid-outline',
   restaurant: 'restaurant-outline',
   cafe: 'cafe-outline',
@@ -29,7 +29,7 @@ export const CATEGORY_IONICONS: Record<PoiCategory | 'all', IoniconName> = {
   other: 'location-outline',
 };
 
-export function getCategoryIconName(category: string): IoniconName {
+function getCategoryIconName(category: string): IoniconName {
   return CATEGORY_IONICONS[category as PoiCategory] ?? CATEGORY_IONICONS.other;
 }
 

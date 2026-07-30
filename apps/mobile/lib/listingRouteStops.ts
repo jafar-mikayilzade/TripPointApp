@@ -14,7 +14,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-export function normalizeListingRouteStops(raw: unknown): ListingRouteStop[] {
+function normalizeListingRouteStops(raw: unknown): ListingRouteStop[] {
   if (!Array.isArray(raw)) {
     return [];
   }
@@ -53,7 +53,7 @@ function stripRouteHeaderPrefix(text: string): string {
 }
 
 /** Köhnə elanlar: təsvirdə "Marşrut:\n1. Ad" formatı */
-export function parseRouteStopsFromDescription(description: string | null): ListingRouteStop[] {
+function parseRouteStopsFromDescription(description: string | null): ListingRouteStop[] {
   if (!description) {
     return [];
   }
@@ -228,7 +228,7 @@ export function resolveListingRouteStops(
   return parseRouteStopsFromDescription(listing.description);
 }
 
-export function buildMapsPlaceUrl(stop: ListingRouteStop): string {
+function buildMapsPlaceUrl(stop: ListingRouteStop): string {
   if (
     stop.lat != null &&
     stop.lng != null &&

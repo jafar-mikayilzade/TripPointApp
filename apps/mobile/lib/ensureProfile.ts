@@ -5,7 +5,7 @@ import { isGoogleOnlyUser, markEmailVerified } from './emailVerification';
 import { supabase } from './supabase';
 
 /** Auth user metadata-dan profil sahələrini çıxarır (email + Google). */
-export function profileFieldsFromUser(user: User) {
+function profileFieldsFromUser(user: User) {
   const meta = user.user_metadata ?? {};
 
   const fullNameCandidate = [meta.full_name, meta.name, meta.fullName].find(

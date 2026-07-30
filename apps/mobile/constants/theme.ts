@@ -81,37 +81,3 @@ export const shadows = {
   },
 } as const;
 
-export const typography = {
-  title: {
-    fontSize: 30,
-    fontWeight: '700' as const,
-    color: colors.text,
-    letterSpacing: -0.5,
-  },
-  heading: {
-    fontSize: 18,
-    fontWeight: '700' as const,
-    color: colors.text,
-    letterSpacing: -0.2,
-  },
-  body: {
-    fontSize: 15,
-    fontWeight: '500' as const,
-    color: colors.text,
-  },
-  secondary: {
-    fontSize: 14,
-    fontWeight: '400' as const,
-    color: colors.textSecondary,
-  },
-  caption: {
-    fontSize: 12,
-    fontWeight: '500' as const,
-    color: colors.textSecondary,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '600' as const,
-    color: colors.textSecondary,
-  },
-} as const;

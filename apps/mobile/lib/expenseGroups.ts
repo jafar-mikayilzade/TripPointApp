@@ -45,7 +45,7 @@ export async function findActiveGroupForListing(
 }
 
 /** Keep expense members aligned with approved tour participants. */
-export async function syncGroupMembersFromListing(
+async function syncGroupMembersFromListing(
   groupId: string,
   listingId: string
 ): Promise<void> {

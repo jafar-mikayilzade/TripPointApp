@@ -3,7 +3,7 @@
 import { nextSelectableHour } from './listingSchedule';
 
 /** OpenWeather 5-day forecast window (0 = today). */
-export const WEATHER_FORECAST_MAX_OFFSET = 4;
+const WEATHER_FORECAST_MAX_OFFSET = 4;
 
 export function startOfDay(date: Date): Date {
   const next = new Date(date);
@@ -64,10 +64,6 @@ export function formatDateLabel(date: Date): string {
     month: 'short',
     year: 'numeric',
   });
-}
-
-export function formatDateTimeLabel(date: Date): string {
-  return `${formatDateLabel(date)} · ${formatHhMm(date)}`;
 }
 
 /**

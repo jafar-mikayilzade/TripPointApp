@@ -31,7 +31,7 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export function formatSplitBillShareText(input: SplitBillPdfInput): string {
+function formatSplitBillShareText(input: SplitBillPdfInput): string {
   const lines: string[] = [`TripPoint · ${input.groupName}`, ''];
   if (input.region) {
     lines.push(`Region: ${input.region}`, '');
@@ -68,7 +68,7 @@ export function formatSplitBillShareText(input: SplitBillPdfInput): string {
   return lines.join('\n');
 }
 
-export async function shareSplitBillText(input: SplitBillPdfInput): Promise<void> {
+async function shareSplitBillText(input: SplitBillPdfInput): Promise<void> {
   const message = formatSplitBillShareText(input);
   await Share.share(
     Platform.OS === 'ios'

@@ -17,7 +17,7 @@ function randomLinkCode(): string {
   return out;
 }
 
-export function getTelegramBotUsername(): string | null {
+function getTelegramBotUsername(): string | null {
   const fromEnv = process.env.EXPO_PUBLIC_TELEGRAM_BOT_USERNAME?.trim();
   const fromExtra = (
     Constants.expoConfig?.extra as { telegramBotUsername?: string } | undefined

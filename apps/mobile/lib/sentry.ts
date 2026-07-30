@@ -9,7 +9,3 @@ export function initSentry(): void {
   }
   // DSN set but SDK not installed — keep no-op (avoids crash without rebuild)
 }
-
-export function captureException(_error: unknown, _context?: Record<string, unknown>): void {
-  // no-op
-}

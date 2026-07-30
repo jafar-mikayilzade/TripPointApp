@@ -29,7 +29,7 @@ export function collectRouteStops(plan: {
  * Does NOT auto-start turn-by-turn — user taps Start in Maps if they want.
  * Mobile Maps URLs: origin + destination + up to ~8 waypoints.
  */
-export function buildGoogleMapsNavUrl(
+function buildGoogleMapsNavUrl(
   stops: NavStop[],
   options?: { startNavigation?: boolean }
 ): string | null {

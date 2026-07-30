@@ -11,11 +11,11 @@ export function sanitizeLettersOnlyInput(value: string): string {
 export const TEXT_FORMAT_ERROR = 'Səhv format';
 
 /** Sözün ilk iki hərfi eyni ola bilməz. */
-export const TEXT_DOUBLE_START_ERROR =
+const TEXT_DOUBLE_START_ERROR =
   'Hər sözün ilk iki hərfi eyni ola bilməz.';
 
 /** Sözdə yanası 3 eyni hərf ola bilməz. */
-export const TEXT_TRIPLE_LETTER_ERROR =
+const TEXT_TRIPLE_LETTER_ERROR =
   'Sözdə yanası 3 eyni hərf ola bilməz.';
 
 /** Mətndə hərf/boşluqdan başqa simvol varmı (sanitize-dən əvvəl). */
@@ -158,7 +158,7 @@ export function validateFullName(name: string): string | null {
 
 export type PasswordRuleId = 'minLength' | 'upper' | 'lower' | 'digit';
 
-export const PASSWORD_RULES: {
+const PASSWORD_RULES: {
   id: PasswordRuleId;
   label: string;
   test: (password: string) => boolean;
@@ -294,13 +294,13 @@ export const AZ_PHONE_PREFIX = '+994';
 /** Yazarkən 0 daxil olmaqla max: 0501234567 */
 export const AZ_PHONE_MAX_WITH_LEADING_ZERO = 10;
 /** Normallaşdırılmış yerli uzunluq: 501234567 */
-export const AZ_PHONE_LOCAL_LENGTH = 9;
+const AZ_PHONE_LOCAL_LENGTH = 9;
 
 /**
  * İcazəli operator prefiksləri (0 ilə və ya 0-sız):
  * 010, 050, 051, 055, 060, 070, 077, 099
  */
-export const AZ_MOBILE_OPERATOR_PREFIXES = [
+const AZ_MOBILE_OPERATOR_PREFIXES = [
   '10',
   '50',
   '51',
@@ -311,7 +311,7 @@ export const AZ_MOBILE_OPERATOR_PREFIXES = [
   '99',
 ] as const;
 
-export const AZ_PHONE_FORMAT_ERROR = 'prefix:10, 50, 51, 55,60,70, 77, 99';
+const AZ_PHONE_FORMAT_ERROR = 'prefix:10, 50, 51, 55,60,70, 77, 99';
 
 /**
  * Yazarkən: yalnız rəqəm, 994 silinir, başdakı 0 saxlanılır (max 10).
@@ -403,14 +403,6 @@ export function sanitizePositiveIntInput(raw: string): string {
   // Başdakı sıfırları sil: "0" → "", "01" → "1", "10" → "10"
   const normalized = digits.replace(/^0+/, '');
   return normalized;
-}
-
-/**
- * @deprecated Qiymət də yalnız müsbət tam ədəd — sanitizePositiveIntInput istifadə et.
- * Saxlanılıb ki, köhnə importlar sınmasın; eyni məntiq.
- */
-export function sanitizePositiveDecimalInput(raw: string): string {
-  return sanitizePositiveIntInput(raw);
 }
 
 /** Müsbət tam ədəd (≥1). Boş / 0 / onluq → null. */

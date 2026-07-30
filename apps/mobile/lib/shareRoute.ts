@@ -22,7 +22,7 @@ type PlannedRoute = {
   best_time?: string;
 };
 
-export function formatRouteShareText(
+function formatRouteShareText(
   route: PlannedRoute,
   region: string,
   weatherNote?: string | null
@@ -63,61 +63,4 @@ export async function shareRouteText(
   await Share.share(
     Platform.OS === 'ios' ? { message } : { message, title: 'TripPoint marşrutu' }
   );
-}
-
-/**
- * PDF when expo-print is in the native binary; otherwise falls back to text share.
- * Lazy-requires native modules so older dev-clients still boot.
- */
-export async function shareRoutePdf(
-  route: PlannedRoute,
-  region: string,
-  weatherNote?: string | null
-): Promise<void> {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Print = require('expo-print') as typeof import('expo-print');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Sharing = require('expo-sharing') as typeof import('expo-sharing');
-
-    const escapeHtml = (value: string) =>
-      value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-
-    const daysHtml = (route.days ?? [])
-      .map((day) => {
-        const stops = (day.stops ?? [])
-          .map(
-            (s) =>
-              `<li><strong>${escapeHtml(s.time ?? '')}</strong> ${escapeHtml(s.name ?? '')}</li>`
-          )
-          .join('');
-        return `<h2>Gün ${day.day ?? ''} — ${escapeHtml(day.title ?? '')}</h2><ul>${stops}</ul>`;
-      })
-      .join('');
-
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body>
-      <h1>TripPoint — ${escapeHtml(region)}</h1>
-      <p>${escapeHtml(route.summary ?? '')}</p>
-      ${weatherNote ? `<p>${escapeHtml(weatherNote)}</p>` : ''}
-      ${daysHtml}
-    </body></html>`;
-
-    const { uri } = await Print.printToFileAsync({ html });
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(uri, {
-        mimeType: 'application/pdf',
-        dialogTitle: 'Marşrutu paylaş',
-        UTI: 'com.adobe.pdf',
-      });
-      return;
-    }
-  } catch {
-    // Native module missing in current dev-client — text share still works
-  }
-
-  await shareRouteText(route, region, weatherNote);
 }

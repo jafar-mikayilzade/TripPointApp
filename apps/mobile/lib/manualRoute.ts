@@ -12,7 +12,7 @@ export type ManualStop = {
 };
 
 /** Google Maps dir: origin + destination + ~8 waypoints ≈ 10 nöqtə cəmi. */
-export const MANUAL_ROUTE_MAX_NAV_POINTS = 10;
+const MANUAL_ROUTE_MAX_NAV_POINTS = 10;
 
 /** Marşrut stop limiti (cari məkan ayrıca sayılır). */
 export function maxRouteStops(fromOrigin: boolean): number {
@@ -155,7 +155,7 @@ export function haversineKm(
 }
 
 /** Orta sürət ~70 km/s — təxmini yol vaxtı. */
-export function estimateDriveLabel(km: number, avgKmh = 70): string {
+function estimateDriveLabel(km: number, avgKmh = 70): string {
   if (!Number.isFinite(km) || km < 0) {
     return '';
   }

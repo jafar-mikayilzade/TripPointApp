@@ -133,24 +133,3 @@ export function applyWeatherPoiFilter<T extends { category: string }>(
   return filtered.length >= 5 ? filtered : pois;
 }
 
-/** Merge per-day indoor bias when any trip day is rainy. */
-export function weatherForPlanDay(
-  weather: WeatherAdvice | null,
-  dayIndex: number
-): WeatherAdvice | null {
-  if (!weather?.ok) {
-    return weather;
-  }
-  const day = weather.daily_forecast?.[dayIndex];
-  if (!day) {
-    return weather;
-  }
-  return {
-    ...weather,
-    prefer_indoor: Boolean(day.prefer_indoor),
-    summary_az: day.summary_az || weather.summary_az,
-    display_az: day.display_az || weather.display_az,
-    exclude_categories: day.exclude_categories || weather.exclude_categories,
-    prefer_categories: day.prefer_categories || weather.prefer_categories,
-  };
-}

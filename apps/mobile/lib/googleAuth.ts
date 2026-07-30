@@ -130,7 +130,7 @@ export function configureGoogleSignIn() {
 }
 
 /** Google native cache-i təmizlə — növbəti girişdə hesab seçimi açılsın. */
-export async function clearGoogleSession(): Promise<void> {
+async function clearGoogleSession(): Promise<void> {
   const mod = loadGoogleSignIn();
   if (!mod) {
     return;

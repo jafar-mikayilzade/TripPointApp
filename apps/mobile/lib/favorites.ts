@@ -100,25 +100,6 @@ export async function toggleFavorite(
   return { favorited: true, resolvedId };
 }
 
-export async function listFavoriteIds(
-  targetType: FavoriteTargetType
-): Promise<Set<string>> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return new Set();
-  }
-
-  const { data } = await supabase
-    .from('favorites')
-    .select('target_id')
-    .eq('user_id', user.id)
-    .eq('target_type', targetType);
-
-  return new Set((data ?? []).map((row) => row.target_id));
-}
-
 /** İstifadəçinin sevimli listing id-ləri (yaradılma tarixinə görə). */
 export async function listFavoriteListingIdsOrdered(): Promise<string[]> {
   return listFavoriteIdsOrdered('listing');

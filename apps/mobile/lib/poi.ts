@@ -1,9 +1,6 @@
-import type { ComponentProps } from 'react';
-import type FontAwesome from '@expo/vector-icons/FontAwesome';
-
 import type { PoiCategory } from '../types/database';
 
-export const CATEGORY_COLORS: Record<PoiCategory, string> = {
+const CATEGORY_COLORS: Record<PoiCategory, string> = {
   restaurant: '#C47A2C',
   cafe: '#B8952A',
   hotel: '#4A8FE8',
@@ -20,7 +17,7 @@ export const CATEGORY_COLORS: Record<PoiCategory, string> = {
   other: '#9A9AA0',
 };
 
-export const CATEGORY_LABELS: Record<PoiCategory, string> = {
+const CATEGORY_LABELS: Record<PoiCategory, string> = {
   restaurant: 'Restoran',
   cafe: 'Kafe',
   home_restaurant: 'Ev restoranı',
@@ -37,33 +34,12 @@ export const CATEGORY_LABELS: Record<PoiCategory, string> = {
   other: 'Digər',
 };
 
-export const CATEGORY_ICONS: Record<PoiCategory, ComponentProps<typeof FontAwesome>['name']> = {
-  restaurant: 'cutlery',
-  cafe: 'coffee',
-  home_restaurant: 'cutlery',
-  hotel: 'bed',
-  hostel: 'bed',
-  guesthouse: 'home',
-  camping: 'tree',
-  nature: 'tree',
-  waterfall: 'tint',
-  mountain: 'image',
-  lake: 'tint',
-  historical: 'university',
-  monument: 'building',
-  other: 'map-marker',
-};
-
 export function getCategoryColor(category: PoiCategory): string {
   return CATEGORY_COLORS[category] ?? CATEGORY_COLORS.other;
 }
 
 export function getCategoryLabel(category: PoiCategory): string {
   return CATEGORY_LABELS[category] ?? CATEGORY_LABELS.other;
-}
-
-export function getCategoryIcon(category: PoiCategory): ComponentProps<typeof FontAwesome>['name'] {
-  return CATEGORY_ICONS[category] ?? CATEGORY_ICONS.other;
 }
 
 const EARTH_RADIUS_KM = 6371;
@@ -87,53 +63,3 @@ export function getDistanceKm(
   return EARTH_RADIUS_KM * c;
 }
 
-export function formatDistanceKm(distanceKm: number | null): string {
-  if (distanceKm === null) {
-    return '—';
-  }
-  if (distanceKm < 1) {
-    return `${Math.round(distanceKm * 1000)} m`;
-  }
-  return `${distanceKm.toFixed(1)} km`;
-}
-
-export function getGoogleMapsUrl(lat: number, lng: number): string {
-  return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-}
-
-/** Google Maps linkindən lat/lng çıxarır (@lat,lng və ya ?q=lat,lng). */
-export function parseCoordsFromGoogleMapsUrl(url: string): { lat: number; lng: number } | null {
-  const trimmed = url.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const atMatch = trimmed.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
-  if (atMatch) {
-    return { lat: Number(atMatch[1]), lng: Number(atMatch[2]) };
-  }
-
-  const qMatch = trimmed.match(/\?q=(-?\d+\.\d+),(-?\d+\.\d+)/);
-  if (qMatch) {
-    return { lat: Number(qMatch[1]), lng: Number(qMatch[2]) };
-  }
-
-  return null;
-}
-
-/** Admin / AddPoi — cafe omitted (tourism map ignores cafe). */
-export const POI_CATEGORY_OPTIONS: { value: PoiCategory; label: string }[] = [
-  { value: 'restaurant', label: 'Restoran' },
-  { value: 'hotel', label: 'Otel' },
-  { value: 'hostel', label: 'Hostel' },
-  { value: 'home_restaurant', label: 'Ev restoranı' },
-  { value: 'guesthouse', label: 'Qonaq evi' },
-  { value: 'camping', label: 'Kemping' },
-  { value: 'nature', label: 'Təbiət' },
-  { value: 'waterfall', label: 'Şəlalə' },
-  { value: 'mountain', label: 'Dağ' },
-  { value: 'lake', label: 'Göl' },
-  { value: 'historical', label: 'Tarixi yer' },
-  { value: 'monument', label: 'Abidə' },
-  { value: 'other', label: 'Digər' },
-];

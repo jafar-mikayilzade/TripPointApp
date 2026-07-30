@@ -14,7 +14,7 @@ import { type WeatherAdvice } from '../lib/weather';
 import { SimpleDateTimeField } from './SimpleDateTimeField';
 
 /** Match DropdownButton compact trigger — stable row height. */
-export const SCHEDULE_FIELD_HEIGHT = 40;
+const SCHEDULE_FIELD_HEIGHT = 40;
 const WEATHER_CHIP_WIDTH = 56;
 
 type Props = {
