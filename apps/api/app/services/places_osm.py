@@ -32,6 +32,7 @@ ALL_SYNC_CATEGORIES: list[str] = [
     "hostel",
     "guesthouse",
     "home_restaurant",
+    "camping",
     "nature",
     "waterfall",
     "mountain",
@@ -134,12 +135,25 @@ def _parse_overpass_places(
     return places
 
 
-def _overpass_get(query: str) -> dict[str, Any]:
+def _overpass_get(
+    query: str,
+    *,
+    timeout_seconds: float | None = None,
+    max_mirrors: int | None = None,
+) -> dict[str, Any]:
     headers = {
         "Accept": "application/json",
         "User-Agent": "TripPoint/1.0 (sync-places; contact=dev@trippoint.local)",
     }
     errors: list[str] = []
+    timeout = (
+        float(timeout_seconds)
+        if timeout_seconds is not None
+        else float(OSM_HTTP_TIMEOUT_SECONDS)
+    )
+    endpoints = list(OVERPASS_ENDPOINTS)
+    if max_mirrors is not None and max_mirrors > 0:
+        endpoints = endpoints[:max_mirrors]
 
     def _log(message: str) -> None:
         try:
@@ -147,14 +161,14 @@ def _overpass_get(query: str) -> dict[str, Any]:
         except UnicodeEncodeError:
             print(message.encode("ascii", "replace").decode("ascii"))
 
-    for endpoint in OVERPASS_ENDPOINTS:
+    for endpoint in endpoints:
         try:
             _log(f"[osm] GET {endpoint}")
             response = requests.get(
                 endpoint,
                 params={"data": query},
                 headers=headers,
-                timeout=OSM_HTTP_TIMEOUT_SECONDS,
+                timeout=timeout,
             )
             if response.status_code in {429, 502, 503, 504}:
                 errors.append(f"{endpoint} -> HTTP {response.status_code}")
@@ -201,6 +215,8 @@ def _fetch_selectors(
     per_query_limit: int,
     *,
     parallel: bool = True,
+    timeout_seconds: float | None = None,
+    max_mirrors: int | None = None,
 ) -> list[dict[str, Any]]:
     """Run Overpass selectors and merge unique places."""
 
@@ -208,7 +224,9 @@ def _fetch_selectors(
         query = build_overpass_query(
             latitude, longitude, selector, result_limit=per_query_limit
         )
-        payload = _overpass_get(query)
+        payload = _overpass_get(
+            query, timeout_seconds=timeout_seconds, max_mirrors=max_mirrors
+        )
         return _parse_overpass_places(payload, result_limit=per_query_limit)
 
     merged: list[dict[str, Any]] = []
@@ -248,6 +266,8 @@ def _fetch_single_category(
     limit: int,
     *,
     selector_parallel: bool = True,
+    timeout_seconds: float | None = None,
+    max_mirrors: int | None = None,
 ) -> list[dict[str, Any]]:
     selectors = OSM_CATEGORY_FILTERS.get(category) or OSM_CATEGORY_FILTERS["other"]
     places = _fetch_selectors(
@@ -256,6 +276,8 @@ def _fetch_single_category(
         selectors,
         per_query_limit=min(25, limit),
         parallel=selector_parallel,
+        timeout_seconds=timeout_seconds,
+        max_mirrors=max_mirrors,
     )
     # Specific filter: stamp requested category so home UI filter matches
     for place in places:

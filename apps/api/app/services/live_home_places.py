@@ -1,7 +1,7 @@
-"""Live Google Places for home/Qur map (no DB upsert).
+"""Live OSM places for home/Qur map (no DB upsert).
 
 Hub-driven region load + optional viewport (lat/lng/radius) merge.
-Tourism filter + curated seeds + bucket mix.
+Tourism filter + curated seeds + bucket mix. Google Nearby disabled by default.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 from typing import Any
 
-from app.config import GOOGLE_PLACES_API_KEY
 from app.constants.categories import APP_CATEGORIES
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
 from app.constants.tourism_hubs import hub_as_center, hubs_for_region
@@ -21,13 +20,21 @@ from app.db import supabase
 from app.services.geo_route import haversine_km
 from app.services.live_route_candidates import (
     LIVE_PLAN_RADIUS_METERS,
-    _fetch_google_category,
+    OSM_MAX_CENTERS,
+    _fetch_osm_category,
 )
 from app.services.places_tourism_filter import filter_tourism_rows
 from app.services.rank_pois import mix_home_places, public_poi_fields
 
-# Tourism-focused Nearby types for "all"
-HOME_ALL_GOOGLE_CATS = ("restaurant", "hotel", "nature")
+# Tourism-focused OSM categories for "all" (lean set for Overpass latency)
+HOME_ALL_OSM_CATS = (
+    "restaurant",
+    "hotel",
+    "guesthouse",
+    "nature",
+    "waterfall",
+    "historical",
+)
 
 # How-to expand: add hubs in tourism_hubs.py, seeds in tourism_seeds.py,
 # blacklist in places_tourism_filter.py
@@ -50,20 +57,20 @@ def _cache_key(
 ) -> str:
     cat = (category or "all").strip().lower()
     if lat is None or lng is None:
-        return f"{region_key}|{cat}|{limit}|region"
+        return f"osm|{region_key}|{cat}|{limit}|region"
     # Round to ~100m buckets to absorb tiny pans
     lat_r = round(float(lat), 3)
     lng_r = round(float(lng), 3)
     rad_r = int(round((radius or 8000) / 500.0) * 500)
-    return f"{region_key}|{cat}|{limit}|{lat_r}|{lng_r}|{rad_r}"
+    return f"osm|{region_key}|{cat}|{limit}|{lat_r}|{lng_r}|{rad_r}"
 
 
-def _google_cats_for_filter(category: str | None) -> list[str]:
+def _osm_cats_for_filter(category: str | None) -> list[str]:
     if not category or category == "all":
-        return list(HOME_ALL_GOOGLE_CATS)
+        return list(HOME_ALL_OSM_CATS)
     cat = category.strip().lower()
     if cat not in APP_CATEGORIES or cat == "cafe":
-        return list(HOME_ALL_GOOGLE_CATS)
+        return list(HOME_ALL_OSM_CATS)
     return [cat]
 
 
@@ -82,6 +89,15 @@ def _centers_for_region(region_key: str) -> list[dict[str, Any]]:
             "weight": 0.6,
         }
     ]
+
+
+def _cap_centers(centers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if len(centers) <= OSM_MAX_CENTERS:
+        return centers
+    ranked = sorted(
+        centers, key=lambda c: float(c.get("weight") or 0), reverse=True
+    )
+    return ranked[:OSM_MAX_CENTERS]
 
 
 def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -138,20 +154,20 @@ def _fetch_centers(
     db_region: str,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     warnings: list[str] = []
-    jobs = [(c, cat) for c in centers for cat in cats]
+    capped = _cap_centers(centers)
+    jobs = [(c, cat) for c in capped for cat in cats]
     if not jobs:
         return [], warnings
 
     out: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=min(8, len(jobs))) as pool:
+    with ThreadPoolExecutor(max_workers=min(3, len(jobs))) as pool:
         futures = [
             pool.submit(
-                _fetch_google_category,
+                _fetch_osm_category,
                 latitude=float(center["lat"]),
                 longitude=float(center["lng"]),
                 category=cat,
                 region=db_region,
-                radius_meters=int(center.get("radius_m") or LIVE_PLAN_RADIUS_METERS),
                 hub_id=str(center.get("id") or ""),
                 hub_weight=float(center.get("weight") or 0.5),
             )
@@ -174,7 +190,7 @@ def load_live_home_places(
     radius: int | None = None,
 ) -> dict[str, Any]:
     """
-    Region overview: fetch all tourism hubs.
+    Region overview: fetch tourism hubs via OSM.
     Viewport mode (lat/lng set): fetch viewport center (+ nearby strong hubs).
     """
     region_key = region_key.strip().lower()
@@ -224,7 +240,7 @@ def _load_live_home_places_uncached(
     db_region = REGION_DB_ID.get(region_key, region_key)
     warnings: list[str] = []
     region_hubs = _centers_for_region(region_key)
-    cats = _google_cats_for_filter(category)
+    cats = _osm_cats_for_filter(category)
     viewport_mode = lat is not None and lng is not None
 
     if viewport_mode:
@@ -240,9 +256,8 @@ def _load_live_home_places_uncached(
                 "weight": 1.0,
             }
         ]
-        # Cap hub fan-out in viewport mode (Google call budget)
         for hub in region_hubs:
-            if len(centers) >= 2:
+            if len(centers) >= OSM_MAX_CENTERS:
                 break
             if float(hub.get("weight") or 0) < 0.85:
                 continue
@@ -253,36 +268,19 @@ def _load_live_home_places_uncached(
                 centers.append(hub)
         rank_hubs = region_hubs
     else:
-        centers = region_hubs
+        centers = _cap_centers(region_hubs)
         rank_hubs = region_hubs
 
-    if not GOOGLE_PLACES_API_KEY:
-        warnings.append("google: missing GOOGLE_PLACES_API_KEY")
-        rows = _load_db_places(
-            region_key, category=category, limit=limit, hubs=rank_hubs
-        )
-        return {
-            "region": db_region,
-            "places": [public_poi_fields(r) for r in rows],
-            "source": "db",
-            "warnings": warnings,
-            "viewport": viewport_mode,
-            "hubs_used": [c.get("id") for c in centers],
-        }
-
-    google_rows, gw = _fetch_centers(centers, cats=cats, db_region=db_region)
-    warnings.extend(gw)
+    osm_rows, ow = _fetch_centers(centers, cats=cats, db_region=db_region)
+    warnings.extend(ow)
 
     seeds = seeds_for_region(region_key, db_region=db_region)
     if category and category not in {"all", ""}:
         seeds = [s for s in seeds if str(s.get("category") or "") == category]
-        google_rows = [
-            r
-            for r in google_rows
-            if str(r.get("category") or "") == category
+        osm_rows = [
+            r for r in osm_rows if str(r.get("category") or "") == category
         ]
 
-    # In viewport mode still include seeds near the camera
     if viewport_mode:
         near_seeds: list[dict[str, Any]] = []
         for s in seeds:
@@ -299,7 +297,7 @@ def _load_live_home_places_uncached(
         seeds = near_seeds
 
     merged = filter_tourism_rows(
-        _dedupe_rows(seeds + google_rows),
+        _dedupe_rows(seeds + osm_rows),
         hubs=rank_hubs,
     )
     ranked = mix_home_places(merged, limit=limit, hubs=rank_hubs)
@@ -308,13 +306,13 @@ def _load_live_home_places_uncached(
         return {
             "region": db_region,
             "places": [public_poi_fields(r) for r in ranked],
-            "source": "google",
+            "source": "osm",
             "warnings": warnings,
             "viewport": viewport_mode,
             "hubs_used": [c.get("id") for c in centers],
         }
 
-    warnings.append("google: empty — falling back to db")
+    warnings.append("osm: empty — falling back to db")
     rows = _load_db_places(
         region_key, category=category, limit=limit, hubs=rank_hubs
     )

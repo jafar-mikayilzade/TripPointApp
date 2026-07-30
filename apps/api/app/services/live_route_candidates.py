@@ -1,11 +1,11 @@
-"""Route candidates for AI planning — DB `pois` by default, optional Google live."""
+"""Route candidates for AI planning — OSM-first, DB fallback (optional Google)."""
 
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Literal
 
-from app.config import GOOGLE_PLACES_API_KEY
+from app.config import GOOGLE_PLACES_API_KEY, OSM_PER_CATEGORY_LIMIT
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
 from app.constants.tourism_hubs import hub_as_center, hubs_for_region
 from app.constants.tourism_seeds import seeds_for_region
@@ -16,25 +16,44 @@ from app.services.attraction_classify import (
 )
 from app.services.places_clean import clean_place
 from app.services.places_google import fetch_places_from_google
+from app.services.places_osm import _fetch_single_category
 from app.services.places_tourism_filter import filter_tourism_rows
 from app.services.rank_pois import bucket_route_candidates, public_poi_fields
 
-SourceKind = Literal["google", "db", "mixed"]
+SourceKind = Literal["osm", "google", "db", "mixed"]
 
 # Wider than sync default — regional tourism spots sit outside 5km often
 LIVE_PLAN_RADIUS_METERS = 15_000
 GOOGLE_CALL_TIMEOUT_SECONDS = 12
+# Cap Overpass fan-out (public mirrors rate-limit hard)
+OSM_MAX_CENTERS = 2
+OSM_CATEGORY_LIMIT = max(12, OSM_PER_CATEGORY_LIMIT)
 
-# Always one tourist_attraction fetch (via "nature" map); reclassify after.
+# Tourism buckets for live OSM planning (kept lean — Overpass is slow/rate-limited)
+_BASE_OSM_CATS = (
+    "restaurant",
+    "hotel",
+    "guesthouse",
+    "nature",
+    "waterfall",
+    "historical",
+)
+
+# Legacy Google path (opt-in via source=google)
 _BASE_GOOGLE_CATS = ("restaurant", "hotel", "nature")
 
 
-def _interest_google_categories(interests: list[str] | None) -> list[str]:
+def _interest_osm_categories(interests: list[str] | None) -> list[str]:
     del interests  # applied at bucket/rank time after classify
+    return list(_BASE_OSM_CATS)
+
+
+def _interest_google_categories(interests: list[str] | None) -> list[str]:
+    del interests
     return list(_BASE_GOOGLE_CATS)
 
 
-def _row_from_google_place(
+def _row_from_place(
     place: dict[str, Any],
     *,
     region: str,
@@ -88,7 +107,46 @@ def _fetch_google_category(
 
     rows: list[dict[str, Any]] = []
     for place in raw:
-        row = _row_from_google_place(
+        row = _row_from_place(
+            place,
+            region=region,
+            category=category,
+            hub_id=hub_id,
+            hub_weight=hub_weight,
+        )
+        if row:
+            rows.append(row)
+    return rows, warnings
+
+
+def _fetch_osm_category(
+    *,
+    latitude: float,
+    longitude: float,
+    category: str,
+    region: str,
+    hub_id: str | None = None,
+    hub_weight: float | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    warnings: list[str] = []
+    try:
+        raw = _fetch_single_category(
+            latitude,
+            longitude,
+            category,
+            OSM_CATEGORY_LIMIT,
+            selector_parallel=False,
+            # Fail fast on public mirrors so empty→DB fallback is usable
+            timeout_seconds=12,
+            max_mirrors=2,
+        )
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(f"osm:{category}: {exc}")
+        return [], warnings
+
+    rows: list[dict[str, Any]] = []
+    for place in raw:
+        row = _row_from_place(
             place,
             region=region,
             category=category,
@@ -115,6 +173,18 @@ def _centers_for_region(region_key: str) -> list[dict[str, Any]]:
             "weight": 0.6,
         }
     ]
+
+
+def _cap_centers_for_osm(centers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Prefer highest-weight hubs; keep Overpass load bounded."""
+    if len(centers) <= OSM_MAX_CENTERS:
+        return centers
+    ranked = sorted(
+        centers,
+        key=lambda c: float(c.get("weight") or 0),
+        reverse=True,
+    )
+    return ranked[:OSM_MAX_CENTERS]
 
 
 def _load_buckets_from_db(
@@ -173,16 +243,65 @@ def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(by_id.values())
 
 
+def _load_buckets_from_osm(
+    region_key: str,
+    *,
+    per_bucket: int,
+    hubs: list[dict[str, Any]],
+    interests: list[str] | None,
+    prefer_attraction_cats: set[str] | None,
+) -> tuple[dict[str, list[dict[str, Any]]], list[str], int]:
+    db_region = REGION_DB_ID.get(region_key, region_key)
+    warnings: list[str] = []
+    centers = _cap_centers_for_osm(hubs)
+    categories = _interest_osm_categories(interests)
+    jobs: list[tuple[dict[str, Any], str]] = [
+        (center, cat) for center in centers for cat in categories
+    ]
+    merged_raw: list[dict[str, Any]] = []
+
+    # Sequential-ish: max 3 workers to be kinder to public Overpass
+    with ThreadPoolExecutor(max_workers=min(3, max(1, len(jobs)))) as pool:
+        futures = [
+            pool.submit(
+                _fetch_osm_category,
+                latitude=float(center["lat"]),
+                longitude=float(center["lng"]),
+                category=cat,
+                region=db_region,
+                hub_id=str(center.get("id") or ""),
+                hub_weight=float(center.get("weight") or 0.5),
+            )
+            for center, cat in jobs
+        ]
+        for fut in as_completed(futures):
+            rows, batch_warnings = fut.result()
+            warnings.extend(batch_warnings)
+            merged_raw.extend(rows)
+
+    seeds = seeds_for_region(region_key, db_region=db_region)
+    classified = classify_attraction_rows(_dedupe_rows(seeds + merged_raw))
+    merged = filter_tourism_rows(classified, hubs=hubs)
+    buckets = bucket_route_candidates(
+        merged,
+        per_bucket=per_bucket,
+        hubs=hubs,
+        prefer_attraction_cats=prefer_attraction_cats,
+    )
+    return buckets, warnings, len(merged_raw)
+
+
 def load_live_route_candidates(
     region_key: str,
     *,
     per_bucket: int = 12,
     interests: list[str] | None = None,
-    source: Literal["google", "db"] = "google",
+    source: Literal["osm", "google", "db"] = "osm",
 ) -> dict[str, Any]:
     """
     Candidate buckets for AI planning.
-    Default source=google (Nearby), falls back to Supabase `pois` when empty/unavailable.
+    Default source=osm (Overpass), falls back to Supabase `pois` when empty.
+    source=google kept for opt-in A/B only.
     """
     region_key = region_key.strip().lower()
     if region_key not in REGION_COORDINATES:
@@ -208,8 +327,26 @@ def load_live_route_candidates(
             "warnings": warnings,
         }
 
-    if not GOOGLE_PLACES_API_KEY:
-        warnings.append("google: missing GOOGLE_PLACES_API_KEY")
+    if source == "osm":
+        buckets, osm_warnings, osm_raw = _load_buckets_from_osm(
+            region_key,
+            per_bucket=per_bucket,
+            hubs=centers,
+            interests=interests,
+            prefer_attraction_cats=prefer_attr,
+        )
+        warnings.extend(osm_warnings)
+        if _bucket_counts(buckets) > 0:
+            return {
+                "region": db_region,
+                "buckets": buckets,
+                "source": "osm",
+                "warnings": warnings,
+                "osm_raw_count": osm_raw,
+                "hubs_used": [c.get("id") for c in _cap_centers_for_osm(centers)],
+                "interest_attraction_cats": sorted(prefer_attr or []),
+            }
+        warnings.append("osm: empty results — falling back to db")
         buckets = _load_buckets_from_db(
             region_key,
             per_bucket=per_bucket,
@@ -221,7 +358,20 @@ def load_live_route_candidates(
             "buckets": buckets,
             "source": "db",
             "warnings": warnings,
+            "osm_raw_count": osm_raw,
+            "hubs_used": [c.get("id") for c in centers],
+            "interest_attraction_cats": sorted(prefer_attr or []),
         }
+
+    # source == google (opt-in)
+    if not GOOGLE_PLACES_API_KEY:
+        warnings.append("google: missing GOOGLE_PLACES_API_KEY — using osm")
+        return load_live_route_candidates(
+            region_key,
+            per_bucket=per_bucket,
+            interests=interests,
+            source="osm",
+        )
 
     categories = _interest_google_categories(interests)
     jobs: list[tuple[dict[str, Any], str]] = [
@@ -261,14 +411,13 @@ def load_live_route_candidates(
         source_used = "google"
         buckets = google_buckets
     else:
-        warnings.append("google: empty results — falling back to db")
-        buckets = _load_buckets_from_db(
+        warnings.append("google: empty results — falling back to osm")
+        return load_live_route_candidates(
             region_key,
             per_bucket=per_bucket,
-            hubs=centers,
-            prefer_attraction_cats=prefer_attr,
+            interests=interests,
+            source="osm",
         )
-        source_used = "db"
 
     return {
         "region": db_region,

@@ -34,6 +34,8 @@ def category_from_osm_tags(tags: dict[str, Any]) -> str:
         return "hostel"
     if tourism in {"guest_house", "chalet", "apartment"}:
         return "guesthouse"
+    if tourism in {"camp_site", "caravan_site"}:
+        return "camping"
     if waterway == "waterfall":
         return "waterfall"
     if natural in {"peak", "ridge", "volcano"}:

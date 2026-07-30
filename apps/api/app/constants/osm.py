@@ -50,6 +50,10 @@ OSM_CATEGORY_FILTERS: dict[str, list[str]] = {
         'nwr["historic"="monument"]["name"]',
         'nwr["historic"="memorial"]["name"]',
     ],
+    "camping": [
+        'nwr["tourism"="camp_site"]["name"]',
+        'nwr["tourism"="caravan_site"]["name"]',
+    ],
     "other": [
         'nwr["tourism"="information"]["name"]',
         'nwr["shop"="souvenir"]["name"]',

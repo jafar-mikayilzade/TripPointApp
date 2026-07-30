@@ -22,7 +22,7 @@ _raw_anthropic = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 ANTHROPIC_API_KEY = _raw_anthropic.strip('"').strip("'") or None
 
 # mock | osm | google | hybrid
-DATA_SOURCE = (os.getenv("DATA_SOURCE") or "mock").strip().lower()
+DATA_SOURCE = (os.getenv("DATA_SOURCE") or "osm").strip().lower()
 ALLOWED_DATA_SOURCES = {"mock", "osm", "google", "hybrid"}
 
 _DEFAULT_OVERPASS = (
