@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -68,11 +69,23 @@ CRON_SECRET = _raw_cron.strip('"').strip("'") or None
 _raw_sentry = (os.getenv("SENTRY_DSN") or "").strip()
 SENTRY_DSN = _raw_sentry.strip('"').strip("'") or None
 
+# CORS: native apps send no Origin, so "*" is safe by default. Set
+# CORS_ALLOW_ORIGINS to a comma-separated list to lock down browser callers.
+_raw_cors = (os.getenv("CORS_ALLOW_ORIGINS") or "*").strip()
+CORS_ALLOW_ORIGINS: list[str] = [
+    origin.strip() for origin in _raw_cors.split(",") if origin.strip()
+] or ["*"]
+
 
 def validate_settings() -> None:
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         raise RuntimeError(
             "Missing required environment variables: SUPABASE_URL, SUPABASE_SERVICE_KEY"
+        )
+    if TELEGRAM_BOT_TOKEN and not TELEGRAM_WEBHOOK_SECRET:
+        logging.getLogger(__name__).warning(
+            "TELEGRAM_WEBHOOK_SECRET is unset — /api/telegram/webhook accepts "
+            "unverified updates. Set it and pass secret_token to setWebhook."
         )
     if DATA_SOURCE not in ALLOWED_DATA_SOURCES:
         raise RuntimeError(

@@ -5,6 +5,7 @@
  */
 
 import { getApiBaseUrl } from './apiBase';
+import { getAuthHeaders } from './authHeaders';
 import { trackEvent } from './trackEvent';
 
 export type PlanRouteStop = {
@@ -97,6 +98,11 @@ async function planRouteViaFastApi(
     return null;
   }
 
+  const authHeaders = await getAuthHeaders();
+  if (!authHeaders) {
+    return null;
+  }
+
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 60_000);
@@ -104,7 +110,7 @@ async function planRouteViaFastApi(
       method: 'POST',
       headers: {
         Accept: 'application/json',
-        'Content-Type': 'application/json',
+        ...authHeaders,
       },
       body: JSON.stringify({
         region: input.region,

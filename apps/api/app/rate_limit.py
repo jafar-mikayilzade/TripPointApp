@@ -25,6 +25,10 @@ _DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     # Paid third-party quota (Google Places / OpenWeather) — generous but capped
     "/api/route-candidates": (60, 60),
     "/api/weather": (60, 60),
+    # Fan-out to admin chats / push — cap so one client cannot spam them
+    "/api/telegram/notify": (10, 60),
+    "/api/telegram/webhook": (120, 60),
+    "/api/notify/dispatch": (30, 60),
 }
 
 
@@ -68,6 +72,27 @@ def _limits() -> dict[str, tuple[int, int]]:
         ),
         "/api/weather": (
             _env_int("RATE_LIMIT_WEATHER", _DEFAULT_LIMITS["/api/weather"][0]),
+            60,
+        ),
+        "/api/telegram/notify": (
+            _env_int(
+                "RATE_LIMIT_TELEGRAM_NOTIFY",
+                _DEFAULT_LIMITS["/api/telegram/notify"][0],
+            ),
+            60,
+        ),
+        "/api/telegram/webhook": (
+            _env_int(
+                "RATE_LIMIT_TELEGRAM_WEBHOOK",
+                _DEFAULT_LIMITS["/api/telegram/webhook"][0],
+            ),
+            60,
+        ),
+        "/api/notify/dispatch": (
+            _env_int(
+                "RATE_LIMIT_NOTIFY_DISPATCH",
+                _DEFAULT_LIMITS["/api/notify/dispatch"][0],
+            ),
             60,
         ),
     }

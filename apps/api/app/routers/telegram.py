@@ -13,6 +13,7 @@ from app.security import secret_matches
 from app.services.telegram_bot import handle_telegram_update
 from app.services.telegram_notify import (
     admin_action_keyboard,
+    moderation_target_is_open,
     notify_all_admins,
 )
 
@@ -93,7 +94,11 @@ def telegram_notify(
     """Admin notify hook — bütün bağlı adminlərə + TELEGRAM_CHAT_ID."""
     _require_user_or_secret(authorization, x_notify_secret)
     markup = None
-    if body.kind and body.target_id:
+    if (
+        body.kind
+        and body.target_id
+        and moderation_target_is_open(body.kind, body.target_id)
+    ):
         markup = admin_action_keyboard(body.kind, body.target_id)
     result = notify_all_admins(body.text, reply_markup=markup)
     return {"ok": result["sent"] > 0, **result}

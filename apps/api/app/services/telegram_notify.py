@@ -183,6 +183,45 @@ def list_admin_telegram_chat_ids() -> list[str]:
     return sorted(chats)
 
 
+# kind → (table, column, open statuses)
+_MODERATION_TARGETS: dict[str, tuple[str, str, tuple[str, ...]]] = {
+    "poi_pending": ("pois", "status", ("pending",)),
+    "photo_pending": ("poi_photos", "status", ("pending",)),
+    "listing_report": ("listing_reports", "status", ("open",)),
+}
+
+
+def moderation_target_is_open(kind: str, target_id: str) -> bool:
+    """True when the row exists and still awaits moderation.
+
+    Callers pass a client-supplied id, so without this check anyone with a
+    session could make admins see approve/reject buttons for arbitrary rows.
+    """
+    target = _MODERATION_TARGETS.get(kind)
+    tid = (target_id or "").strip()
+    if not target or not tid:
+        return False
+
+    table, column, open_values = target
+    try:
+        rows = (
+            supabase.table(table)
+            .select(f"id, {column}")
+            .eq("id", tid)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+    except Exception:
+        logger.exception("moderation target check failed: %s %s", kind, tid)
+        return False
+
+    if not rows:
+        return False
+    return str(rows[0].get(column) or "") in open_values
+
+
 def admin_action_keyboard(kind: str, target_id: str) -> dict[str, Any] | None:
     """Inline ✅/❌ for moderation notify messages.
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import SENTRY_DSN, validate_settings
+from app.config import CORS_ALLOW_ORIGINS, SENTRY_DSN, validate_settings
 from app.rate_limit import RateLimitMiddleware
 from app.routers import (
     health,
@@ -46,7 +46,7 @@ def create_app() -> FastAPI:
     application = FastAPI(title="TripPoint Backend", version="1.0.0")
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=CORS_ALLOW_ORIGINS,
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],

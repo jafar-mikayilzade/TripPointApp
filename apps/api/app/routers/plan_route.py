@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from app.auth import verify_user
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
 from app.services.live_route_candidates import load_live_route_candidates
 from app.services.plan_itinerary import build_skeleton, enrich_with_claude
@@ -60,7 +61,14 @@ class PlanRouteIn(BaseModel):
 
 
 @router.post("/api/plan-route")
-def plan_route_endpoint(body: PlanRouteIn) -> JSONResponse:
+def plan_route_endpoint(
+    body: PlanRouteIn,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> JSONResponse:
+    # Planning burns Claude/weather quota, so keep it behind a session.
+    if not verify_user(authorization):
+        raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+
     region_key = body.region.strip().lower()
     if region_key not in REGION_COORDINATES:
         raise HTTPException(

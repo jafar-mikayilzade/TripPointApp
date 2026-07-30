@@ -52,6 +52,33 @@ class TestNotifyDispatchAuth:
         assert res.json()["ok"] is True
 
 
+class TestServiceRoleWriteAuth:
+    """Endpoints that write with the service role must reject anonymous calls."""
+
+    def test_upsert_google_place_requires_session(self, client: TestClient):
+        res = client.post(
+            "/api/pois/upsert-google-place",
+            json={
+                "place_id": "ChIJtest12345",
+                "name": "Test",
+                "lat": 41.0,
+                "lng": 48.0,
+            },
+        )
+        assert res.status_code == 401
+
+    def test_sync_places_requires_session_or_cron(self, client: TestClient):
+        res = client.get("/api/sync-places?region=quba&category=all")
+        assert res.status_code == 401
+
+    def test_plan_route_requires_session(self, client: TestClient):
+        res = client.post(
+            "/api/plan-route",
+            json={"region": "quba", "days": 1, "budget": "mid", "interests": []},
+        )
+        assert res.status_code == 401
+
+
 class TestJobsAuth:
     def test_nightly_requires_cron_secret(self, client: TestClient, monkeypatch):
         monkeypatch.setattr("app.routers.jobs.CRON_SECRET", None)

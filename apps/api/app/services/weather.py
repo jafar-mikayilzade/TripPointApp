@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -9,6 +10,8 @@ import requests
 
 from app.config import OPENWEATHER_API_KEY
 from app.constants.regions import REGION_COORDINATES
+
+logger = logging.getLogger(__name__)
 
 # Free-tier friendly: one forecast call covers ~5 days; reuse across users.
 CACHE_TTL_SECONDS = 45 * 60
@@ -209,11 +212,12 @@ def fetch_region_weather(
         response = requests.get(url, params=params, timeout=8)
         response.raise_for_status()
         data = response.json()
-    except requests.RequestException as exc:
+    except requests.RequestException:
+        # Never echo the exception: the request URL carries the API key.
+        logger.exception("weather fetch failed for region=%s", key)
         return {
             "ok": False,
             "error": "weather_fetch_failed",
-            "detail": str(exc)[:200],
             "region": key,
         }
 

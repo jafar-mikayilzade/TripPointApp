@@ -1,15 +1,18 @@
 import Constants from 'expo-constants';
+import * as Crypto from 'expo-crypto';
 import { Linking } from 'react-native';
 
 import { supabase } from './supabase';
 
 const LINK_TTL_MS = 15 * 60 * 1000;
 
+/** One-time account-link code — must not be guessable, so no Math.random. */
 function randomLinkCode(): string {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = Crypto.getRandomBytes(12);
   let out = '';
-  for (let i = 0; i < 12; i += 1) {
-    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  for (let i = 0; i < bytes.length; i += 1) {
+    out += alphabet[bytes[i] % alphabet.length];
   }
   return out;
 }
