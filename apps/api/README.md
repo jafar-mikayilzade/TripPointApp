@@ -25,10 +25,31 @@ Yeni endpoint/məntiq üçün `main.py`-yə yığmayın — uyğun `routers/` / 
 cd apps/api
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements-dev.lock
 copy .env.example .env
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+## Asılılıqlar
+
+| Fayl | Rol |
+|------|-----|
+| `requirements.txt` / `requirements-dev.txt` | Əl ilə redaktə olunan giriş — yalnız aralıqlar (`>=x,<y`) |
+| `requirements.lock` / `requirements-dev.lock` | Generasiya olunur — bütün tranzitiv paketlər pin + sha256 |
+
+Docker, Railway və CI **yalnız `.lock` fayllarını** quraşdırır (`--require-hashes`), ona görə üç mühit də eyni ağaca düşür. `requirements.txt`-də versiya aralığını dəyişdikdən sonra lock-u yenidən yaratmaq lazımdır — əks halda CI-dakı "Lock is in sync" addımı düşür.
+
+Lock-lar deploy runtime-ı ilə (Linux + CPython 3.12) eyni mühitdə yaradılır, lokal interpretatorda yox:
+
+```powershell
+cd apps/api
+docker run --rm -v "$($PWD.Path):/w" -w /w python:3.12-slim sh -c `
+  "pip install -q pip-tools && `
+   pip-compile --strip-extras --generate-hashes --output-file=requirements.lock requirements.txt && `
+   pip-compile --strip-extras --generate-hashes --output-file=requirements-dev.lock requirements-dev.txt"
+```
+
+Paketləri qəsdən yeniləmək üçün eyni əmrə `--upgrade` əlavə et.
 
 ## Railway deploy (monorepo)
 
