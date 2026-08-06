@@ -39,17 +39,16 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 Docker, Railway və CI **yalnız `.lock` fayllarını** quraşdırır (`--require-hashes`), ona görə üç mühit də eyni ağaca düşür. `requirements.txt`-də versiya aralığını dəyişdikdən sonra lock-u yenidən yaratmaq lazımdır — əks halda CI-dakı "Lock is in sync" addımı düşür.
 
-Lock-lar deploy runtime-ı ilə (Linux + CPython 3.12) eyni mühitdə yaradılır, lokal interpretatorda yox:
+Lock-lar `--universal` rejimində yaradılır: platformadan asılı paketlər marker ilə gəlir (məs. `uvloop ... ; sys_platform != 'win32'`), ona görə eyni fayl həm Linux deploy-da, həm Windows-da lokal quraşdırılır.
 
-```powershell
+```bash
 cd apps/api
-docker run --rm -v "$($PWD.Path):/w" -w /w python:3.12-slim sh -c `
-  "pip install -q pip-tools && `
-   pip-compile --strip-extras --generate-hashes --output-file=requirements.lock requirements.txt && `
-   pip-compile --strip-extras --generate-hashes --output-file=requirements-dev.lock requirements-dev.txt"
+pip install uv
+uv pip compile --universal --python-version 3.12 --generate-hashes -o requirements.lock requirements.txt
+uv pip compile --universal --python-version 3.12 --generate-hashes -o requirements-dev.lock requirements-dev.txt
 ```
 
-Paketləri qəsdən yeniləmək üçün eyni əmrə `--upgrade` əlavə et.
+`--python-version 3.12` deploy runtime-ının minimumudur — lokal interpretator daha yeni ola bilər. Paketləri qəsdən yeniləmək üçün əmrə `--upgrade` əlavə et.
 
 ## Railway deploy (monorepo)
 
