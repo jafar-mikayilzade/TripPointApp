@@ -25,7 +25,7 @@ export type RouteCandidateBuckets = {
 
 export async function fetchRouteCandidates(
   region: string,
-  perBucket = 12,
+  perBucket = 40,
   options?: { interests?: string[] }
 ): Promise<RouteCandidateBuckets | null> {
   const base = getApiBaseUrl();

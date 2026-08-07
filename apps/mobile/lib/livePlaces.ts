@@ -1,4 +1,4 @@
-/** Home / Qur map: live Google Places via FastAPI (DB fallback on server). */
+/** Home / Qur map: places from FastAPI DB-backed `/api/live-places`. */
 
 import { getApiBaseUrl } from './apiBase';
 import type { Poi, PoiCategory } from '../types/database';
@@ -15,6 +15,17 @@ export type LivePlace = {
   rating?: number | null;
   rating_count?: number | null;
   address?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  price_from?: number | null;
+  price_currency?: string | null;
+  hotel_class?: number | null;
+  amenities?: string[] | null;
+  check_in_time?: string | null;
+  check_out_time?: string | null;
+  data_source?: string | null;
+  thumbnail_url?: string | null;
+  opening_hours?: Poi['opening_hours'];
 };
 
 export type LivePlacesResult = {
@@ -53,12 +64,21 @@ export function livePlaceToPoi(place: LivePlace, regionId: string): Poi {
     lat: Number(place.lat),
     lng: Number(place.lng),
     address: place.address ?? null,
-    phone: null,
-    website: null,
+    phone: place.phone ?? null,
+    website: place.website ?? null,
     rating: place.rating ?? null,
     rating_count: place.rating_count ?? null,
     place_id: placeId,
-    submitted_by: 'google',
+    submitted_by: place.data_source === 'serpapi' ? 'serpapi' : 'system',
+    price_from: place.price_from ?? null,
+    price_currency: place.price_currency ?? null,
+    hotel_class: place.hotel_class ?? null,
+    amenities: place.amenities ?? null,
+    check_in_time: place.check_in_time ?? null,
+    check_out_time: place.check_out_time ?? null,
+    data_source: place.data_source ?? null,
+    thumbnail_url: place.thumbnail_url ?? null,
+    opening_hours: place.opening_hours ?? null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };

@@ -49,13 +49,6 @@ import {
   stopsToPolyline,
   type ManualStop,
 } from '../../lib/manualRoute';
-import {
-  fetchLivePlaces,
-  livePlaceToPoi,
-  mergeLivePlacesById,
-  radiusMetersFromLongitudeDelta,
-  viewportTileKey,
-} from '../../lib/livePlaces';
 import { openRouteInGoogleMaps } from '../../lib/openNavigation';
 import { shareRouteText } from '../../lib/shareRoute';
 import { supabase } from '../../lib/supabase';
@@ -100,9 +93,6 @@ export default function AiKomekciScreen() {
   const responsive = useResponsiveLayout();
   /** Google POI klikindən sonra onPress də gələ bilər — ikiqat əlavənin qarşısı. */
   const lastPoiClickAt = useRef(0);
-  const viewportFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const loadedViewportTiles = useRef<Set<string>>(new Set());
-  const viewportFetchGen = useRef(0);
 
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [routeStops, setRouteStops] = useState<ManualStop[]>([]);
@@ -180,26 +170,7 @@ export default function AiKomekciScreen() {
   const loadRegionPois = useCallback(async (regionId: string) => {
     setLoadingPois(true);
     setError(null);
-    loadedViewportTiles.current = new Set();
-    viewportFetchGen.current += 1;
     try {
-      const live = await fetchLivePlaces(regionId, { limit: 60 });
-      if (live && live.places.length > 0) {
-        const mapped: RegionPoi[] = live.places.map((place) => {
-          const poi = livePlaceToPoi(place, regionId);
-          return {
-            id: poi.id,
-            name: poi.name,
-            category: poi.category,
-            lat: poi.lat,
-            lng: poi.lng,
-            region: poi.region,
-          };
-        });
-        setRegionPois(mapped);
-        return;
-      }
-
       setRegionPois(await loadRegionPoisFromDb(regionId));
     } catch (err) {
       setError(getErrorMessage(err));
@@ -208,64 +179,6 @@ export default function AiKomekciScreen() {
       setLoadingPois(false);
     }
   }, [loadRegionPoisFromDb]);
-
-  const fetchViewportPois = useCallback(
-    (region: MapRegion) => {
-      if (!selectedRegion) return;
-      if (region.longitudeDelta > 0.45) {
-        return;
-      }
-
-      if (viewportFetchTimer.current) {
-        clearTimeout(viewportFetchTimer.current);
-      }
-
-      viewportFetchTimer.current = setTimeout(() => {
-        void (async () => {
-          const tile = viewportTileKey(
-            region.latitude,
-            region.longitude,
-            region.longitudeDelta
-          );
-          if (loadedViewportTiles.current.has(tile)) {
-            return;
-          }
-          loadedViewportTiles.current.add(tile);
-          const gen = viewportFetchGen.current;
-          const radius = radiusMetersFromLongitudeDelta(region.longitudeDelta);
-
-          const live = await fetchLivePlaces(selectedRegion, {
-            limit: 50,
-            lat: region.latitude,
-            lng: region.longitude,
-            radius,
-          });
-
-          if (!live || live.places.length === 0) {
-            loadedViewportTiles.current.delete(tile);
-            return;
-          }
-          if (gen !== viewportFetchGen.current) {
-            return;
-          }
-
-          const incoming: RegionPoi[] = live.places.map((place) => {
-            const poi = livePlaceToPoi(place, selectedRegion);
-            return {
-              id: poi.id,
-              name: poi.name,
-              category: poi.category,
-              lat: poi.lat,
-              lng: poi.lng,
-              region: poi.region,
-            };
-          });
-          setRegionPois((prev) => mergeLivePlacesById(prev, incoming));
-        })();
-      }, 650);
-    },
-    [selectedRegion]
-  );
 
   useEffect(() => {
     if (!selectedRegion || !regionMeta) {
@@ -302,14 +215,6 @@ export default function AiKomekciScreen() {
       cancelled = true;
     };
   }, [selectedRegion, startDayOffset, startAt]);
-
-  useEffect(() => {
-    return () => {
-      if (viewportFetchTimer.current) {
-        clearTimeout(viewportFetchTimer.current);
-      }
-    };
-  }, []);
 
   // Marker custom view — qısa müddət tracksViewChanges=true ki, hamısı çəkilsin
   useEffect(() => {
@@ -929,13 +834,6 @@ export default function AiKomekciScreen() {
                 }
                 showsUserLocation={false}
                 showsMyLocationButton={false}
-                onRegionChangeComplete={
-                  selectedRegion
-                    ? (region) => {
-                        fetchViewportPois(region);
-                      }
-                    : undefined
-                }
                 onPress={handleMapPress}
                 onPoiClick={handleGooglePoiClick}
               >

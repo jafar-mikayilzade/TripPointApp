@@ -11,7 +11,6 @@ from threading import Lock
 from typing import Any
 
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
-from app.constants.tourism_seeds import seeds_for_region
 from app.db import supabase
 from app.services.geo_route import haversine_km
 from app.services.live_route_candidates import LIVE_PLAN_RADIUS_METERS
@@ -36,11 +35,11 @@ def _cache_key(
 ) -> str:
     cat = (category or "all").strip().lower()
     if lat is None or lng is None:
-        return f"db|{region_key}|{cat}|{limit}|region"
+        return f"db2|{region_key}|{cat}|{limit}|region"
     lat_r = round(float(lat), 3)
     lng_r = round(float(lng), 3)
     rad_r = int(round((radius or 8000) / 500.0) * 500)
-    return f"db|{region_key}|{cat}|{limit}|{lat_r}|{lng_r}|{rad_r}"
+    return f"db2|{region_key}|{cat}|{limit}|{lat_r}|{lng_r}|{rad_r}"
 
 
 def _centers_for_region(region_key: str) -> list[dict[str, Any]]:
@@ -64,7 +63,10 @@ def _load_db_places(
         supabase.table("pois")
         .select(
             "id, name, category, description, lat, lng, region, rating, "
-            "rating_count, place_id, address"
+            "rating_count, place_id, address, phone, website, "
+            "price_from, price_currency, hotel_class, amenities, "
+            "check_in_time, check_out_time, data_source, thumbnail_url, "
+            "opening_hours, status"
         )
         .eq("status", "approved")
         .ilike("region", db_region)
@@ -75,11 +77,8 @@ def _load_db_places(
         query = query.eq("category", category)
     result = query.execute()
     rows = list(result.data or [])
-    seeds = seeds_for_region(region_key, db_region=db_region)
-    if category and category not in {"all", ""}:
-        seeds = [s for s in seeds if str(s.get("category") or "") == category]
-
-    merged = dedupe_poi_rows(seeds + rows)
+    # DB only — no tourism seeds / OSM live merge
+    merged = dedupe_poi_rows(rows)
 
     if lat is not None and lng is not None:
         r_km = (float(radius or 8_000) / 1000.0) * 1.4

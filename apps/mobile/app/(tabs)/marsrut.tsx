@@ -800,7 +800,7 @@ export default function MarsrutScreen() {
       let accommodations: any[] = [];
       let attractions: any[] = [];
 
-      const ranked = await fetchRouteCandidates(regionId, 16, {
+      const ranked = await fetchRouteCandidates(regionId, 48, {
         interests,
       });
       if (
@@ -829,7 +829,7 @@ export default function MarsrutScreen() {
           .eq('status', 'approved')
           .eq('region', regionId.toLowerCase())
           .order('rating', { ascending: false, nullsFirst: false })
-          .limit(80);
+          .limit(400);
 
         if (poisError) {
           throw poisError;
@@ -863,11 +863,11 @@ export default function MarsrutScreen() {
         restaurants = pois
           .filter((p) => hasAny(p, ['restaurant', 'home_restaurant', 'cafe']))
           .sort(byRating)
-          .slice(0, 12);
+          .slice(0, 40);
         accommodations = pois
           .filter((p) => hasAny(p, ['hotel', 'hostel', 'guesthouse', 'camping']))
           .sort(byRating)
-          .slice(0, 12);
+          .slice(0, 40);
         attractions = preferAttractionsForInterests(
           pois
             .filter((p) =>
@@ -883,7 +883,7 @@ export default function MarsrutScreen() {
             )
             .sort(byRating),
           interests
-        ).slice(0, 16);
+        ).slice(0, 60);
       }
 
       if (restaurants.length + accommodations.length + attractions.length === 0) {

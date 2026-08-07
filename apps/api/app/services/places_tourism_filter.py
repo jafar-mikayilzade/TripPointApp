@@ -225,9 +225,18 @@ def _food_quality_ok(row: dict[str, Any]) -> bool:
         count = int(row["rating_count"]) if row.get("rating_count") is not None else 0
     except (TypeError, ValueError):
         count = 0
+    # OSM/Geoapify rows often lack ratings — keep named restaurants for planning
     if rating is None:
+        source = str(row.get("data_source") or "").lower()
+        if source in {"geoapify", "osm", "booking"} or str(row.get("place_id") or "").startswith(
+            ("geoapify:", "osm:", "booking:")
+        ):
+            return bool(str(row.get("name") or "").strip())
         return False
-    return rating >= FOOD_MIN_RATING and count >= FOOD_MIN_REVIEWS
+    if count >= FOOD_MIN_REVIEWS:
+        return rating >= FOOD_MIN_RATING
+    # Soft: rated but few reviews still ok if score is solid
+    return rating >= 3.8
 
 
 def passes_tourism_filter(

@@ -303,4 +303,26 @@ def public_poi_fields(row: dict[str, Any]) -> dict[str, Any]:
     }
     if row.get("address"):
         out["address"] = row.get("address")
+    if row.get("phone"):
+        out["phone"] = row.get("phone")
+    if row.get("website"):
+        out["website"] = row.get("website")
+    if row.get("price_from") is not None:
+        out["price_from"] = row.get("price_from")
+    if row.get("price_currency"):
+        out["price_currency"] = row.get("price_currency")
+    if row.get("hotel_class") is not None:
+        out["hotel_class"] = row.get("hotel_class")
+    if row.get("amenities") is not None:
+        out["amenities"] = row.get("amenities")
+    if row.get("check_in_time"):
+        out["check_in_time"] = row.get("check_in_time")
+    if row.get("check_out_time"):
+        out["check_out_time"] = row.get("check_out_time")
+    if row.get("data_source"):
+        out["data_source"] = row.get("data_source")
+    if row.get("thumbnail_url"):
+        out["thumbnail_url"] = row.get("thumbnail_url")
+    if row.get("opening_hours") is not None:
+        out["opening_hours"] = row.get("opening_hours")
     return out

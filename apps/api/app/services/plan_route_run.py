@@ -100,7 +100,8 @@ def run_plan_route(
 
     loaded = load_live_route_candidates(
         region_key,
-        per_bucket=16,
+        # Enough attractions for multi-day packing (≈5–6 stops/day + buffer)
+        per_bucket=max(40, days_n * 10),
         interests=interest_list or None,
         source="db",
     )

@@ -19,7 +19,12 @@ router = APIRouter(tags=["route"])
 @router.get("/api/route-candidates")
 def route_candidates_endpoint(
     region: str = Query(..., description="Tourism region key, e.g. quba"),
-    per_bucket: int = Query(12, ge=4, le=30, description="Max POIs per category group"),
+    per_bucket: int = Query(
+        40,
+        ge=8,
+        le=80,
+        description="Max POIs per category group (restaurants / lodging / attractions)",
+    ),
     interests: str | None = Query(
         None,
         description="Comma-separated mobile interests, e.g. nature,food,history",

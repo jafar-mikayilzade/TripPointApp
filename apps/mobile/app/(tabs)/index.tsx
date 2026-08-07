@@ -46,7 +46,6 @@ import {
   fetchGooglePlaceRating,
   type GoogleMapPoiPayload,
 } from '../../lib/adminMap';
-import { triggerRegionPlacesSync } from '../../lib/syncPlaces';
 import { getCategoryLabel, type HomeCategoryFilterId } from '../../lib/categoryUtils';
 import {
   displayPoiDescription,
@@ -61,14 +60,7 @@ import {
   formatWeatherLabel,
   type WeatherAdvice,
 } from '../../lib/weather';
-import {
-  fetchLivePlaces,
-  isDatabasePoiId,
-  livePlaceToPoi,
-  mergeLivePlacesById,
-  radiusMetersFromLongitudeDelta,
-  viewportTileKey,
-} from '../../lib/livePlaces';
+import { isDatabasePoiId } from '../../lib/livePlaces';
 import { supabase } from '../../lib/supabase';
 import { useIsAdmin } from '../../lib/useIsAdmin';
 import type { Poi, PoiCategory, PoiPhoto } from '../../types/database';
@@ -134,9 +126,6 @@ export default function HomeScreen() {
     null
   );
   const listRef = useRef<FlatList<PoiListItem>>(null);
-  const viewportFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const loadedViewportTiles = useRef<Set<string>>(new Set());
-  const viewportFetchGen = useRef(0);
   const { isAdmin } = useIsAdmin();
   const { showToast, ToastHost } = useToast();
 
@@ -258,7 +247,7 @@ export default function HomeScreen() {
 
     query = query.neq('category', 'cafe');
 
-    const { data, error } = await query.limit(50);
+    const { data, error } = await query.limit(400);
     if (error) {
       throw error;
     }
@@ -300,26 +289,6 @@ export default function HomeScreen() {
     return mapped;
   }, [selectedRegionId, categoryFilter]);
 
-  const mapLiveToListItems = useCallback(
-    (places: Parameters<typeof livePlaceToPoi>[0][], regionId: string): PoiListItem[] =>
-      places.map((place) => {
-        const poi = livePlaceToPoi(place, regionId);
-        return {
-          ...poi,
-          photoUrl: null,
-          averageRating:
-            typeof poi.rating === 'number' && Number.isFinite(poi.rating)
-              ? poi.rating
-              : null,
-          ratingCount:
-            typeof poi.rating_count === 'number' && Number.isFinite(poi.rating_count)
-              ? poi.rating_count
-              : 0,
-        };
-      }),
-    []
-  );
-
   const fetchPois = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent === true;
     const gen = ++fetchPoisGen.current;
@@ -329,29 +298,7 @@ export default function HomeScreen() {
         setErrorMessage(null);
       }
 
-      // Region overview — hub-driven live; uğursuz olsa DB fallback
-      if (selectedRegionId) {
-        loadedViewportTiles.current = new Set();
-        viewportFetchGen.current += 1;
-        const live = await fetchLivePlaces(selectedRegionId, {
-          category: categoryFilter === 'all' ? null : categoryFilter,
-          limit: 60,
-        });
-
-        if (gen !== fetchPoisGen.current) {
-          return;
-        }
-
-        if (live && live.places.length > 0) {
-          const mapped = mapLiveToListItems(live.places, selectedRegionId);
-          if (__DEV__) {
-            console.log('Live places:', mapped.length, live.source, live.hubs_used);
-          }
-          setPois(mapped);
-          return;
-        }
-      }
-
+      // Always load from Supabase `pois` so SerpAPI price/amenities stay intact.
       const mapped = await fetchPoisFromDb();
       if (gen !== fetchPoisGen.current) {
         return;
@@ -376,68 +323,7 @@ export default function HomeScreen() {
         setLoading(false);
       }
     }
-  }, [selectedRegionId, categoryFilter, fetchPoisFromDb, mapLiveToListItems]);
-
-  const fetchViewportPlaces = useCallback(
-    (region: MapRegion) => {
-      if (!selectedRegionId) return;
-      // Region overview already covers zoomed-out view — skip Google spam
-      if (region.longitudeDelta > 0.45) {
-        return;
-      }
-
-      if (viewportFetchTimer.current) {
-        clearTimeout(viewportFetchTimer.current);
-      }
-
-      viewportFetchTimer.current = setTimeout(() => {
-        void (async () => {
-          const tile = viewportTileKey(
-            region.latitude,
-            region.longitude,
-            region.longitudeDelta
-          );
-          if (loadedViewportTiles.current.has(tile)) {
-            return;
-          }
-          loadedViewportTiles.current.add(tile);
-          const gen = viewportFetchGen.current;
-          const radius = radiusMetersFromLongitudeDelta(region.longitudeDelta);
-
-          const live = await fetchLivePlaces(selectedRegionId, {
-            category: categoryFilter === 'all' ? null : categoryFilter,
-            limit: 50,
-            lat: region.latitude,
-            lng: region.longitude,
-            radius,
-          });
-
-          if (!live || live.places.length === 0) {
-            loadedViewportTiles.current.delete(tile);
-            return;
-          }
-          if (gen !== viewportFetchGen.current) {
-            return;
-          }
-
-          const incoming = mapLiveToListItems(live.places, selectedRegionId);
-          setPois((prev) => mergeLivePlacesById(prev, incoming));
-          if (__DEV__) {
-            console.log('Viewport merge:', incoming.length, tile);
-          }
-        })();
-      }, 650);
-    },
-    [selectedRegionId, categoryFilter, mapLiveToListItems]
-  );
-
-  useEffect(() => {
-    return () => {
-      if (viewportFetchTimer.current) {
-        clearTimeout(viewportFetchTimer.current);
-      }
-    };
-  }, []);
+  }, [fetchPoisFromDb]);
 
   useEffect(() => {
     let cancelled = false;
@@ -485,8 +371,6 @@ export default function HomeScreen() {
       setRegionWeather(null);
       return;
     }
-    // Lazy fill pois (OSM attractions insert-if-missing) — non-blocking
-    triggerRegionPlacesSync(selectedRegionId);
     void fetchRegionWeather(selectedRegionId, 1).then((data) => {
       if (!cancelled) {
         setRegionWeather(data);
@@ -991,9 +875,6 @@ export default function HomeScreen() {
                 )}
                 onRegionChangeComplete={(region) => {
                   lastMapRegionRef.current = region;
-                  if (selectedRegionId) {
-                    fetchViewportPlaces(region);
-                  }
                 }}
                 onPoiClick={isAdmin ? handleGooglePoiClick : undefined}
                 onPress={isAdmin && Platform.OS === 'web' ? handleAdminMapPress : undefined}

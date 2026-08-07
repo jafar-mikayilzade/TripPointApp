@@ -169,21 +169,42 @@ def _load_buckets_from_db(
     hubs: list[dict[str, Any]],
     prefer_attraction_cats: set[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
+    """Load approved pois per category group so hotels don't starve attractions."""
     db_region = REGION_DB_ID.get(region_key, region_key)
-    result = (
-        supabase.table("pois")
-        .select(
-            "id, name, category, categories, description, lat, lng, region, rating, "
-            "rating_count, place_id"
-        )
-        .eq("status", "approved")
-        .ilike("region", db_region)
-        .neq("category", "cafe")
-        .limit(200)
-        .execute()
+    select_cols = (
+        "id, name, category, categories, description, lat, lng, region, rating, "
+        "rating_count, place_id, address, price_from, price_currency, data_source"
     )
-    rows = classify_attraction_rows(list(result.data or []))
-    # DB-only planning — use approved pois from our table (no hardcoded seeds).
+    # Pull enough rows per family — PostgREST default max is usually 1000
+    fetch_n = max(120, per_bucket * 4)
+
+    def _fetch(categories: list[str]) -> list[dict[str, Any]]:
+        result = (
+            supabase.table("pois")
+            .select(select_cols)
+            .eq("status", "approved")
+            .ilike("region", db_region)
+            .in_("category", categories)
+            .order("rating", desc=True)
+            .limit(fetch_n)
+            .execute()
+        )
+        return list(result.data or [])
+
+    food_rows = _fetch(["restaurant", "home_restaurant"])
+    lodging_rows = _fetch(["hotel", "hostel", "guesthouse", "camping"])
+    attraction_rows = _fetch(
+        [
+            "nature",
+            "waterfall",
+            "mountain",
+            "lake",
+            "historical",
+            "monument",
+            "other",
+        ]
+    )
+    rows = classify_attraction_rows(food_rows + lodging_rows + attraction_rows)
     merged = filter_tourism_rows(rows, hubs=hubs)
     return bucket_route_candidates(
         merged,

@@ -26,6 +26,26 @@ ANTHROPIC_API_KEY = _raw_anthropic.strip('"').strip("'") or None
 _raw_serpapi = (os.getenv("SERPAPI_API_KEY") or "").strip()
 SERPAPI_API_KEY = _raw_serpapi.strip('"').strip("'") or None
 
+# Optional — RapidAPI (Booking.com + TripAdvisor wrappers → pois sync)
+_raw_rapid = (os.getenv("RAPIDAPI_KEY") or "").strip()
+RAPIDAPI_KEY = _raw_rapid.strip('"').strip("'") or None
+RAPIDAPI_BOOKING_HOST = (
+    (os.getenv("RAPIDAPI_BOOKING_HOST") or "booking-com15.p.rapidapi.com")
+    .strip()
+    .strip('"')
+    .strip("'")
+)
+RAPIDAPI_TRIPADVISOR_HOST = (
+    (os.getenv("RAPIDAPI_TRIPADVISOR_HOST") or "tripadvisor16.p.rapidapi.com")
+    .strip()
+    .strip('"')
+    .strip("'")
+)
+
+# Optional — Geoapify Places API → pois sync
+_raw_geoapify = (os.getenv("GEOAPIFY_API_KEY") or "").strip()
+GEOAPIFY_API_KEY = _raw_geoapify.strip('"').strip("'") or None
+
 # mock | osm | google | hybrid
 DATA_SOURCE = (os.getenv("DATA_SOURCE") or "osm").strip().lower()
 ALLOWED_DATA_SOURCES = {"mock", "osm", "google", "hybrid"}
