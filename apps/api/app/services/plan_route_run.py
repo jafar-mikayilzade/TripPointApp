@@ -4,21 +4,43 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.constants.regions import REGION_COORDINATES, REGION_DB_ID, REGION_LABELS
+from app.constants.regions import (
+    CANONICAL_REGION_IDS,
+    REGION_COORDINATES,
+    REGION_DB_ID,
+    REGION_LABELS,
+    TOURISM_FEATURED_IDS,
+)
 from app.services.live_route_candidates import load_live_route_candidates
 from app.services.plan_itinerary import build_skeleton, enrich_with_claude
 
 REGION_EMOJI: dict[str, str] = {
+    "baku": "🏙",
     "quba": "🏔",
     "qusar": "🏔",
     "seki": "🏛",
     "qabala": "🌲",
     "lerik": "🌿",
-    "baku": "🏙",
+    "ismayilli": "🏞",
+    "samaxi": "🍇",
+    "gence": "🏙",
+    "goygol": "🌊",
+    "lenkeran": "🌴",
+    "astara": "🌴",
+    "zaqatala": "🌲",
+    "qax": "🏞",
+    "susa": "🏛",
+    "naxcivan": "🏛",
+    "ordubad": "🏛",
+    "xacmaz": "🏖",
+    "qobustan": "🪨",
+    "naftalan": "♨️",
+    "kelbecer": "♨️",
 }
 
-# Canonical region keys for bot menus (no alias duplicates)
-BOT_REGION_KEYS: list[str] = ["quba", "qusar", "seki", "qabala", "lerik", "baku"]
+# Telegram menu: tourism-featured only (full list is too large for one keyboard).
+# HTTP /api/plan-route accepts every key in REGION_COORDINATES.
+BOT_REGION_KEYS: list[str] = list(TOURISM_FEATURED_IDS)
 
 
 def run_plan_route(
@@ -38,9 +60,12 @@ def run_plan_route(
     """Build itinerary. Raises ValueError on user/input errors."""
     region_key = (region or "").strip().lower()
     if region_key not in REGION_COORDINATES:
+        sample = ", ".join(
+            REGION_LABELS[k] for k in BOT_REGION_KEYS[:8] if k in REGION_LABELS
+        )
         raise ValueError(
-            "Region düzgün deyil. Seçim: "
-            + ", ".join(REGION_LABELS[k] for k in BOT_REGION_KEYS if k in REGION_LABELS)
+            f"Region düzgün deyil. Nümunə: {sample} … "
+            f"(cəmi {len(CANONICAL_REGION_IDS)} şəhər/rayon)"
         )
 
     days_n = int(days)

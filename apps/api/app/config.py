@@ -22,6 +22,10 @@ OPENWEATHER_API_KEY = _raw_ow_key.strip('"').strip("'") or None
 _raw_anthropic = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
 ANTHROPIC_API_KEY = _raw_anthropic.strip('"').strip("'") or None
 
+# Optional — Google Hotels via SerpAPI (lodging → pois)
+_raw_serpapi = (os.getenv("SERPAPI_API_KEY") or "").strip()
+SERPAPI_API_KEY = _raw_serpapi.strip('"').strip("'") or None
+
 # mock | osm | google | hybrid
 DATA_SOURCE = (os.getenv("DATA_SOURCE") or "osm").strip().lower()
 ALLOWED_DATA_SOURCES = {"mock", "osm", "google", "hybrid"}

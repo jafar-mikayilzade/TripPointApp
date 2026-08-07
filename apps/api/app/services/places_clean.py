@@ -135,7 +135,10 @@ def clean_place(
 
     description = place.get("description")
     if description:
-        row["description"] = str(description)
+        text = str(description).strip()
+        # Never persist Cyrillic (RU) blurbs — app is Azerbaijani-only for copy.
+        if text and not any("\u0400" <= ch <= "\u04FF" for ch in text):
+            row["description"] = text
     address = place.get("vicinity") or place.get("address")
     if address:
         row["address"] = str(address)
@@ -145,5 +148,32 @@ def clean_place(
     website = place.get("website")
     if website:
         row["website"] = str(website)
+
+    # Lodging extras (SerpAPI Google Hotels / similar)
+    if place.get("price_from") is not None:
+        try:
+            row["price_from"] = round(float(place["price_from"]), 2)
+        except (TypeError, ValueError):
+            pass
+    if place.get("price_currency"):
+        row["price_currency"] = str(place["price_currency"]).strip().upper()[:8]
+    if place.get("hotel_class") is not None:
+        try:
+            stars = int(place["hotel_class"])
+            if 1 <= stars <= 5:
+                row["hotel_class"] = stars
+        except (TypeError, ValueError):
+            pass
+    amenities = place.get("amenities")
+    if isinstance(amenities, list):
+        row["amenities"] = [str(a) for a in amenities if a][:40]
+    if place.get("check_in_time"):
+        row["check_in_time"] = str(place["check_in_time"])[:40]
+    if place.get("check_out_time"):
+        row["check_out_time"] = str(place["check_out_time"])[:40]
+    if place.get("data_source"):
+        row["data_source"] = str(place["data_source"])[:32]
+    if place.get("thumbnail_url"):
+        row["thumbnail_url"] = str(place["thumbnail_url"])[:2000]
 
     return row

@@ -21,6 +21,7 @@ _DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     "/api/plan-route": (5, 60),
     "/api/live-places": (30, 60),
     "/api/sync-places": (10, 60),
+    "/api/import-serpapi-hotels": (5, 60),
     "/api/pois/upsert-google-place": (20, 60),
     # Paid third-party quota (Google Places / OpenWeather) — generous but capped
     "/api/route-candidates": (60, 60),
@@ -54,6 +55,13 @@ def _limits() -> dict[str, tuple[int, int]]:
         ),
         "/api/sync-places": (
             _env_int("RATE_LIMIT_SYNC_PLACES", _DEFAULT_LIMITS["/api/sync-places"][0]),
+            60,
+        ),
+        "/api/import-serpapi-hotels": (
+            _env_int(
+                "RATE_LIMIT_IMPORT_SERPAPI",
+                _DEFAULT_LIMITS["/api/import-serpapi-hotels"][0],
+            ),
             60,
         ),
         "/api/pois/upsert-google-place": (

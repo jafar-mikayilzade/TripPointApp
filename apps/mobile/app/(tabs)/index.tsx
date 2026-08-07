@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   FlatList,
   KeyboardAvoidingView,
   Linking,
@@ -46,10 +47,12 @@ import {
   type GoogleMapPoiPayload,
 } from '../../lib/adminMap';
 import { triggerRegionPlacesSync } from '../../lib/syncPlaces';
+import { getCategoryLabel, type HomeCategoryFilterId } from '../../lib/categoryUtils';
 import {
-  getCategoryLabel,
-  type HomeCategoryFilterId,
-} from '../../lib/categoryUtils';
+  displayPoiDescription,
+  formatPoiPrice,
+  translateAmenities,
+} from '../../lib/poiDisplay';
 import { getErrorMessage } from '../../lib/errors';
 import { isPoiSponsored, summarizeOpeningHours } from '../../lib/openingHours';
 import { pickPhotoUrl } from '../../lib/photoUrls';
@@ -85,11 +88,7 @@ type PoiQueryRow = Poi & {
 
 const LOCATION_OPTIONS: { label: string; value: string | null }[] = [
   { label: '🗺️ Hamısı', value: null },
-  { label: '📍 Quba', value: 'quba' },
-  { label: '📍 Qusar', value: 'qusar' },
-  { label: '📍 Şəki', value: 'seki' },
-  { label: '📍 Lerik', value: 'lerik' },
-  { label: '📍 Qəbələ', value: 'qabala' },
+  ...REGIONS.map((r) => ({ label: `📍 ${r.label}`, value: r.id })),
 ];
 
 const CATEGORY_OPTIONS: { label: string; value: string | null }[] = [
@@ -108,14 +107,6 @@ const CATEGORY_OPTIONS: { label: string; value: string | null }[] = [
   { label: 'Abidə', value: 'monument' },
   { label: 'Digər', value: 'other' },
 ];
-
-const REGION_LOCATIVE: Record<string, string> = {
-  quba: 'Qubada',
-  qusar: 'Qusarda',
-  seki: 'Şəkidə',
-  lerik: 'Lerikdə',
-  qabala: 'Qəbələdə',
-};
 
 function calculateDistance(
   lat1: number,
@@ -220,7 +211,7 @@ export default function HomeScreen() {
     }
 
     const locative = selectedRegionId
-      ? (REGION_LOCATIVE[selectedRegionId] ?? `${selectedRegion?.label ?? ''}da`)
+      ? (selectedRegion?.locative ?? selectedRegion?.label ?? '')
       : null;
 
     if (selectedRegionId && categoryFilter === 'all') {
@@ -1267,7 +1258,15 @@ export default function HomeScreen() {
                   <Text style={styles.pickerClose}>✕</Text>
                 </TouchableOpacity>
               </View>
-              <ScrollView>
+              <ScrollView
+                style={[
+                  styles.pickerScroll,
+                  { maxHeight: Math.round(Dimensions.get('window').height * 0.55) },
+                ]}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator
+              >
                 {LOCATION_OPTIONS.map((option) => {
                   const selected = selectedRegionId === option.value;
                   return (
@@ -1303,7 +1302,15 @@ export default function HomeScreen() {
                   <Text style={styles.pickerClose}>✕</Text>
                 </TouchableOpacity>
               </View>
-              <ScrollView>
+              <ScrollView
+                style={[
+                  styles.pickerScroll,
+                  { maxHeight: Math.round(Dimensions.get('window').height * 0.55) },
+                ]}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator
+              >
                 {CATEGORY_OPTIONS.map((option) => {
                   const selected =
                     option.value === null
@@ -1352,12 +1359,14 @@ function SelectedPoiPanel({
         ? poi.rating
         : null;
   const [averageRating, setAverageRating] = useState<number | null>(initialRating);
-  const [userScore, setUserScore] = useState<number | null>(null);
-  const [submittingScore, setSubmittingScore] = useState(false);
-  const [ratingError, setRatingError] = useState<string | null>(null);
+  const [amenitiesOpen, setAmenitiesOpen] = useState(false);
 
   const regionLabel =
     REGIONS.find((region) => region.id === poi.region)?.label ?? poi.region;
+
+  useEffect(() => {
+    setAmenitiesOpen(false);
+  }, [poi.id]);
 
   useEffect(() => {
     let active = true;
@@ -1368,33 +1377,21 @@ function SelectedPoiPanel({
           ? poi.rating
           : null;
     setAverageRating(fallback);
-    setUserScore(null);
 
     if (!isDatabasePoiId(poi.id)) {
-      // Live Google — yalnız Google rating (Place Details / Nearby)
       return () => {
         active = false;
       };
     }
 
     (async () => {
-      setRatingError(null);
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
       const { data, error } = await supabase
         .from('ratings')
-        .select('score, rater_id')
+        .select('score')
         .eq('target_type', 'poi')
         .eq('target_id', poi.id);
 
-      if (!active) {
-        return;
-      }
-
-      if (error) {
-        setRatingError(getErrorMessage(error));
+      if (!active || error) {
         return;
       }
 
@@ -1405,77 +1402,12 @@ function SelectedPoiPanel({
         const sum = rows.reduce((acc, row) => acc + row.score, 0);
         setAverageRating(sum / rows.length);
       }
-
-      if (user) {
-        setUserScore(rows.find((row) => row.rater_id === user.id)?.score ?? null);
-      } else {
-        setUserScore(null);
-      }
     })();
 
     return () => {
       active = false;
     };
   }, [poi]);
-
-  async function handleSubmitScore(score: number) {
-    if (submittingScore) {
-      return;
-    }
-
-    // Live Google marker — icma reytinqi yalnız DB POI üçün
-    if (!isDatabasePoiId(poi.id)) {
-      setRatingError('Google məkanında icma reytinqi hələ aktiv deyil.');
-      return;
-    }
-
-    setSubmittingScore(true);
-    setRatingError(null);
-
-    try {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      if (userError || !user) {
-        setRatingError(userError ? getErrorMessage(userError) : 'Reytinq vermək üçün daxil olun.');
-        return;
-      }
-
-      const { error } = await supabase.from('ratings').upsert(
-        {
-          rater_id: user.id,
-          target_type: 'poi',
-          target_id: poi.id,
-          score,
-        },
-        { onConflict: 'rater_id,target_type,target_id' }
-      );
-
-      if (error) {
-        setRatingError(getErrorMessage(error));
-        return;
-      }
-
-      setUserScore(score);
-
-      const { data: refreshed } = await supabase
-        .from('ratings')
-        .select('score')
-        .eq('target_type', 'poi')
-        .eq('target_id', poi.id);
-
-      if (refreshed && refreshed.length > 0) {
-        const sum = refreshed.reduce((acc, row) => acc + row.score, 0);
-        setAverageRating(sum / refreshed.length);
-      }
-    } catch (err) {
-      setRatingError(getErrorMessage(err));
-    } finally {
-      setSubmittingScore(false);
-    }
-  }
 
   return (
     <ScrollView style={styles.detailPanel} contentContainerStyle={styles.detailPanelContent}>
@@ -1536,6 +1468,11 @@ function SelectedPoiPanel({
           ⭐ {averageRating === null ? '—' : averageRating.toFixed(1)}
         </Text>
         {(() => {
+          const priceLabel = formatPoiPrice(poi.price_from, poi.price_currency);
+          if (!priceLabel) return null;
+          return <Text style={[styles.detailMeta, styles.detailPrice]}>{priceLabel}</Text>;
+        })()}
+        {(() => {
           const hours = summarizeOpeningHours(poi.opening_hours);
           if (!hours) {
             return null;
@@ -1557,11 +1494,41 @@ function SelectedPoiPanel({
         })()}
       </View>
 
-      {poi.description?.trim() ? (
-        <Text style={styles.detailDescription} numberOfLines={3}>
-          {poi.description.trim()}
-        </Text>
-      ) : null}
+      {(() => {
+        const desc = displayPoiDescription(poi.description);
+        if (!desc) return null;
+        return (
+          <Text style={styles.detailDescription} numberOfLines={3}>
+            {desc}
+          </Text>
+        );
+      })()}
+
+      {(() => {
+        const amenities = translateAmenities(poi.amenities);
+        if (amenities.length === 0) return null;
+        return (
+          <View style={styles.panelAmenities}>
+            <TouchableOpacity
+              style={styles.panelAmenitiesToggle}
+              onPress={() => setAmenitiesOpen((v) => !v)}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.panelAmenitiesTitle}>
+                İmkanlar ({amenities.length})
+              </Text>
+              <Text style={styles.panelAmenitiesHint}>{amenitiesOpen ? '▴' : '▾'}</Text>
+            </TouchableOpacity>
+            {amenitiesOpen
+              ? amenities.map((item) => (
+                  <Text key={item} style={styles.panelAmenityItem}>
+                    · {item}
+                  </Text>
+                ))
+              : null}
+          </View>
+        );
+      })()}
 
       <View style={styles.detailActions}>
         {poi.phone ? (
@@ -1581,26 +1548,6 @@ function SelectedPoiPanel({
           <Text style={styles.actionButtonText}>🗺️ Maps-də aç</Text>
         </TouchableOpacity>
       </View>
-
-      <Text style={styles.ratingPrompt}>⭐ Reytinq ver</Text>
-      <View style={styles.starRow}>
-        {[1, 2, 3, 4, 5].map((score) => {
-          const filled = (userScore ?? 0) >= score;
-          return (
-            <TouchableOpacity
-              key={score}
-              onPress={() => handleSubmitScore(score)}
-              disabled={submittingScore}
-              hitSlop={6}
-            >
-              <Text style={[styles.starButton, filled && styles.starButtonFilled]}>
-                {filled ? '⭐' : '☆'}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      {ratingError ? <Text style={styles.ratingError}>{ratingError}</Text> : null}
     </ScrollView>
   );
 }
@@ -1656,6 +1603,11 @@ function PoiListCard({
                 {item.averageRating === null ? '—' : item.averageRating.toFixed(1)}
               </Text>
             </View>
+            {(() => {
+              const priceLabel = formatPoiPrice(item.price_from, item.price_currency);
+              if (!priceLabel) return null;
+              return <Text style={styles.cardPrice}>{priceLabel}</Text>;
+            })()}
             {distanceLabel ? (
               <Text style={styles.distanceText}>{distanceLabel}</Text>
             ) : null}
@@ -1715,8 +1667,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
-    maxHeight: '65%',
+    maxHeight: '70%',
     paddingBottom: 20,
+  },
+  pickerScroll: {
+    flexGrow: 0,
   },
   pickerHeader: {
     flexDirection: 'row',
@@ -1944,6 +1899,37 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginBottom: 12,
   },
+  detailPrice: {
+    color: colors.accent,
+    fontWeight: '700',
+  },
+  panelAmenities: {
+    marginBottom: 12,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: colors.chip,
+    gap: 4,
+  },
+  panelAmenitiesToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  panelAmenitiesTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  panelAmenitiesHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '700',
+  },
+  panelAmenityItem: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
   detailActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1960,29 +1946,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: colors.text,
-  },
-  ratingPrompt: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.chipText,
-    marginBottom: 6,
-  },
-  starRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  starButton: {
-    fontSize: 22,
-    color: colors.border,
-  },
-  starButtonFilled: {
-    color: colors.warning,
-  },
-  ratingError: {
-    marginTop: 6,
-    fontSize: 11,
-    color: colors.dangerText,
   },
   shareHeaderButton: {
     fontSize: 12,
@@ -2117,6 +2080,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.textMuted,
     fontWeight: '500',
+  },
+  cardPrice: {
+    marginTop: 2,
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.accent,
   },
   cardCategory: {
     marginTop: 1,

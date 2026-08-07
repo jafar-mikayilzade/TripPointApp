@@ -16,7 +16,7 @@ TripPoint üç qatdan ibarətdir. Auth və mövcud Supabase axını qorunur; Pyt
 
 Mobile → Supabase Client → `pois` (+ `poi_photos`)
 
-Filter: `status = approved`, `region` = `quba|qusar|seki|lerik|qabala` (**lowercase**)
+Filter: `status = approved`, `region` = app region id (**lowercase**, e.g. `quba`, `baku`, `susa`, …)
 
 ### Sync (background)
 
@@ -71,7 +71,7 @@ Home + Qur live map və DB oxuma `cafe` kateqoriyasını atır (turizm səsi). H
 |-------|------|
 | `place_id` | UNIQUE — upsert açarı |
 | `name`, `lat`, `lng` | tələb olunur |
-| `region` | app REGIONS id: `quba`, `qusar`, `seki`, `lerik`, `qabala` |
+| `region` | app REGIONS id (canonical lowercase: `baku`, `quba`, `seki`, `susa`, … — full list in `apps/mobile/constants/regions.ts`) |
 | `status` | `pending \| approved \| rejected` — sync ilə gələnlər adətən `approved` |
 | `category` | app enum (`restaurant`, `cafe`, `hotel`, …); Google `tourist_attraction` → map et |
 

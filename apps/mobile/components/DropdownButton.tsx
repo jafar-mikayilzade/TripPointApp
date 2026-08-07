@@ -2,9 +2,11 @@ import { useState } from 'react';
 import {
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
   type StyleProp,
   type ViewStyle,
@@ -44,6 +46,7 @@ export function DropdownButton({
   style,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const [openInternal, setOpenInternal] = useState(false);
   const open = openControlled ?? openInternal;
   const setOpen = (next: boolean) => {
@@ -55,6 +58,7 @@ export function DropdownButton({
 
   const selected = options.find((o) => o.value === value);
   const sheetTitle = caption ?? label;
+  const menuMaxHeight = Math.min(420, Math.round(windowHeight * 0.55));
 
   return (
     <View style={[styles.wrap, style]}>
@@ -100,7 +104,13 @@ export function DropdownButton({
             onPress={(e) => e.stopPropagation()}
           >
             <Text style={styles.sheetTitle}>{sheetTitle}</Text>
-            <View style={styles.menu}>
+            <ScrollView
+              style={[styles.menuScroll, { maxHeight: menuMaxHeight }]}
+              contentContainerStyle={styles.menu}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator
+            >
               {options.map((option, index) => {
                 const isSelected = value === option.value;
                 const isLast = index === options.length - 1;
@@ -129,7 +139,7 @@ export function DropdownButton({
                   </TouchableOpacity>
                 );
               })}
-            </View>
+            </ScrollView>
             <Pressable style={styles.cancelBtn} onPress={() => setOpen(false)}>
               <Text style={styles.cancelText}>Bağla</Text>
             </Pressable>
@@ -212,11 +222,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     letterSpacing: -0.2,
   },
-  menu: {
+  menuScroll: {
     backgroundColor: colors.surface,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderSoft,
+  },
+  menu: {
     overflow: 'hidden',
   },
   option: {

@@ -19,5 +19,19 @@ def weather_endpoint(
         le=4,
         description="0=today, 1=tomorrow — first day of the trip in forecast",
     ),
+    lat: float | None = Query(
+        None,
+        description="Optional latitude override when region is new / unknown on older deploys",
+    ),
+    lng: float | None = Query(
+        None,
+        description="Optional longitude override paired with lat",
+    ),
 ) -> dict:
-    return fetch_region_weather(region, days, start_offset=start_day)
+    return fetch_region_weather(
+        region,
+        days,
+        start_offset=start_day,
+        lat=lat,
+        lng=lng,
+    )

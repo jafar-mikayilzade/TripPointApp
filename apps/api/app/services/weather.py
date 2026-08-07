@@ -166,10 +166,26 @@ def build_daily_forecast(
 
 
 def fetch_region_weather(
-    region_key: str, days: int = 3, *, start_offset: int = 0
+    region_key: str,
+    days: int = 3,
+    *,
+    start_offset: int = 0,
+    lat: float | None = None,
+    lng: float | None = None,
 ) -> dict[str, Any]:
     key = region_key.strip().lower()
-    if key not in REGION_COORDINATES:
+    if key in REGION_COORDINATES:
+        coords = REGION_COORDINATES[key]
+    elif lat is not None and lng is not None:
+        try:
+            coords = {"latitude": float(lat), "longitude": float(lng)}
+        except (TypeError, ValueError):
+            return {
+                "ok": False,
+                "error": "invalid_coordinates",
+                "region": key,
+            }
+    else:
         return {
             "ok": False,
             "error": "unknown_region",
@@ -193,12 +209,14 @@ def fetch_region_weather(
             "available": False,
         }
 
-    cache_key = f"{key}:{max(1, min(days, 5))}:{max(0, min(start_offset, 4))}"
+    cache_key = (
+        f"{key}:{coords['latitude']:.3f}:{coords['longitude']:.3f}:"
+        f"{max(1, min(days, 5))}:{max(0, min(start_offset, 4))}"
+    )
     cached = _cache_get(cache_key)
     if cached:
         return {**cached, "cached": True}
 
-    coords = REGION_COORDINATES[key]
     url = "https://api.openweathermap.org/data/2.5/forecast"
     params = {
         "lat": coords["latitude"],

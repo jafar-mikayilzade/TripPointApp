@@ -1,6 +1,7 @@
 /** Cached regional weather from FastAPI — keeps OpenWeather key + quota off the client. */
 
 import { getApiBaseUrl } from './apiBase';
+import { getRegionById } from '../constants/regions';
 
 export type DailyWeather = {
   day_index: number;
@@ -92,9 +93,16 @@ export async function fetchRegionWeather(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 9000);
   try {
+    const regionMeta = getRegionById(region);
+    const latQ =
+      regionMeta != null ? `&lat=${encodeURIComponent(String(regionMeta.latitude))}` : '';
+    const lngQ =
+      regionMeta != null ? `&lng=${encodeURIComponent(String(regionMeta.longitude))}` : '';
     const url =
       `${base}/api/weather?region=${encodeURIComponent(region.toLowerCase())}` +
-      `&days=${days}&start_day=${Math.max(0, Math.min(startDay, 4))}`;
+      `&days=${days}&start_day=${Math.max(0, Math.min(startDay, 4))}` +
+      latQ +
+      lngQ;
     const res = await fetch(url, {
       method: 'GET',
       headers: { Accept: 'application/json' },

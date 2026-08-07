@@ -87,9 +87,18 @@ export type Poi = {
   /** Featured on home when true and sponsor_until not expired */
   is_sponsored?: boolean;
   sponsor_until?: string | null;
-  /** External (Google) rating 1–5; OSM usually null */
+  /** External (Google / SerpAPI) rating 1–5; OSM usually null */
   rating: number | null;
   rating_count: number | null;
+  /** Nightly rate snapshot from lodging import (SerpAPI etc.) */
+  price_from?: number | null;
+  price_currency?: string | null;
+  hotel_class?: number | null;
+  amenities?: string[] | null;
+  check_in_time?: string | null;
+  check_out_time?: string | null;
+  data_source?: string | null;
+  thumbnail_url?: string | null;
   place_id?: string | null;
   submitted_by: string;
   created_at: string;

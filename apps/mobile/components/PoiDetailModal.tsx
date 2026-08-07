@@ -25,6 +25,11 @@ import { getErrorMessage } from '../lib/errors';
 import { isDatabasePoiId } from '../lib/livePlaces';
 import { isPoiSponsored, summarizeOpeningHours } from '../lib/openingHours';
 import { getCategoryLabel } from '../lib/categoryUtils';
+import {
+  displayPoiDescription,
+  formatPoiPrice,
+  translateAmenities,
+} from '../lib/poiDisplay';
 import { getCategoryColor } from '../lib/poi';
 import { pickPhotoUrl } from '../lib/photoUrls';
 import { supabase } from '../lib/supabase';
@@ -55,19 +60,24 @@ export function PoiDetailModal({
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [averageRating, setAverageRating] = useState<number | null>(null);
   const [ratingCount, setRatingCount] = useState(0);
-  const [userScore, setUserScore] = useState<number | null>(null);
   const [loadingRating, setLoadingRating] = useState(false);
-  const [submittingScore, setSubmittingScore] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoToast, setInfoToast] = useState<string | null>(null);
   const [infoToastKey, setInfoToastKey] = useState(0);
+  const [amenitiesOpen, setAmenitiesOpen] = useState(false);
 
   function showInfoToast(message: string) {
     setInfoToast(message);
     setInfoToastKey((key) => key + 1);
   }
+
+  useEffect(() => {
+    if (!visible) {
+      setAmenitiesOpen(false);
+    }
+  }, [visible, poi?.id]);
 
   useEffect(() => {
     if (!visible || !poi) {
@@ -84,7 +94,6 @@ export function PoiDetailModal({
       setPhotos([]);
       setAverageRating(null);
       setRatingCount(0);
-      setUserScore(null);
 
       const {
         data: { user },
@@ -101,7 +110,7 @@ export function PoiDetailModal({
           .eq('poi_id', poi!.id)
           .eq('status', 'approved')
           .order('order_index', { ascending: true }),
-        supabase.from('ratings').select('score, rater_id').eq('target_type', 'poi').eq('target_id', poi!.id),
+        supabase.from('ratings').select('score').eq('target_type', 'poi').eq('target_id', poi!.id),
       ]);
 
       if (!isActive) {
@@ -123,7 +132,6 @@ export function PoiDetailModal({
       } else {
         const rows = ratingsResult.data ?? [];
         if (rows.length === 0) {
-          // Fall back to Google/external rating on the POI row
           const external =
             typeof poi!.rating === 'number' && Number.isFinite(poi!.rating)
               ? poi!.rating
@@ -138,11 +146,6 @@ export function PoiDetailModal({
           const sum = rows.reduce((acc, row) => acc + row.score, 0);
           setAverageRating(sum / rows.length);
           setRatingCount(rows.length);
-        }
-
-        if (user) {
-          const mine = rows.find((row) => row.rater_id === user.id);
-          setUserScore(mine?.score ?? null);
         }
       }
 
@@ -236,66 +239,6 @@ export function PoiDetailModal({
       setErrorMessage(getErrorMessage(err));
     } finally {
       setUploadingPhoto(false);
-    }
-  }
-
-  async function handleSubmitScore(score: number) {
-    if (!poi || submittingScore) {
-      return;
-    }
-
-    setSubmittingScore(true);
-    setErrorMessage(null);
-    setInfoToast(null);
-
-    try {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      if (userError || !user) {
-        setErrorMessage(userError ? getErrorMessage(userError) : 'Reytinq vermək üçün daxil olun.');
-        return;
-      }
-
-      const { error } = await supabase.from('ratings').upsert(
-        {
-          rater_id: user.id,
-          target_type: 'poi',
-          target_id: poi.id,
-          score,
-        },
-        { onConflict: 'rater_id,target_type,target_id' }
-      );
-
-      if (error) {
-        setErrorMessage(getErrorMessage(error));
-        return;
-      }
-
-      setUserScore(score);
-      showInfoToast('Reytinqiniz saxlanıldı');
-
-      const { data: refreshed, error: refreshError } = await supabase
-        .from('ratings')
-        .select('score')
-        .eq('target_type', 'poi')
-        .eq('target_id', poi.id);
-
-      if (!refreshError && refreshed) {
-        setRatingCount(refreshed.length);
-        if (refreshed.length === 0) {
-          setAverageRating(null);
-        } else {
-          const sum = refreshed.reduce((acc, row) => acc + row.score, 0);
-          setAverageRating(sum / refreshed.length);
-        }
-      }
-    } catch (err) {
-      setErrorMessage(getErrorMessage(err));
-    } finally {
-      setSubmittingScore(false);
     }
   }
 
@@ -412,9 +355,53 @@ export function PoiDetailModal({
               </View>
             )}
 
+            {(() => {
+              const priceLabel = formatPoiPrice(poi.price_from, poi.price_currency);
+              if (!priceLabel) return null;
+              return (
+                <View style={styles.priceRow}>
+                  <Text style={styles.priceLabel}>Qiymət</Text>
+                  <Text style={styles.priceValue}>{priceLabel}</Text>
+                </View>
+              );
+            })()}
+
+            {poi.hotel_class ? (
+              <Text style={styles.hotelClassText}>
+                {'★'.repeat(Math.min(5, poi.hotel_class))} · {poi.hotel_class} ulduzlu
+              </Text>
+            ) : null}
+
             <Text style={styles.description}>
-              {poi.description?.trim() ? poi.description : 'Təsvir əlavə olunmayıb.'}
+              {displayPoiDescription(poi.description) ?? 'Təsvir əlavə olunmayıb.'}
             </Text>
+
+            {(() => {
+              const amenities = translateAmenities(poi.amenities);
+              if (amenities.length === 0) return null;
+              return (
+                <View style={styles.amenitiesBlock}>
+                  <Pressable
+                    style={styles.amenitiesToggle}
+                    onPress={() => setAmenitiesOpen((v) => !v)}
+                  >
+                    <Text style={styles.amenitiesToggleText}>
+                      İmkanlar ({amenities.length})
+                    </Text>
+                    <Text style={styles.amenitiesCaret}>{amenitiesOpen ? '▴' : '▾'}</Text>
+                  </Pressable>
+                  {amenitiesOpen ? (
+                    <View style={styles.amenitiesList}>
+                      {amenities.map((item) => (
+                        <Text key={item} style={styles.amenityItem}>
+                          · {item}
+                        </Text>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })()}
 
             {(() => {
               const hours = summarizeOpeningHours(poi.opening_hours);
@@ -469,28 +456,6 @@ export function PoiDetailModal({
                 <FontAwesome name="map" size={14} color="#fff" />
                 <Text style={styles.primaryButtonText}>Google Maps-də aç</Text>
               </Pressable>
-            </View>
-
-            <Text style={styles.rateLabel}>Reytinq ver</Text>
-            <View style={styles.starsRow}>
-              {[1, 2, 3, 4, 5].map((score) => {
-                const filled = (userScore ?? 0) >= score;
-                return (
-                  <Pressable
-                    key={score}
-                    onPress={() => handleSubmitScore(score)}
-                    disabled={submittingScore}
-                    hitSlop={8}
-                  >
-                    <FontAwesome
-                      name={filled ? 'star' : 'star-o'}
-                      size={28}
-                      color={filled ? colors.warning : colors.border}
-                    />
-                  </Pressable>
-                );
-              })}
-              {submittingScore ? <ActivityIndicator color={colors.accent} /> : null}
             </View>
           </ScrollView>
 
@@ -645,6 +610,68 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
   },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: colors.accentSoft,
+  },
+  priceLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  priceValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.accent,
+  },
+  hotelClassText: {
+    marginBottom: 10,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  amenitiesBlock: {
+    marginBottom: 16,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    overflow: 'hidden',
+  },
+  amenitiesToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: colors.surface,
+  },
+  amenitiesToggleText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  amenitiesCaret: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    fontWeight: '700',
+  },
+  amenitiesList: {
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    gap: 4,
+    backgroundColor: colors.bg,
+  },
+  amenityItem: {
+    fontSize: 13,
+    color: colors.chipText,
+    lineHeight: 20,
+  },
   inlineLoader: {
     alignSelf: 'flex-start',
     marginBottom: 14,
@@ -708,17 +735,6 @@ const styles = StyleSheet.create({
     color: colors.textOnAccent,
     fontSize: 14,
     fontWeight: '600',
-  },
-  rateLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 10,
-  },
-  starsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
   },
   errorText: {
     color: colors.dangerText,
