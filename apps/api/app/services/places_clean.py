@@ -42,6 +42,8 @@ def category_from_osm_tags(tags: dict[str, Any]) -> str:
         return "mountain"
     if natural == "water" or water in {"lake", "reservoir", "pond"}:
         return "lake"
+    if str(tags.get("boundary") or "").lower() == "national_park":
+        return "nature"
     if historic in {"monument", "memorial"}:
         return "monument"
     if historic or tourism == "museum":

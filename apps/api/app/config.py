@@ -51,8 +51,8 @@ DATA_SOURCE = (os.getenv("DATA_SOURCE") or "osm").strip().lower()
 ALLOWED_DATA_SOURCES = {"mock", "osm", "google", "hybrid"}
 
 _DEFAULT_OVERPASS = (
-    "https://overpass-api.de/api/interpreter,"
     "https://overpass.openstreetmap.fr/api/interpreter,"
+    "https://overpass-api.de/api/interpreter,"
     "https://lz4.overpass-api.de/api/interpreter,"
     "https://overpass.kumi.systems/api/interpreter"
 )
