@@ -48,7 +48,8 @@ import type {
   Profile,
 } from '../types/database';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 type MemberProfile = Pick<Profile, 'id' | 'full_name' | 'phone'>;
 
@@ -91,6 +92,8 @@ function normalizeParam(value: string | string[] | undefined): string | null {
 
 export default function SplitBillScreen() {
   const insets = useSafeAreaInsets();
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
   const params = useLocalSearchParams<{ groupId?: string | string[]; listingId?: string | string[] }>();
   const paramGroupId = normalizeParam(params.groupId);
@@ -596,13 +599,13 @@ export default function SplitBillScreen() {
             <View
               style={[
                 styles.statusBadge,
-                { backgroundColor: group.status === 'settled' ? colors.successSoft : '#DBEAFE' },
+                { backgroundColor: group.status === 'settled' ? colors.successSoft : colors.accentSoft },
               ]}
             >
               <Text
                 style={[
                   styles.statusText,
-                  { color: group.status === 'settled' ? '#166534' : colors.accentPressed },
+                  { color: group.status === 'settled' ? colors.success : colors.accentPressed },
                 ]}
               >
                 {statusLabel(group.status)}
@@ -755,7 +758,7 @@ export default function SplitBillScreen() {
                 disabled={settling}
               >
                 {settling ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color={colors.textOnAccent} />
                 ) : (
                   <Text style={styles.primaryButtonText}>Hesablandı</Text>
                 )}
@@ -816,7 +819,7 @@ export default function SplitBillScreen() {
                   disabled={savingCard}
                 >
                   {savingCard ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color={colors.textOnAccent} />
                   ) : (
                     <Text style={styles.primaryButtonText}>Yadda saxla</Text>
                   )}
@@ -892,7 +895,7 @@ export default function SplitBillScreen() {
                   disabled={savingExpense}
                 >
                   {savingExpense ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color={colors.textOnAccent} />
                   ) : (
                     <Text style={styles.primaryButtonText}>Göndər</Text>
                   )}
@@ -919,7 +922,7 @@ export default function SplitBillScreen() {
           <Text style={styles.backText}>Geri</Text>
         </Pressable>
         <Pressable style={styles.addButton} onPress={openCreateModal}>
-          <FontAwesome name="plus" size={12} color="#fff" />
+          <FontAwesome name="plus" size={12} color={colors.textOnAccent} />
           <Text style={styles.addButtonText}>Yeni Qrup</Text>
         </Pressable>
       </View>
@@ -1042,7 +1045,7 @@ export default function SplitBillScreen() {
                   disabled={creating}
                 >
                   {creating ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color={colors.textOnAccent} />
                   ) : (
                     <Text style={styles.primaryButtonText}>Yarat</Text>
                   )}
@@ -1057,7 +1060,8 @@ export default function SplitBillScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -1412,3 +1416,4 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 });
+}

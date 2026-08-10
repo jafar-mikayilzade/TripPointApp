@@ -11,7 +11,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { REGIONS } from '../constants/regions';
-import { colors, radii, shadows } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { radii, shadows } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 import { openStopInMaps } from '../lib/listingRouteStops';
 import type { SavedRoute } from '../lib/savedRoutes';
 
@@ -31,6 +33,8 @@ export function SavedRouteDetailModal({
   onShareAsTour,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const bottomSafe = Math.max(insets.bottom, 12);
 
   const regionLabel = useMemo(() => {
@@ -156,7 +160,8 @@ export function SavedRouteDetailModal({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -240,7 +245,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1.5,
     borderColor: colors.favorite,
-    backgroundColor: '#FFF3D0',
+    backgroundColor: colors.warningSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -370,3 +375,4 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
 });
+}

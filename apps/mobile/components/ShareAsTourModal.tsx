@@ -14,7 +14,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DEFAULT_REGION_ID, REGIONS } from '../constants/regions';
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 import { getErrorMessage } from '../lib/errors';
 import {
   FIELD_EMPTY_PLACEHOLDER,
@@ -77,6 +78,8 @@ export function ShareAsTourModal({
   savedRouteId,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const bottomSafe = Math.max(insets.bottom, 12);
   const { showInfo } = useInfoToast();
 
@@ -530,7 +533,8 @@ export function ShareAsTourModal({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -690,8 +694,9 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   submitText: {
-    color: '#fff',
+    color: colors.textOnAccent,
     fontWeight: '700',
     fontSize: 15,
   },
 });
+}

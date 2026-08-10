@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
 import { nextSelectableHour } from '../lib/listingSchedule';
 import {
   addDays,
@@ -11,6 +11,7 @@ import {
   syncReturnForTrip,
 } from '../lib/tripSchedule';
 import { type WeatherAdvice } from '../lib/weather';
+import { useThemeColors } from '../theme/ThemeProvider';
 import { SimpleDateTimeField } from './SimpleDateTimeField';
 
 /** Match DropdownButton compact trigger — stable row height. */
@@ -58,6 +59,8 @@ export function TripScheduleFields({
   showStartDay = true,
   showTimes = true,
 }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const minDate = useMemo(() => nextSelectableHour(), []);
   const days = Math.max(1, tripDays);
   const sameDayReturn = days <= 1 && !allowOvernight;
@@ -168,57 +171,59 @@ export function TripScheduleFields({
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    gap: 6,
-    marginTop: 6,
-    marginBottom: 2,
-  },
-  dayRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  dayField: {
-    flex: 1,
-    minWidth: 0,
-    height: SCHEDULE_FIELD_HEIGHT,
-    justifyContent: 'center',
-  },
-  weatherChip: {
-    width: WEATHER_CHIP_WIDTH,
-    height: SCHEDULE_FIELD_HEIGHT,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    borderRadius: 8,
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-  },
-  weatherChipEmpty: {
-    backgroundColor: colors.surfaceMuted,
-  },
-  weatherTemp: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
-    letterSpacing: -0.2,
-  },
-  weatherPlaceholder: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textMuted,
-  },
-  timeRow: {
-    flexDirection: 'row',
-    gap: 6,
-    height: SCHEDULE_FIELD_HEIGHT,
-  },
-  timeField: {
-    flex: 1,
-    height: SCHEDULE_FIELD_HEIGHT,
-    justifyContent: 'center',
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: {
+      gap: 6,
+      marginTop: 6,
+      marginBottom: 2,
+    },
+    dayRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    dayField: {
+      flex: 1,
+      minWidth: 0,
+      height: SCHEDULE_FIELD_HEIGHT,
+      justifyContent: 'center',
+    },
+    weatherChip: {
+      width: WEATHER_CHIP_WIDTH,
+      height: SCHEDULE_FIELD_HEIGHT,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+      borderRadius: 8,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.borderSoft,
+    },
+    weatherChipEmpty: {
+      backgroundColor: colors.surfaceMuted,
+    },
+    weatherTemp: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.text,
+      letterSpacing: -0.2,
+    },
+    weatherPlaceholder: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textMuted,
+    },
+    timeRow: {
+      flexDirection: 'row',
+      gap: 6,
+      height: SCHEDULE_FIELD_HEIGHT,
+    },
+    timeField: {
+      flex: 1,
+      height: SCHEDULE_FIELD_HEIGHT,
+      justifyContent: 'center',
+    },
+  });
+}

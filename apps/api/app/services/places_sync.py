@@ -217,10 +217,369 @@ def _insert_if_missing(cleaned_places: list[dict[str, Any]]) -> tuple[int, int]:
     inserted = 0
     batch_size = 50
     for i in range(0, len(to_insert), batch_size):
-        batch = to_insert[i : i + batch_size]
+        batch = [_strip_unknown_poi_fields(r) for r in to_insert[i : i + batch_size]]
         result = supabase.table("pois").insert(batch).execute()
         inserted += len(result.data) if result.data else len(batch)
     return inserted, skipped
+
+
+_POIS_COLUMNS: set[str] | None = None
+
+# Fields refreshed on existing hospitality rows (price snapshot, gallery, etc.)
+_HOSPITALITY_ENRICH_KEYS = (
+    "price_from",
+    "price_currency",
+    "hotel_class",
+    "amenities",
+    "check_in_time",
+    "check_out_time",
+    "data_source",
+    "thumbnail_url",
+    "website",
+    "phone",
+    "address",
+    "description",
+    "rating",
+    "rating_count",
+    "photo_urls",
+    "cuisine",
+    "external_url",
+)
+
+
+def _pois_columns() -> set[str]:
+    """Cached live column set so optional migration fields can be omitted safely."""
+    global _POIS_COLUMNS
+    if _POIS_COLUMNS is not None:
+        return _POIS_COLUMNS
+    result = supabase.table("pois").select("*").limit(1).execute()
+    if result.data:
+        _POIS_COLUMNS = set(result.data[0].keys())
+    else:
+        _POIS_COLUMNS = {
+            "name",
+            "category",
+            "status",
+            "region",
+            "lat",
+            "lng",
+            "place_id",
+            "rating",
+            "rating_count",
+            "address",
+            "phone",
+            "website",
+            "description",
+            "price_from",
+            "price_currency",
+            "hotel_class",
+            "amenities",
+            "check_in_time",
+            "check_out_time",
+            "data_source",
+            "thumbnail_url",
+        }
+    return _POIS_COLUMNS
+
+
+def invalidate_pois_columns_cache() -> None:
+    global _POIS_COLUMNS
+    _POIS_COLUMNS = None
+
+
+def _strip_unknown_poi_fields(row: dict[str, Any]) -> dict[str, Any]:
+    cols = _pois_columns()
+    # Drop migration-only fields until schema is applied; never send unknown keys.
+    return {k: v for k, v in row.items() if k in cols}
+
+
+def _existing_hospitality_rows(place_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """place_id → existing poi row (id + enrich fields)."""
+    found: dict[str, dict[str, Any]] = {}
+    select_cols = ["id", "place_id", "region", *_HOSPITALITY_ENRICH_KEYS]
+    cols = _pois_columns()
+    select = ",".join(c for c in select_cols if c == "id" or c == "place_id" or c in cols)
+    chunk_size = 60
+    for i in range(0, len(place_ids), chunk_size):
+        chunk = place_ids[i : i + chunk_size]
+        if not chunk:
+            continue
+        result = (
+            supabase.table("pois").select(select).in_("place_id", chunk).execute()
+        )
+        for row in result.data or []:
+            pid = str(row.get("place_id") or "").strip()
+            if pid:
+                found[pid] = row
+    return found
+
+
+def _merge_amenities(existing: Any, incoming: Any) -> list[str] | None:
+    merged: list[str] = []
+    for src in (existing, incoming):
+        if not isinstance(src, list):
+            continue
+        for item in src:
+            text = str(item).strip()
+            if text and text not in merged:
+                merged.append(text)
+            if len(merged) >= 40:
+                return merged
+    return merged or None
+
+
+def _hospitality_patch(
+    existing: dict[str, Any],
+    incoming: dict[str, Any],
+) -> dict[str, Any]:
+    """Build update payload: refresh lodging snapshots; fill empty scalar fields."""
+    patch: dict[str, Any] = {}
+    refresh_always = {
+        "price_from",
+        "price_currency",
+        "hotel_class",
+        "check_in_time",
+        "check_out_time",
+        "thumbnail_url",
+        "photo_urls",
+        "data_source",
+    }
+    for key in _HOSPITALITY_ENRICH_KEYS:
+        if key not in incoming or incoming[key] is None:
+            continue
+        if key == "amenities":
+            merged = _merge_amenities(existing.get("amenities"), incoming.get("amenities"))
+            if merged:
+                patch["amenities"] = merged
+            continue
+        if key in refresh_always:
+            patch[key] = incoming[key]
+            continue
+        if key == "rating":
+            try:
+                new_count = int(incoming.get("rating_count") or 0)
+                old_count = int(existing.get("rating_count") or 0)
+            except (TypeError, ValueError):
+                new_count, old_count = 0, 0
+            if existing.get("rating") is None or new_count >= old_count:
+                patch["rating"] = incoming["rating"]
+                if incoming.get("rating_count") is not None:
+                    patch["rating_count"] = incoming["rating_count"]
+            continue
+        if key == "rating_count":
+            continue
+        if existing.get(key) in (None, "", []):
+            patch[key] = incoming[key]
+    return patch
+
+
+def _sync_poi_gallery(poi_uuid: str, urls: list[str]) -> int:
+    """Insert missing external gallery URLs into poi_photos (approved)."""
+    clean_urls = [
+        u.strip()[:2000]
+        for u in urls
+        if isinstance(u, str) and u.strip().startswith("http")
+    ][:12]
+    if not clean_urls or not poi_uuid:
+        return 0
+    existing = (
+        supabase.table("poi_photos")
+        .select("photo_url")
+        .eq("poi_id", poi_uuid)
+        .execute()
+    )
+    have = {
+        str(r.get("photo_url") or "").strip()
+        for r in (existing.data or [])
+        if r.get("photo_url")
+    }
+    to_add = [u for u in clean_urls if u not in have]
+    if not to_add:
+        return 0
+    start_index = len(have)
+    rows = [
+        {
+            "poi_id": poi_uuid,
+            "photo_url": url,
+            "thumb_url": url,
+            "medium_url": url,
+            "order_index": start_index + idx,
+            "status": "approved",
+            "uploaded_by": None,
+        }
+        for idx, url in enumerate(to_add)
+    ]
+    supabase.table("poi_photos").insert(rows).execute()
+    return len(rows)
+
+
+def upsert_hospitality_places(cleaned_places: list[dict[str, Any]]) -> dict[str, int]:
+    """
+    Insert new hospitality POIs and enrich existing rows (price, amenities, photos).
+    Also seeds poi_photos from thumbnail_url / photo_urls.
+    """
+    if not cleaned_places:
+        return {"inserted": 0, "updated": 0, "skipped": 0, "photos_added": 0}
+
+    # Dedupe by place_id within the batch (Geoapify can emit duplicates)
+    deduped: dict[str, dict[str, Any]] = {}
+    for raw in cleaned_places:
+        pid = str(raw.get("place_id") or "").strip()
+        if not pid:
+            continue
+        prev = deduped.get(pid)
+        if prev is None:
+            deduped[pid] = raw
+            continue
+        # Prefer row with more enrich fields / photos
+        score = lambda r: (
+            1 if r.get("price_from") is not None else 0,
+            1 if r.get("thumbnail_url") else 0,
+            len(r.get("photo_urls") or []) if isinstance(r.get("photo_urls"), list) else 0,
+            len(r.get("amenities") or []) if isinstance(r.get("amenities"), list) else 0,
+        )
+        if score(raw) >= score(prev):
+            deduped[pid] = raw
+    cleaned_places = list(deduped.values())
+
+    place_ids = [
+        str(row["place_id"]).strip()
+        for row in cleaned_places
+        if row.get("place_id")
+    ]
+    existing_map = _existing_hospitality_rows(place_ids)
+
+    to_insert: list[dict[str, Any]] = []
+    updates: list[tuple[str, dict[str, Any], list[str]]] = []  # uuid, patch, gallery
+    skipped = 0
+
+    for raw in cleaned_places:
+        pid = str(raw.get("place_id") or "").strip()
+        if not pid:
+            skipped += 1
+            continue
+        gallery: list[str] = []
+        photos = raw.get("photo_urls")
+        if isinstance(photos, list):
+            gallery.extend(str(u) for u in photos if u)
+        thumb = raw.get("thumbnail_url")
+        if isinstance(thumb, str) and thumb.startswith("http") and thumb not in gallery:
+            gallery.insert(0, thumb)
+
+        row = _strip_unknown_poi_fields(dict(raw))
+        prev = existing_map.get(pid)
+        # Same external id already stored under another region → keep a local copy
+        if prev is not None:
+            prev_region = str(prev.get("region") or "").strip().lower()
+            row_region = str(row.get("region") or "").strip().lower()
+            if prev_region and row_region and prev_region != row_region:
+                scoped = f"{pid}:{row_region}"
+                if scoped not in existing_map:
+                    row = dict(row)
+                    row["place_id"] = scoped
+                    to_insert.append(_strip_unknown_poi_fields(row))
+                    continue
+                prev = existing_map[scoped]
+                pid = scoped
+                row = _strip_unknown_poi_fields(dict(raw))
+                row["place_id"] = scoped
+        if prev is None:
+            to_insert.append(row)
+            continue
+        patch = _hospitality_patch(prev, row)
+        poi_uuid = str(prev.get("id") or "")
+        if patch or gallery:
+            updates.append((poi_uuid, patch, gallery))
+        else:
+            skipped += 1
+
+    inserted = 0
+    batch_size = 40
+    inserted_rows: list[dict[str, Any]] = []
+    for i in range(0, len(to_insert), batch_size):
+        batch = to_insert[i : i + batch_size]
+        try:
+            result = supabase.table("pois").insert(batch).execute()
+            batch_data = list(result.data or [])
+            inserted += len(batch_data) if batch_data else len(batch)
+            inserted_rows.extend(batch_data)
+        except Exception as exc:  # noqa: BLE001 — race / duplicate place_id
+            msg = str(exc)
+            if "23505" not in msg and "duplicate key" not in msg.lower():
+                raise
+            # Fall back to one-by-one upsert so one duplicate does not drop the batch
+            for item in batch:
+                pid = str(item.get("place_id") or "")
+                try:
+                    result = supabase.table("pois").insert(item).execute()
+                    batch_data = list(result.data or [])
+                    if batch_data:
+                        inserted += 1
+                        inserted_rows.extend(batch_data)
+                except Exception as one_exc:  # noqa: BLE001
+                    one_msg = str(one_exc)
+                    if "23505" in one_msg or "duplicate key" in one_msg.lower():
+                        # Treat as existing — refresh lookup and enrich
+                        found = _existing_hospitality_rows([pid]).get(pid)
+                        if found:
+                            patch = _hospitality_patch(found, item)
+                            poi_uuid = str(found.get("id") or "")
+                            gallery = []
+                            photos = item.get("photo_urls")
+                            if isinstance(photos, list):
+                                gallery.extend(str(u) for u in photos if u)
+                            thumb = item.get("thumbnail_url")
+                            if isinstance(thumb, str) and thumb.startswith("http"):
+                                gallery.insert(0, thumb)
+                            if patch and poi_uuid:
+                                supabase.table("pois").update(patch).eq(
+                                    "id", poi_uuid
+                                ).execute()
+                                updates.append((poi_uuid, {}, gallery))
+                            elif gallery and poi_uuid:
+                                updates.append((poi_uuid, {}, gallery))
+                        continue
+                    raise
+
+    updated = 0
+    photos_added = 0
+    for poi_uuid, patch, gallery in updates:
+        if patch and poi_uuid:
+            supabase.table("pois").update(patch).eq("id", poi_uuid).execute()
+            updated += 1
+        if gallery and poi_uuid:
+            photos_added += _sync_poi_gallery(poi_uuid, gallery)
+
+    for row in inserted_rows:
+        poi_uuid = str(row.get("id") or "")
+        gallery: list[str] = []
+        photos = row.get("photo_urls")
+        if isinstance(photos, list):
+            gallery.extend(str(u) for u in photos if u)
+        thumb = row.get("thumbnail_url")
+        if isinstance(thumb, str) and thumb.startswith("http"):
+            gallery.insert(0, thumb)
+        # Prefer gallery from original cleaned payload when insert response omits jsonb
+        if not gallery:
+            pid = str(row.get("place_id") or "")
+            for raw in cleaned_places:
+                if str(raw.get("place_id") or "") == pid:
+                    photos = raw.get("photo_urls")
+                    if isinstance(photos, list):
+                        gallery.extend(str(u) for u in photos if u)
+                    thumb = raw.get("thumbnail_url")
+                    if isinstance(thumb, str) and thumb.startswith("http"):
+                        gallery.insert(0, thumb)
+                    break
+        if poi_uuid and gallery:
+            photos_added += _sync_poi_gallery(poi_uuid, gallery)
+
+    return {
+        "inserted": inserted,
+        "updated": updated,
+        "skipped": skipped,
+        "photos_added": photos_added,
+    }
 
 
 def _sync_hybrid_all_progressive(

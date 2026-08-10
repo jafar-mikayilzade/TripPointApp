@@ -88,6 +88,8 @@ export type PlanRouteInput = {
   varietySeed?: number;
   /** Soft-exclude POIs from the previous plan */
   excludePoiIds?: string[];
+  /** Overnight: hotel | private (guesthouse/hostel/camping) */
+  lodgingType?: 'hotel' | 'private';
 };
 
 async function planRouteViaFastApi(
@@ -127,6 +129,7 @@ async function planRouteViaFastApi(
         returnByTime: input.returnByTime ?? '21:00',
         varietySeed: input.varietySeed ?? Date.now(),
         excludePoiIds: input.excludePoiIds ?? [],
+        lodgingType: input.lodgingType ?? 'hotel',
       }),
       signal: controller.signal,
     });

@@ -1,5 +1,5 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -9,8 +9,9 @@ import {
   View,
 } from 'react-native';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
 import { isSubscribed, toggleSubscription } from '../lib/subscriptions';
+import { useThemeColors } from '../theme/ThemeProvider';
 import { useInfoToast } from './InfoToastProvider';
 
 type Props = {
@@ -20,6 +21,8 @@ type Props = {
   compact?: boolean;
   /** When true, show tour+organizer toggles inline (detail sheet). */
   expandable?: boolean;
+  /** Sit opposite Marşrut in a flex row (detail sheet). */
+  rowPartner?: boolean;
   disabled?: boolean;
   /**
    * Batch hint from parent (1 query for whole list).
@@ -39,11 +42,14 @@ export function SubscribeMenuButton({
   organizerId,
   compact = false,
   expandable = false,
+  rowPartner = false,
   disabled = false,
   listingSubscribed,
   organizerSubscribed,
   statusReady = false,
 }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { showInfo } = useInfoToast();
   const [tourOn, setTourOn] = useState(false);
   const [orgOn, setOrgOn] = useState(false);
@@ -165,11 +171,12 @@ export function SubscribeMenuButton({
   }
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, rowPartner && styles.wrapRowPartner]}>
       <Pressable
         onPress={openMenu}
         style={[
           styles.pill,
+          rowPartner && styles.pillRowPartner,
           anyOn && styles.pillActive,
           (disabled || busy) && styles.pillDisabled,
         ]}
@@ -235,87 +242,100 @@ export function SubscribeMenuButton({
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: {
-    marginTop: 12,
-    marginBottom: 4,
-    gap: 8,
-  },
-  iconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceMuted,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconBtnActive: {
-    borderColor: colors.accent,
-    backgroundColor: colors.accentSoft,
-  },
-  pill: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderRadius: 999,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-  },
-  pillActive: {
-    backgroundColor: colors.accentSoft,
-    borderColor: colors.accent,
-  },
-  pillDisabled: {
-    opacity: 0.6,
-  },
-  pillText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  pillTextActive: {
-    color: colors.accentPressed,
-  },
-  panel: {
-    borderRadius: 14,
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-    overflow: 'hidden',
-  },
-  panelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  panelRowBorder: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.borderSoft,
-  },
-  panelLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  panelLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  panelState: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textMuted,
-  },
-  panelStateOn: {
-    color: colors.success,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    wrap: {
+      marginTop: 12,
+      marginBottom: 4,
+      gap: 8,
+    },
+    wrapRowPartner: {
+      flex: 1,
+      marginTop: 0,
+      marginBottom: 0,
+    },
+    pillRowPartner: {
+      alignSelf: 'stretch',
+      justifyContent: 'center',
+      borderRadius: 14,
+      paddingVertical: 12,
+    },
+    iconBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceMuted,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    iconBtnActive: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accentSoft,
+    },
+    pill: {
+      alignSelf: 'flex-start',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      borderRadius: 999,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      backgroundColor: colors.surfaceMuted,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.borderSoft,
+    },
+    pillActive: {
+      backgroundColor: colors.accentSoft,
+      borderColor: colors.accent,
+    },
+    pillDisabled: {
+      opacity: 0.6,
+    },
+    pillText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.textSecondary,
+    },
+    pillTextActive: {
+      color: colors.accentPressed,
+    },
+    panel: {
+      borderRadius: 14,
+      backgroundColor: colors.surfaceMuted,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.borderSoft,
+      overflow: 'hidden',
+    },
+    panelRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+    },
+    panelRowBorder: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.borderSoft,
+    },
+    panelLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    panelLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    panelState: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: colors.textMuted,
+    },
+    panelStateOn: {
+      color: colors.success,
+    },
+  });
+}

@@ -2,8 +2,7 @@ import type { ComponentProps } from 'react';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import type { PoiCategory } from '../types/database';
-
-import { colors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
 
@@ -43,9 +42,14 @@ type CategoryIconProps = {
 export function CategoryIcon({
   category,
   size = 16,
-  color = colors.text,
+  color,
 }: CategoryIconProps) {
+  const colors = useThemeColors();
   return (
-    <Ionicons name={getCategoryIconName(category)} size={size} color={color} />
+    <Ionicons
+      name={getCategoryIconName(category)}
+      size={size}
+      color={color ?? colors.brand}
+    />
   );
 }

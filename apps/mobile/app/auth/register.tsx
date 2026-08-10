@@ -1,5 +1,5 @@
 import { Link, router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -14,6 +14,7 @@ import {
 
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { FormField } from '../../components/FormField';
+import { TripPointWordmark } from '../../components/TripPointWordmark';
 import { AUTH_CALLBACK_URL } from '../../lib/authDeepLink';
 import { sendEmailVerificationLink } from '../../lib/emailVerification';
 import { ensureProfile } from '../../lib/ensureProfile';
@@ -30,10 +31,14 @@ import {
 } from '../../lib/formValidation';
 import { signInWithGoogle } from '../../lib/googleAuth';
 import { supabase } from '../../lib/supabase';
-
-import { colors } from '../../constants/theme';
+import type { ThemeColors } from '../../constants/theme';
+import { radii } from '../../constants/theme';
+import { useTheme, useThemeColors } from '../../theme/ThemeProvider';
 
 export default function RegisterScreen() {
+  const colors = useThemeColors();
+  const { isDark } = useTheme();
+  const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const scrollRef = useRef<ScrollView>(null);
   const passwordBlockY = useRef(0);
 
@@ -247,13 +252,15 @@ export default function RegisterScreen() {
         showsVerticalScrollIndicator={false}
         automaticallyAdjustKeyboardInsets
       >
+        <TripPointWordmark size={28} showDecor style={{ marginBottom: 16 }} />
         <Text style={styles.title}>Qeydiyyat</Text>
-        <Text style={styles.subtitle}>Yeni TripPoint hesabı yaradın</Text>
+        <Text style={styles.subtitle}>Yeni hesab yaradın</Text>
 
         {errorMessage ? <ErrorBanner message={errorMessage} /> : null}
 
         <FormField
-          label="Ad soyad"
+          label="Ad və Soyad"
+          leftIcon="person-outline"
           value={fullName}
           onChangeText={(text) => {
             const lettersOnly = text.replace(/[^\p{L}\s]/gu, '');
@@ -277,6 +284,7 @@ export default function RegisterScreen() {
 
         <FormField
           label="E-poçt"
+          leftIcon="mail-outline"
           value={email}
           onChangeText={(text) => {
             setEmail(text);
@@ -310,6 +318,7 @@ export default function RegisterScreen() {
         >
           <FormField
             label="Şifrə"
+            leftIcon="lock-closed-outline"
             value={password}
             onChangeText={setPassword}
             placeholder="şifrənizi yazın"
@@ -360,9 +369,9 @@ export default function RegisterScreen() {
               disabled={loading || googleLoading || Boolean(emailError)}
             >
               {loading ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={isDark ? colors.textOnAccent : '#FFFFFF'} />
               ) : (
-                <Text style={styles.buttonText}>Qeydiyyat</Text>
+                <Text style={styles.buttonText}>Hesab Yarat</Text>
               )}
             </Pressable>
 
@@ -407,161 +416,159 @@ export default function RegisterScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
-    backgroundColor: colors.surface,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 48,
-  },
-  confirmScreen: {
-    flex: 1,
-    justifyContent: 'center',
-    padding: 24,
-    backgroundColor: colors.surface,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 24,
-  },
-  passwordHints: {
-    marginBottom: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    gap: 4,
-  },
-  passwordHintsOk: {
-    backgroundColor: colors.successSoft,
-    borderColor: '#BBF7D0',
-  },
-  passwordHint: {
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: '500',
-  },
-  passwordHintUnmet: {
-    color: colors.danger,
-  },
-  passwordHintMet: {
-    color: colors.success,
-  },
-  passwordFocusSpacer: {
-    height: 220,
-  },
-  confirmBody: {
-    marginTop: 12,
-    fontSize: 15,
-    color: colors.chipText,
-    lineHeight: 22,
-  },
-  confirmEmail: {
-    fontWeight: '700',
-    color: colors.text,
-  },
-  confirmHint: {
-    marginTop: 12,
-    marginBottom: 20,
-    fontSize: 14,
-    color: colors.textSecondary,
-    lineHeight: 20,
-  },
-  button: {
-    backgroundColor: colors.accent,
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  secondaryButton: {
-    marginTop: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  secondaryButtonText: {
-    color: colors.accent,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: colors.textOnAccent,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 16,
-    gap: 12,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: colors.border,
-  },
-  dividerText: {
-    color: colors.textMuted,
-    fontSize: 13,
-  },
-  googleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingVertical: 14,
-    backgroundColor: 'white',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    elevation: 2,
-  },
-  googleIcon: {
-    width: 20,
-    height: 20,
-    borderRadius: 16,
-    backgroundColor: '#4285F4',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  googleIconText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  googleButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.chipText,
-  },
-  footer: {
-    marginTop: 20,
-    textAlign: 'center',
-    color: colors.textSecondary,
-    fontSize: 14,
-  },
-  footerLink: {
-    color: colors.accent,
-    fontWeight: '600',
-  },
-});
+function createStyles(colors: ThemeColors, isDark: boolean) {
+  return StyleSheet.create({
+    flex: {
+      flex: 1,
+      backgroundColor: colors.bg,
+    },
+    scrollContent: {
+      flexGrow: 1,
+      paddingHorizontal: 24,
+      paddingTop: 24,
+      paddingBottom: 48,
+    },
+    confirmScreen: {
+      flex: 1,
+      justifyContent: 'center',
+      padding: 24,
+      backgroundColor: colors.bg,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: '800',
+      color: colors.text,
+      marginBottom: 4,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      marginBottom: 24,
+    },
+    passwordHints: {
+      marginBottom: 8,
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      borderRadius: radii.sm,
+      backgroundColor: colors.dangerSoft,
+      borderWidth: 1,
+      borderColor: colors.danger,
+      gap: 4,
+    },
+    passwordHintsOk: {
+      backgroundColor: colors.successSoft,
+      borderColor: colors.success,
+    },
+    passwordHint: {
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: '500',
+    },
+    passwordHintUnmet: {
+      color: colors.danger,
+    },
+    passwordHintMet: {
+      color: colors.success,
+    },
+    passwordFocusSpacer: {
+      height: 220,
+    },
+    confirmBody: {
+      marginTop: 12,
+      fontSize: 15,
+      color: colors.chipText,
+      lineHeight: 22,
+    },
+    confirmEmail: {
+      fontWeight: '700',
+      color: colors.text,
+    },
+    confirmHint: {
+      marginTop: 12,
+      marginBottom: 20,
+      fontSize: 14,
+      color: colors.textSecondary,
+      lineHeight: 20,
+    },
+    button: {
+      backgroundColor: isDark ? colors.accent : colors.brand,
+      borderRadius: radii.pill,
+      paddingVertical: 14,
+      alignItems: 'center',
+      marginTop: 8,
+      marginBottom: 4,
+    },
+    secondaryButton: {
+      marginTop: 12,
+      paddingVertical: 12,
+      alignItems: 'center',
+    },
+    secondaryButtonText: {
+      color: colors.brand,
+      fontWeight: '600',
+      fontSize: 14,
+    },
+    buttonDisabled: {
+      opacity: 0.6,
+    },
+    buttonText: {
+      color: isDark ? colors.textOnAccent : '#FFFFFF',
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    dividerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginVertical: 16,
+      gap: 12,
+    },
+    dividerLine: {
+      flex: 1,
+      height: 1,
+      backgroundColor: colors.border,
+    },
+    dividerText: {
+      color: colors.textMuted,
+      fontSize: 13,
+    },
+    googleButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 12,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      borderRadius: radii.pill,
+      paddingVertical: 14,
+      backgroundColor: colors.surface,
+    },
+    googleIcon: {
+      width: 20,
+      height: 20,
+      borderRadius: 16,
+      backgroundColor: '#4285F4',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    googleIconText: {
+      color: 'white',
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    googleButtonText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    footer: {
+      marginTop: 20,
+      textAlign: 'center',
+      color: colors.textSecondary,
+      fontSize: 14,
+    },
+    footerLink: {
+      color: colors.brand,
+      fontWeight: '700',
+    },
+  });
+}

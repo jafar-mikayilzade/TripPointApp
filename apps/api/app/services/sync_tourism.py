@@ -14,7 +14,7 @@ from app.services.places_rapidapi import (
     fetch_standardized_for_region,
     require_rapidapi_key,
 )
-from app.services.places_sync import _insert_if_missing
+from app.services.places_sync import upsert_hospitality_places
 
 logger = logging.getLogger(__name__)
 
@@ -85,11 +85,17 @@ def sync_tourism_regions(
             cleaned.append(row)
 
         inserted = 0
+        updated = 0
         skipped_existing = 0
+        photos_added = 0
         if dry_run:
             skipped_existing = 0
         else:
-            inserted, skipped_existing = _insert_if_missing(cleaned)
+            stats = upsert_hospitality_places(cleaned)
+            inserted = int(stats.get("inserted") or 0)
+            updated = int(stats.get("updated") or 0)
+            skipped_existing = int(stats.get("skipped") or 0)
+            photos_added = int(stats.get("photos_added") or 0)
 
         total_mapped += len(cleaned)
         total_inserted += inserted
@@ -106,7 +112,9 @@ def sync_tourism_regions(
                 "cleaned": len(cleaned),
                 "clean_skipped": clean_skipped,
                 "inserted": inserted if not dry_run else 0,
+                "updated": updated if not dry_run else 0,
                 "skipped_existing": skipped_existing if not dry_run else 0,
+                "photos_added": photos_added if not dry_run else 0,
                 "dry_run": dry_run,
                 "warnings": fetched.get("errors") or [],
                 "sample_place_ids": [r.get("place_id") for r in cleaned[:5]],

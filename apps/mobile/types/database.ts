@@ -99,6 +99,10 @@ export type Poi = {
   check_out_time?: string | null;
   data_source?: string | null;
   thumbnail_url?: string | null;
+  /** External gallery URLs from lodging/restaurant imports */
+  photo_urls?: string[] | null;
+  cuisine?: string | null;
+  external_url?: string | null;
   place_id?: string | null;
   submitted_by: string;
   created_at: string;
@@ -272,7 +276,9 @@ export type Rating = {
   target_type: RatingTargetType;
   target_id: string;
   score: number;
-  comment: string | null;
+  /** DB column is `review` (legacy); prefer this name in app code */
+  review?: string | null;
+  comment?: string | null;
   created_at: string;
 };
 
@@ -284,14 +290,19 @@ export type Post = {
   lat: number | null;
   lng: number | null;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
 };
 
 export type PostPhoto = {
   id: string;
   post_id: string;
-  url: string;
-  sort_order: number | null;
+  /** Actual DB column */
+  photo_url: string;
+  /** @deprecated use photo_url — kept for older local types */
+  url?: string;
+  order_index: number | null;
+  /** @deprecated use order_index */
+  sort_order?: number | null;
   created_at: string;
 };
 

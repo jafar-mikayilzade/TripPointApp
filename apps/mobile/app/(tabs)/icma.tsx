@@ -13,9 +13,10 @@ import { useResponsiveLayout } from '../../lib/layout';
 import { supabase } from '../../lib/supabase';
 import type { Listing, ListingType, Profile } from '../../types/database';
 
-import { colors } from '../../constants/theme';
+import type { ThemeColors } from '../../constants/theme';
+import { useThemeColors } from '../../theme/ThemeProvider';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState, useMemo } from 'react';
 import {
   FlatList,
   Image,
@@ -38,14 +39,16 @@ const FILTERS: { id: ListingFilter; label: string }[] = [
   { id: 'carpool', label: 'Carpool' },
 ];
 
-const TYPE_META: Record<
+function getTypeMeta(colors: ThemeColors): Record<
   ListingType,
   { label: string; tint: string; soft: string }
-> = {
-  carpool: { label: 'Carpool', tint: colors.accent, soft: colors.accentSoft },
-  tour: { label: 'Tur', tint: colors.success, soft: colors.successSoft },
-  local_service: { label: 'Yerli xidmət', tint: colors.warning, soft: colors.warningSoft },
-};
+> {
+  return {
+    carpool: { label: 'Carpool', tint: colors.accent, soft: colors.accentSoft },
+    tour: { label: 'Tur', tint: colors.success, soft: colors.successSoft },
+    local_service: { label: 'Yerli xidmət', tint: colors.warning, soft: colors.warningSoft },
+  };
+}
 
 function formatDate(value: string | null): string {
   if (!value) {
@@ -86,6 +89,9 @@ function getRegionLabel(region: string | null): string {
 }
 
 export default function IcmaScreen() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const insets = useSafeAreaInsets();
   const { padH } = useResponsiveLayout();
 
@@ -307,7 +313,10 @@ function ListingCard({
   listingSubscribed?: boolean;
   organizerSubscribed?: boolean;
 }) {
-  const meta = TYPE_META[listing.type];
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
+  const meta = getTypeMeta(colors)[listing.type];
   const creatorName = listing.creator?.full_name?.trim() || 'İstifadəçi';
   const seatsLabel = formatFilledSpots(listing);
   const price = formatPrice(listing);
@@ -336,34 +345,39 @@ function ListingCard({
         {listing.creator?.avatar_url ? (
           <Image source={{ uri: listing.creator.avatar_url }} style={styles.avatar} />
         ) : (
-          <View style={styles.avatarPlaceholder}>
-            <Text style={styles.avatarInitial}>{creatorName.charAt(0).toUpperCase()}</Text>
+          <View style={[styles.avatarPlaceholder, styles.avatarWarm]}>
+            <Text style={styles.avatarInitialWarm}>{creatorName.charAt(0).toUpperCase()}</Text>
           </View>
         )}
 
         <View style={styles.cardBody}>
           <View style={styles.cardTop}>
+            <View>
+              <Text style={styles.creatorLine} numberOfLines={1}>
+                {creatorName}
+              </Text>
+            </View>
             <View style={[styles.badge, { backgroundColor: meta.soft }]}>
               <Text style={[styles.badgeText, { color: meta.tint }]}>{meta.label}</Text>
             </View>
-            <Text style={styles.topRight} numberOfLines={1}>
-              {price}
-            </Text>
           </View>
 
-          <Text style={styles.cardTitle} numberOfLines={1}>
+          <Text style={styles.cardTitle} numberOfLines={2}>
             {listing.title}
           </Text>
 
-          <View style={styles.pairRow}>
-            <Text style={styles.pairLeft} numberOfLines={1}>
-              {pairLeft}
+          <View style={styles.factsRow}>
+            <Text style={styles.factChip} numberOfLines={1}>
+              {getRegionLabel(listing.region)}
             </Text>
-            {pairRight ? (
-              <Text style={styles.pairRight} numberOfLines={1}>
-                {pairRight}
+            {pairLeft ? (
+              <Text style={styles.factChip} numberOfLines={1}>
+                {pairLeft}
               </Text>
             ) : null}
+            <Text style={styles.factPrice} numberOfLines={1}>
+              {price}
+            </Text>
           </View>
         </View>
 
@@ -385,6 +399,9 @@ function ListingCard({
 const MemoListingCard = memo(ListingCard);
 
 function SkeletonCard() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   return (
     <View style={styles.skeletonCard}>
       <View style={styles.cardInner}>
@@ -405,7 +422,8 @@ function SkeletonCard() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -557,22 +575,60 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   avatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   avatarPlaceholder: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  avatarWarm: {
+    backgroundColor: '#F59E0B',
   },
   avatarInitial: {
     fontSize: 12,
     fontWeight: '700',
     color: colors.textSecondary,
+  },
+  avatarInitialWarm: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  creatorLine: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text,
+    maxWidth: 160,
+  },
+  factsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  factChip: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    overflow: 'hidden',
+    maxWidth: '48%',
+  },
+  factPrice: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.brand,
+    marginLeft: 'auto',
   },
   emptyState: {
     alignItems: 'center',
@@ -629,3 +685,4 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
   },
 });
+}

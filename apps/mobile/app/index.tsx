@@ -1,12 +1,14 @@
 import { Redirect } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { supabase } from '../lib/supabase';
-
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 export default function Index() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [ready, setReady] = useState(false);
   const [hasSession, setHasSession] = useState(false);
 
@@ -53,16 +55,18 @@ export default function Index() {
   return <Redirect href="/auth/login" />;
 }
 
-const styles = StyleSheet.create({
-  loader: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-  },
-  text: {
-    marginTop: 12,
-    color: colors.textSecondary,
-    fontWeight: '600',
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    loader: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface,
+    },
+    text: {
+      marginTop: 12,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+  });
+}

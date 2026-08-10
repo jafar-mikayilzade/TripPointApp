@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useMemo, useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -60,7 +60,8 @@ import type {
   Profile,
 } from '../types/database';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 export type ListingWithCreator = Listing & {
   creator: Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'phone' | 'is_verified'> | null;
@@ -87,6 +88,8 @@ function getParticipantProfile(row: ParticipantRow): ParticipantProfile | null {
 }
 
 function CreatorStarRating({ value, loading }: { value: number | null; loading: boolean }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   if (loading) {
     return <Text style={styles.ratingLoading}>…</Text>;
   }
@@ -108,20 +111,23 @@ function CreatorStarRating({ value, loading }: { value: number | null; loading: 
   );
 }
 
-const STATUS_META: Record<
+function getStatusMeta(colors: ThemeColors): Record<
   ParticipantStatus,
   { label: string; background: string; color: string }
-> = {
+> {
+  return {
   pending: { label: 'Gözləyir', background: colors.warningSoft, color: colors.warning },
   approved: { label: 'Təsdiqlənib', background: colors.successSoft, color: colors.success },
   rejected: { label: 'Rədd edilib', background: colors.dangerSoft, color: colors.dangerText },
   cancelled: { label: 'Ləğv edilib', background: colors.chip, color: colors.textSecondary },
 };
+}
 
-const TYPE_META: Record<
+function getTypeMeta(colors: ThemeColors): Record<
   ListingType,
   { label: string; icon: 'car' | 'map' | 'briefcase'; color: string; soft: string }
-> = {
+> {
+  return {
   carpool: {
     label: 'Carpool',
     icon: 'car',
@@ -141,6 +147,7 @@ const TYPE_META: Record<
     soft: colors.warningSoft,
   },
 };
+}
 
 function InfoFact({
   icon,
@@ -151,6 +158,8 @@ function InfoFact({
   label: string;
   value: string;
 }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.infoFact}>
       <View style={styles.infoIconWrap}>
@@ -216,6 +225,10 @@ export function ListingDetailModal({
   onDeleted,
 }: ListingDetailModalProps) {
   const insets = useSafeAreaInsets();
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const STATUS_META = useMemo(() => getStatusMeta(colors), [colors]);
+  const TYPE_META = useMemo(() => getTypeMeta(colors), [colors]);
   const bottomSafe = Math.max(insets.bottom, 12);
   const router = useRouter();
   const { isAdmin } = useIsAdmin();
@@ -719,13 +732,51 @@ export function ListingDetailModal({
         <View style={[styles.sheet, { paddingBottom: bottomSafe }]}>
           <View style={styles.handle} />
           <View style={styles.sheetHeader}>
-            <FavoriteButton targetType="listing" targetId={listing.id} size={18} />
+            <View style={styles.headerFavWrap}>
+              <FavoriteButton targetType="listing" targetId={listing.id} size={18} />
+            </View>
             <Pressable onPress={onClose} style={styles.closeButton} hitSlop={12}>
-              <FontAwesome name="times" size={16} color={colors.text} />
+              <FontAwesome name="times" size={16} color={colors.textMuted} />
             </Pressable>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+            <Pressable
+              style={styles.creatorHeader}
+              onPress={() => {
+                if (!listing.creator?.id) {
+                  return;
+                }
+                onClose();
+                router.push({
+                  pathname: '/(tabs)/profil',
+                  params: { userId: listing.creator.id },
+                });
+              }}
+              accessibilityLabel="Profilə bax"
+            >
+              {listing.creator?.avatar_url ? (
+                <Image source={{ uri: listing.creator.avatar_url }} style={styles.avatar} />
+              ) : (
+                <View style={[styles.avatarPlaceholder, styles.avatarAccent]}>
+                  <Text style={styles.avatarInitialAccent}>
+                    {creatorName.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.creatorMeta}>
+                <View style={styles.creatorNameRow}>
+                  <Text style={styles.creatorNameLg} numberOfLines={1}>
+                    {creatorName}
+                  </Text>
+                  {listing.creator?.is_verified ? (
+                    <FontAwesome name="check-circle" size={14} color={colors.success} />
+                  ) : null}
+                </View>
+                <CreatorStarRating value={creatorRating} loading={loadingExtras} />
+              </View>
+            </Pressable>
+
             <View style={[styles.badge, { backgroundColor: meta.soft }]}>
               <FontAwesome name={meta.icon} size={11} color={meta.color} />
               <Text style={[styles.badgeText, { color: meta.color }]}>{meta.label}</Text>
@@ -741,86 +792,45 @@ export function ListingDetailModal({
               </View>
             ) : null}
 
-            <View style={styles.creatorActionsRow}>
+            <View style={styles.quickActionsRow}>
               <Pressable
-                style={styles.creatorLeft}
-                onPress={() => {
-                  if (!listing.creator?.id) {
-                    return;
-                  }
-                  onClose();
-                  router.push({
-                    pathname: '/(tabs)/profil',
-                    params: { userId: listing.creator.id },
-                  });
-                }}
-                accessibilityLabel="Profilə bax"
+                style={[
+                  styles.quickActionBtn,
+                  styles.whatsappButton,
+                  !contactDisplayPhone && styles.whatsappButtonDisabled,
+                ]}
+                onPress={openWhatsApp}
               >
-                {listing.creator?.avatar_url ? (
-                  <Image source={{ uri: listing.creator.avatar_url }} style={styles.avatar} />
-                ) : (
-                  <View style={styles.avatarPlaceholder}>
-                    <Text style={styles.avatarInitial}>{creatorName.charAt(0).toUpperCase()}</Text>
-                  </View>
-                )}
-                <View style={styles.creatorMeta}>
-                  <View style={styles.creatorNameRow}>
-                    <Text style={styles.creatorName} numberOfLines={1}>
-                      {creatorName}
-                    </Text>
-                    {listing.creator?.is_verified ? (
-                      <FontAwesome name="check-circle" size={14} color={colors.success} />
-                    ) : null}
-                  </View>
-                  <CreatorStarRating value={creatorRating} loading={loadingExtras} />
-                </View>
+                <FontAwesome name="whatsapp" size={16} color="#FFFFFF" />
+                <Text style={styles.quickActionText} numberOfLines={1}>
+                  {contactDisplayPhone ? "WhatsApp'a yaz" : 'Nömrə yox'}
+                </Text>
               </Pressable>
 
-              <View style={styles.sideActions}>
-                <Pressable
-                  style={[
-                    styles.sideActionBtn,
-                    styles.whatsappButton,
-                    !contactDisplayPhone && styles.whatsappButtonDisabled,
-                  ]}
-                  onPress={openWhatsApp}
-                >
-                  <FontAwesome name="whatsapp" size={12} color={colors.textOnAccent} />
-                  <Text style={styles.sideActionText} numberOfLines={1}>
-                    {contactDisplayPhone ? 'Whatsappa yaz' : 'Nömrə yox'}
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  style={[styles.sideActionBtn, styles.splitBillButton]}
-                  onPress={() => {
-                    onClose();
-                    void (async () => {
-                      const params = await resolveSplitBillParamsForListing(listing.id);
-                      router.push({
-                        pathname: '/split-bill',
-                        params,
-                      } as never);
-                    })();
-                  }}
-                >
-                  <FontAwesome name="money" size={11} color={colors.textOnAccent} />
-                  <Text style={styles.sideActionText}>Xərc bölüşdür</Text>
-                </Pressable>
-              </View>
+              <Pressable
+                style={[styles.quickActionBtn, styles.splitBillButton]}
+                onPress={() => {
+                  onClose();
+                  void (async () => {
+                    const params = await resolveSplitBillParamsForListing(listing.id);
+                    router.push({
+                      pathname: '/split-bill',
+                      params,
+                    } as never);
+                  })();
+                }}
+              >
+                <FontAwesome name="paper-plane" size={14} color="#FFFFFF" />
+                <Text style={styles.quickActionText}>Xərc bölüşdür</Text>
+              </Pressable>
             </View>
 
-            <Text style={styles.sectionLabel}>Məlumat</Text>
+            <Text style={styles.sectionLabel}>MƏLUMAT</Text>
 
-            <View style={styles.infoCard}>
+            <View style={styles.infoGrid}>
               {listing.type === 'carpool' ? (
                 <>
-                  <InfoFact icon="map-marker" label="Haradan" value={listing.origin_text || '—'} />
-                  <InfoFact
-                    icon="map-marker"
-                    label="Haraya"
-                    value={listing.destination_text || '—'}
-                  />
+                  <InfoFact icon="map-marker" label="Region" value={regionLabel} />
                   <InfoFact
                     icon="calendar"
                     label="Nə vaxt"
@@ -828,10 +838,11 @@ export function ListingDetailModal({
                   />
                   <InfoFact
                     icon="users"
-                    label="Qalan yer"
-                    value={`${spotsLeft} / ${capacity || '—'}`}
+                    label="İştirakçı"
+                    value={`${joinedCount} / ${capacity || '—'}`}
                   />
                   <InfoFact icon="money" label="Qiymət" value={formatPrice(listing)} />
+                  <InfoFact icon="road" label="Marşrut" value={`${listing.origin_text || '—'} → ${listing.destination_text || '—'}`} />
                 </>
               ) : null}
 
@@ -863,16 +874,21 @@ export function ListingDetailModal({
               ) : null}
             </View>
 
-            {listing.type === 'tour' || listing.type === 'carpool' ? (
-              <>
+            {(listing.type === 'tour' || listing.type === 'carpool') ? (
+              <View style={styles.metaLinksRow}>
                 <Pressable
-                  style={styles.routeToggle}
+                  style={[
+                    styles.metaActionBtn,
+                    listing.type === 'tour' && !isOwner && currentUserId
+                      ? null
+                      : styles.metaActionBtnSolo,
+                  ]}
                   onPress={() => setRouteListOpen((open) => !open)}
                 >
                   <FontAwesome
                     name={routeListOpen ? 'chevron-down' : 'chevron-right'}
-                    size={11}
-                    color={colors.accent}
+                    size={12}
+                    color={colors.brand}
                   />
                   <Text style={styles.routeToggleText}>
                     Marşrut
@@ -883,6 +899,24 @@ export function ListingDetailModal({
                         : ''}
                   </Text>
                 </Pressable>
+
+                {listing.type === 'tour' && !isOwner && currentUserId ? (
+                  <SubscribeMenuButton
+                    expandable
+                    rowPartner
+                    listingId={listing.id}
+                    organizerId={
+                      listing.created_by && listing.created_by !== currentUserId
+                        ? listing.created_by
+                        : null
+                    }
+                  />
+                ) : null}
+              </View>
+            ) : null}
+
+            {listing.type === 'tour' || listing.type === 'carpool' ? (
+              <>
                 {routeListOpen ? (
                   loadingExtras ? (
                     <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
@@ -925,18 +959,6 @@ export function ListingDetailModal({
                   )
                 ) : null}
               </>
-            ) : null}
-
-            {listing.type === 'tour' && !isOwner && currentUserId ? (
-              <SubscribeMenuButton
-                expandable
-                listingId={listing.id}
-                organizerId={
-                  listing.created_by && listing.created_by !== currentUserId
-                    ? listing.created_by
-                    : null
-                }
-              />
             ) : null}
 
             {listing.type === 'tour' && isOwner ? (
@@ -1306,7 +1328,8 @@ export function ListingDetailModal({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -1402,12 +1425,25 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderSoft,
   },
+  infoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.borderSoft,
+    backgroundColor: colors.surfaceMuted,
+  },
   infoFact: {
+    width: '47%',
+    flexGrow: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    gap: 10,
+    paddingVertical: 6,
+    minWidth: '42%',
   },
   infoIconWrap: {
     width: 32,
@@ -1429,10 +1465,82 @@ const styles = StyleSheet.create({
   },
   infoFactValue: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
     color: colors.text,
     flexShrink: 1,
     minWidth: 0,
+  },
+  creatorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14,
+  },
+  creatorNameLg: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.text,
+    maxWidth: 220,
+  },
+  avatarAccent: {
+    backgroundColor: '#F59E0B',
+  },
+  avatarInitialAccent: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  headerFavWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.warningSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  quickActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+  },
+  quickActionText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  metaLinksRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 12,
+  },
+  metaActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  metaActionBtnSolo: {
+    flex: 0,
+    alignSelf: 'stretch',
+    minWidth: '48%',
   },
   routeListCard: {
     backgroundColor: colors.surface,
@@ -1554,24 +1662,15 @@ const styles = StyleSheet.create({
     opacity: 0.9,
   },
   splitBillButton: {
-    backgroundColor: colors.accent,
+    backgroundColor: '#3B82F6',
   },
   sectionLabel: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '800',
     color: colors.textMuted,
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    letterSpacing: 0.6,
     marginBottom: 8,
-  },
-  routeToggle: {
-    marginTop: 4,
-    marginBottom: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   subscribersWrap: {
     marginTop: 12,
@@ -1646,7 +1745,7 @@ const styles = StyleSheet.create({
   routeToggleText: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.accent,
+    color: colors.brand,
   },
   poiItem: {
     flex: 1,
@@ -1677,14 +1776,14 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   joinButton: {
-    backgroundColor: colors.success,
+    backgroundColor: colors.brand,
     borderRadius: 16,
-    paddingVertical: 14,
+    paddingVertical: 15,
     alignItems: 'center',
   },
   joinButtonText: {
-    color: colors.textOnAccent,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontWeight: '800',
     fontSize: 15,
   },
   disabledButton: {
@@ -1753,7 +1852,7 @@ const styles = StyleSheet.create({
     gap: 8,
     borderWidth: 1,
     borderColor: '#FECACA',
-    backgroundColor: '#FFF7F7',
+    backgroundColor: colors.dangerSoft,
     borderRadius: 16,
     paddingVertical: 12,
   },
@@ -1766,7 +1865,7 @@ const styles = StyleSheet.create({
     gap: 8,
     borderWidth: 1,
     borderColor: '#FECACA',
-    backgroundColor: '#FFF7F7',
+    backgroundColor: colors.dangerSoft,
     borderRadius: 12,
     padding: 12,
   },
@@ -1910,3 +2009,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+}

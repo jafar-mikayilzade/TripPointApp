@@ -26,15 +26,31 @@ DEFAULT_RADIUS_M = 25_000
 DEFAULT_RESULT_LIMIT = 60
 
 # (app category, overpass selector with name required)
+# Lodging/food first so stars/price-tagged venues land before attractions.
 CATEGORY_SELECTORS: list[tuple[str, str]] = [
+    ("hotel", 'node["tourism"="hotel"]["name"]'),
+    ("hotel", 'way["tourism"="hotel"]["name"]'),
+    ("guesthouse", 'node["tourism"="guest_house"]["name"]'),
+    ("guesthouse", 'way["tourism"="guest_house"]["name"]'),
+    ("guesthouse", 'nwr["tourism"="chalet"]["name"]'),
+    ("guesthouse", 'nwr["tourism"="apartment"]["name"]'),
+    ("hostel", 'nwr["tourism"="hostel"]["name"]'),
     ("restaurant", 'node["amenity"="restaurant"]["name"]'),
     ("restaurant", 'way["amenity"="restaurant"]["name"]'),
+    ("camping", 'nwr["tourism"="camp_site"]["name"]'),
     ("waterfall", 'nwr["waterway"="waterfall"]["name"]'),
     ("lake", 'nwr["natural"="water"]["water"="lake"]["name"]'),
     ("lake", 'nwr["water"="lake"]["name"]'),
     ("nature", 'nwr["leisure"="nature_reserve"]["name"]'),
+    ("nature", 'nwr["tourism"="viewpoint"]["name"]'),
+    ("nature", 'nwr["tourism"="attraction"]["name"]'),
     ("nature", 'relation["boundary"="national_park"]["name"]'),
     ("mountain", 'node["natural"="peak"]["name"]'),
+    ("historical", 'nwr["tourism"="museum"]["name"]'),
+    ("historical", 'nwr["historic"="castle"]["name"]'),
+    ("historical", 'nwr["historic"="ruins"]["name"]'),
+    ("monument", 'nwr["historic"="monument"]["name"]'),
+    ("monument", 'nwr["historic"="memorial"]["name"]'),
 ]
 
 
@@ -50,7 +66,7 @@ def _query_for_selector(
     needs_center = selector.lstrip().startswith(("way", "rel", "nwr"))
     out_clause = "out center" if needs_center else "out body"
     return (
-        f"[out:json][timeout:25];\n"
+        f"[out:json][timeout:55];\n"
         f"{selector}{around};\n"
         f"{out_clause} {int(result_limit)};"
     )
@@ -76,16 +92,22 @@ def _fetch_category_places(
     query = _query_for_selector(
         lat, lng, selector, radius_m=radius_m, result_limit=DEFAULT_RESULT_LIMIT
     )
-    # Prefer currently healthy public mirror first (others often 429/504)
-    preferred = "https://overpass.openstreetmap.fr/api/interpreter"
+    # Prefer currently healthy public mirrors first (others often 429/504)
+    preferred = [
+        "https://overpass.openstreetmap.fr/api/interpreter",
+        "https://overpass-api.de/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+    ]
     try:
         from app.config import OVERPASS_ENDPOINTS
 
-        endpoints = [preferred] + [
-            e for e in OVERPASS_ENDPOINTS if e.rstrip("/") != preferred.rstrip("/")
+        endpoints = preferred + [
+            e
+            for e in OVERPASS_ENDPOINTS
+            if e.rstrip("/") not in {p.rstrip("/") for p in preferred}
         ]
     except Exception:
-        endpoints = [preferred]
+        endpoints = list(preferred)
 
     # Temporarily point module mirrors at preferred order without mutating forever
     import app.services.places_osm as osm_mod
@@ -95,7 +117,12 @@ def _fetch_category_places(
     # Clear cooldown so one bad mirror earlier doesn't block the run
     osm_mod._OVERPASS_COOLDOWN_UNTIL = 0.0
     try:
-        payload = _overpass_get(query, timeout_seconds=35.0, max_mirrors=2)
+        payload = _overpass_get(
+            query,
+            timeout_seconds=45.0,
+            max_mirrors=3,
+            rotate=False,
+        )
     except Exception as exc:
         logger.warning("overpass failed for %s: %s", app_category, exc)
         print(f"[osm-import] {app_category} failed: {exc}")
@@ -145,8 +172,8 @@ def import_osm_named_for_region(
                 continue
             seen_ids.add(pid)
             raw.append(place)
-        # Be gentle with public mirrors
-        time.sleep(1.0)
+        # Be gentle with public mirrors (keep short — 30-region runs)
+        time.sleep(0.45)
 
     cleaned: list[dict[str, Any]] = []
     skipped_no_name = 0
@@ -169,6 +196,16 @@ def import_osm_named_for_region(
             continue
         cleaned.append(row)
         by_cat[cat] = by_cat.get(cat, 0) + 1
+
+    # Prefer rated / priced / starred lodging first when writing
+    cleaned.sort(
+        key=lambda r: (
+            0 if r.get("rating") is not None else 1,
+            0 if r.get("price_from") is not None else 1,
+            0 if r.get("hotel_class") is not None else 1,
+            -(float(r["rating"]) if r.get("rating") is not None else -1.0),
+        )
+    )
 
     inserted = 0
     skipped_existing = 0

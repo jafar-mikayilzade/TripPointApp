@@ -2,7 +2,7 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useMemo, useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -22,13 +22,16 @@ import MapView, { Marker } from '../components/AppMap';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PoiDetailModal } from '../components/PoiDetailModal';
+import { getApiBaseUrl } from '../lib/apiBase';
+import { getAuthHeaders } from '../lib/authHeaders';
 import { getErrorMessage } from '../lib/errors';
 import { supabase } from '../lib/supabase';
 import { confirmDelete, deletePost } from '../lib/userContentDelete';
 import { uploadImage } from '../lib/uploadImage';
 import type { Poi, Post, PostPhoto, Profile } from '../types/database';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 type FeedPost = Post & {
   author: Pick<Profile, 'id' | 'full_name' | 'avatar_url'> | null;
@@ -59,6 +62,8 @@ function formatDate(value: string): string {
 
 export default function FeedScreen() {
   const insets = useSafeAreaInsets();
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
 
   const [posts, setPosts] = useState<FeedPost[]>([]);
@@ -130,9 +135,9 @@ export default function FeedScreen() {
       supabase.from('profiles').select('id, full_name, avatar_url').in('id', userIds),
       supabase
         .from('post_photos')
-        .select('*')
+        .select('id, post_id, photo_url, order_index, created_at')
         .in('post_id', postIds)
-        .order('sort_order', { ascending: true }),
+        .order('order_index', { ascending: true }),
       poiIds.length > 0
         ? supabase.from('pois').select('id, name, lat, lng').in('id', poiIds)
         : Promise.resolve({ data: [] as Pick<Poi, 'id' | 'name' | 'lat' | 'lng'>[], error: null }),
@@ -350,8 +355,8 @@ export default function FeedScreen() {
           const url = await uploadImage(imageUris[i], STORAGE_BUCKET, path);
           photoRows.push({
             post_id: post.id,
-            url,
-            sort_order: i + 1,
+            photo_url: url,
+            order_index: i + 1,
           });
         }
 
@@ -406,46 +411,95 @@ export default function FeedScreen() {
       return;
     }
 
-    const { error } = await supabase.from('ratings').upsert(
-      {
-        rater_id: user.id,
-        target_type: 'post',
-        target_id: postId,
-        score,
-      },
-      { onConflict: 'rater_id,target_type,target_id' }
-    );
+    try {
+      const base = getApiBaseUrl();
+      const headers = await getAuthHeaders();
+      if (base && headers) {
+        const res = await fetch(`${base}/api/ratings/upsert`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            target_type: 'post',
+            target_id: postId,
+            score,
+          }),
+        });
+        const json = (await res.json().catch(() => null)) as {
+          success?: boolean;
+          average?: number | null;
+          count?: number;
+          user_score?: number;
+          detail?: { message?: string } | string;
+        } | null;
+        if (!res.ok) {
+          const detail = json?.detail;
+          const message =
+            typeof detail === 'string'
+              ? detail
+              : detail?.message || getErrorMessage({ message: `HTTP ${res.status}` });
+          setErrorMessage(message);
+          setRatingBusyId(null);
+          return;
+        }
+        setPosts((current) =>
+          current.map((item) =>
+            item.id === postId
+              ? {
+                  ...item,
+                  averageRating: json?.average ?? null,
+                  ratingCount: json?.count ?? 0,
+                  userScore: json?.user_score ?? score,
+                }
+              : item
+          )
+        );
+        setRatingBusyId(null);
+        return;
+      }
 
-    if (error) {
-      setErrorMessage(getErrorMessage(error));
-      setRatingBusyId(null);
-      return;
-    }
-
-    const { data: refreshed, error: refreshError } = await supabase
-      .from('ratings')
-      .select('score, rater_id')
-      .eq('target_type', 'post')
-      .eq('target_id', postId);
-
-    if (!refreshError && refreshed) {
-      const sum = refreshed.reduce((acc, row) => acc + row.score, 0);
-      const mine = refreshed.find((row) => row.rater_id === user.id)?.score ?? score;
-      setPosts((current) =>
-        current.map((item) =>
-          item.id === postId
-            ? {
-                ...item,
-                averageRating: refreshed.length > 0 ? sum / refreshed.length : null,
-                ratingCount: refreshed.length,
-                userScore: mine,
-              }
-            : item
-        )
+      const { error } = await supabase.from('ratings').upsert(
+        {
+          rater_id: user.id,
+          target_type: 'post',
+          target_id: postId,
+          score,
+        },
+        { onConflict: 'rater_id,target_type,target_id' }
       );
-    }
 
-    setRatingBusyId(null);
+      if (error) {
+        setErrorMessage(getErrorMessage(error));
+        setRatingBusyId(null);
+        return;
+      }
+
+      const { data: refreshed, error: refreshError } = await supabase
+        .from('ratings')
+        .select('score, rater_id')
+        .eq('target_type', 'post')
+        .eq('target_id', postId);
+
+      if (!refreshError && refreshed) {
+        const sum = refreshed.reduce((acc, row) => acc + row.score, 0);
+        const mine = refreshed.find((row) => row.rater_id === user.id)?.score ?? score;
+        setPosts((current) =>
+          current.map((item) =>
+            item.id === postId
+              ? {
+                  ...item,
+                  averageRating: refreshed.length > 0 ? sum / refreshed.length : null,
+                  ratingCount: refreshed.length,
+                  userScore: mine,
+                }
+              : item
+          )
+        );
+      }
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err));
+    } finally {
+      setRatingBusyId(null);
+    }
   }
 
   async function handleDeletePost(postId: string) {
@@ -519,7 +573,11 @@ export default function FeedScreen() {
             style={styles.photoScroll}
           >
             {item.photos.map((photo) => (
-              <Image key={photo.id} source={{ uri: photo.url }} style={styles.postPhoto} />
+              <Image
+                key={photo.id}
+                source={{ uri: photo.photo_url || photo.url }}
+                style={styles.postPhoto}
+              />
             ))}
           </ScrollView>
         ) : null}
@@ -655,7 +713,7 @@ export default function FeedScreen() {
                         style={styles.removePreview}
                         onPress={() => setImageUris((current) => current.filter((item) => item !== uri))}
                       >
-                        <FontAwesome name="times" size={12} color="#fff" />
+                        <FontAwesome name="times" size={12} color={colors.textOnAccent} />
                       </Pressable>
                     </View>
                   ))}
@@ -730,7 +788,7 @@ export default function FeedScreen() {
                 disabled={sharing}
               >
                 {sharing ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color={colors.textOnAccent} />
                 ) : (
                   <Text style={styles.submitText}>Paylaş</Text>
                 )}
@@ -788,7 +846,8 @@ export default function FeedScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -1119,3 +1178,4 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 });
+}

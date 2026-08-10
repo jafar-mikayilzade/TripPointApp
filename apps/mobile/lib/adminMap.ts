@@ -221,6 +221,23 @@ export async function updatePoiCoordinates(
   return { error: null };
 }
 
+/** Admin: hard-delete an approved POI (photos cascade via FK). */
+export async function deletePoiAsAdmin(
+  poiId: string
+): Promise<{ error: string | null }> {
+  if (!poiId?.trim()) {
+    return { error: 'POI id yoxdur' };
+  }
+
+  const { error } = await supabase.from('pois').delete().eq('id', poiId);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return { error: null };
+}
+
 export async function insertApprovedPoiFromGoogle(params: {
   name: string;
   category: PoiCategory;

@@ -1,7 +1,7 @@
 import type { ErrorBoundaryProps } from 'expo-router';
 import { Stack, router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 
 import { subscribeAuthDeepLinks } from '../lib/authDeepLink';
@@ -23,7 +23,9 @@ import { initSentry } from '../lib/sentry';
 import { supabase } from '../lib/supabase';
 
 import { InfoToastProvider } from '../components/InfoToastProvider';
-import { colors } from '../constants/theme';
+import { BrandSplash } from '../components/BrandSplash';
+import { lightColors } from '../constants/theme';
+import { ThemeProvider } from '../theme/ThemeProvider';
 
 initSentry();
 
@@ -41,6 +43,7 @@ function safeReplace(href: string) {
 }
 
 export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  const styles = errorStyles;
   return (
     <View style={styles.loader}>
       <Text style={styles.errorTitle}>Tətbiq xətası</Text>
@@ -52,7 +55,7 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   );
 }
 
-export default function RootLayout() {
+function RootLayoutInner() {
   const [isLoading, setIsLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [passwordRecovery, setPasswordRecovery] = useState(isPasswordRecoveryPending());
@@ -236,12 +239,7 @@ export default function RootLayout() {
   }, []);
 
   if (isLoading) {
-    return (
-      <View style={styles.loader}>
-        <ActivityIndicator size="large" color={colors.accent} />
-        <Text style={styles.loadingText}>Yüklənir...</Text>
-      </View>
-    );
+    return <BrandSplash animateProgress />;
   }
 
   const showApp = !!session && !passwordRecovery;
@@ -266,38 +264,41 @@ export default function RootLayout() {
   );
 }
 
-const styles = StyleSheet.create({
+export default function RootLayout() {
+  return (
+    <ThemeProvider>
+      <RootLayoutInner />
+    </ThemeProvider>
+  );
+}
+
+const errorStyles = StyleSheet.create({
   loader: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: lightColors.bg,
     paddingHorizontal: 24,
-  },
-  loadingText: {
-    marginTop: 12,
-    color: colors.textSecondary,
-    fontWeight: '600',
   },
   errorTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: colors.text,
+    color: lightColors.text,
     marginBottom: 8,
   },
   errorText: {
-    color: colors.dangerText,
+    color: lightColors.dangerText,
     textAlign: 'center',
     marginBottom: 16,
   },
   retryButton: {
-    backgroundColor: colors.accent,
+    backgroundColor: lightColors.brand,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
   retryText: {
-    color: colors.textOnAccent,
+    color: lightColors.textOnAccent,
     fontWeight: '700',
   },
 });

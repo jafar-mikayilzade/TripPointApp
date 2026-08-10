@@ -1,7 +1,8 @@
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,6 +12,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -28,7 +30,8 @@ import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
 import { TripScheduleFields } from '../../components/TripScheduleFields';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
-import { colors } from '../../constants/theme';
+import type { ThemeColors } from '../../constants/theme';
+import { useThemeColors } from '../../theme/ThemeProvider';
 import { getErrorMessage } from '../../lib/errors';
 import { useResponsiveLayout } from '../../lib/layout';
 import { collectRouteStops, openRouteInGoogleMaps } from '../../lib/openNavigation';
@@ -64,6 +67,7 @@ type DayOption = 1 | 2 | 3;
 type BudgetOption = 'budget' | 'mid' | 'premium';
 type InterestId = 'nature' | 'history';
 type GroupOption = 'solo' | 'couple' | 'family' | 'group';
+type LodgingOption = 'hotel' | 'private';
 
 type PlanStop = {
   time: string;
@@ -167,13 +171,75 @@ function isMapPathStop(stop: {
   return true;
 }
 
-const DAY_COLORS = [
-  colors.accent,
-  colors.success,
-  colors.warning,
-  colors.accentPressed,
-  colors.danger,
-];
+function visitStopsOnly(stops: PlanStop[]): PlanStop[] {
+  return stops.filter((s) => !isTravelStop(s));
+}
+
+function renumberVisitStops(stops: PlanStop[]): PlanStop[] {
+  let seq = 0;
+  return stops.map((s) => {
+    if (isTravelStop(s)) {
+      return { ...s, sequence_order: null };
+    }
+    seq += 1;
+    return { ...s, sequence_order: seq };
+  });
+}
+
+function planWithDayStops(
+  plan: GeneratedPlan,
+  dayIdx: number,
+  stops: PlanStop[]
+): GeneratedPlan {
+  return {
+    ...plan,
+    days: plan.days.map((day, i) =>
+      i === dayIdx ? { ...day, stops: renumberVisitStops(stops) } : day
+    ),
+  };
+}
+
+function stripTravelFromPlan(plan: GeneratedPlan): GeneratedPlan {
+  return {
+    ...plan,
+    days: plan.days.map((day) => ({
+      ...day,
+      stops: renumberVisitStops(visitStopsOnly(day.stops)),
+    })),
+  };
+}
+
+type RegionPoiPick = {
+  id: string;
+  name: string;
+  category: string;
+  lat: number;
+  lng: number;
+};
+
+function poiToPlanStop(poi: RegionPoiPick): PlanStop {
+  return {
+    time: '•',
+    poi_id: poi.id,
+    name: poi.name,
+    category: poi.category || 'other',
+    duration: '',
+    lat: poi.lat,
+    lng: poi.lng,
+    tip: '',
+    sequence_order: null,
+  };
+}
+
+function getDayColors(colors: ThemeColors): string[] {
+  return [
+    colors.accent,
+    colors.success,
+    colors.warning,
+    colors.accentPressed,
+    colors.danger,
+  ];
+}
 
 const DAY_OPTIONS: { value: DayOption; label: string }[] = [
   { value: 1, label: '1 gün' },
@@ -207,7 +273,7 @@ const AI_LOADING_MESSAGES = [
   'Demək olar hazırdır...',
 ];
 
-function preferAttractionsForInterests<T extends { category: string }>(
+function preferAttractionsForInterests<T extends { category: string; categories?: string[] | null }>(
   attractions: T[],
   selected: InterestId[]
 ): T[] {
@@ -217,9 +283,49 @@ function preferAttractionsForInterests<T extends { category: string }>(
   if (prefer.size === 0) {
     return attractions;
   }
-  const matched = attractions.filter((a) => prefer.has(a.category));
-  const rest = attractions.filter((a) => !prefer.has(a.category));
-  return [...matched, ...rest];
+  // Hard filter: only interest-matching categories
+  return attractions.filter((a) => {
+    const cats =
+      Array.isArray(a.categories) && a.categories.length > 0
+        ? a.categories.map(String)
+        : a.category
+          ? [String(a.category)]
+          : [];
+    return cats.some((c) => prefer.has(c));
+  });
+}
+
+function nearestRegionId(lat: number, lng: number): string {
+  let bestId = REGIONS[0]?.id ?? DEFAULT_REGION_ID;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (const region of REGIONS) {
+    const d =
+      (region.latitude - lat) ** 2 + (region.longitude - lng) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      bestId = region.id;
+    }
+  }
+  return bestId;
+}
+
+function keepInsideSelectedRegion<T extends { lat?: number | null; lng?: number | null; region?: string | null }>(
+  rows: T[],
+  selectedRegionId: string
+): T[] {
+  const target = selectedRegionId.toLowerCase();
+  return rows.filter((row) => {
+    const regionVal = String(row.region || '').trim().toLowerCase();
+    if (regionVal && regionVal !== target) {
+      return false;
+    }
+    const lat = Number(row.lat);
+    const lng = Number(row.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return false;
+    }
+    return nearestRegionId(lat, lng) === target;
+  });
 }
 
 const GROUP_OPTIONS: { value: GroupOption; label: string }[] = [
@@ -228,6 +334,31 @@ const GROUP_OPTIONS: { value: GroupOption; label: string }[] = [
   { value: 'family', label: 'Ailə' },
   { value: 'group', label: 'Qrup' },
 ];
+
+const LODGING_OPTIONS: { value: LodgingOption; label: string; hint: string }[] = [
+  { value: 'hotel', label: 'Otel', hint: 'Yalnız otel' },
+  { value: 'private', label: 'Fərdi ev', hint: 'Ev / hosteli / kempinq' },
+];
+
+const LODGING_CATS: Record<LodgingOption, string[]> = {
+  hotel: ['hotel'],
+  private: ['guesthouse', 'hostel', 'camping'],
+};
+
+function filterAccommodationsByLodgingType<
+  T extends { category?: string; categories?: string[] | null },
+>(rows: T[], lodgingType: LodgingOption): T[] {
+  const allowed = new Set(LODGING_CATS[lodgingType] ?? LODGING_CATS.hotel);
+  return rows.filter((row) => {
+    const cats =
+      Array.isArray(row.categories) && row.categories.length > 0
+        ? row.categories.map(String)
+        : row.category
+          ? [String(row.category)]
+          : [];
+    return cats.some((c) => allowed.has(c));
+  });
+}
 
 function decodePolyline(encoded: string): LatLng[] {
   const poly: LatLng[] = [];
@@ -279,6 +410,10 @@ const MARSRUT_FORM_SPLIT = 0;
 const MARSRUT_PLAN_SPLIT = 0.5;
 
 export default function MarsrutScreen() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const DAY_COLORS = useMemo(() => getDayColors(colors), [colors]);
+
   const mapRef = useRef<MapRef | null>(null);
   const fitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { showInfo } = useInfoToast();
@@ -293,11 +428,19 @@ export default function MarsrutScreen() {
   const [budget, setBudget] = useState<BudgetOption>('mid');
   const [interests, setInterests] = useState<InterestId[]>(['nature']);
   const [group, setGroup] = useState<GroupOption | null>(null);
+  const [lodgingType, setLodgingType] = useState<LodgingOption>('hotel');
 
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState(AI_LOADING_MESSAGES[0]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [plan, setPlan] = useState<GeneratedPlan | null>(null);
+  const [editingPlan, setEditingPlan] = useState(false);
+  const [addPlacesOpen, setAddPlacesOpen] = useState(false);
+  const [addDayIdx, setAddDayIdx] = useState<number | null>(null);
+  const [insertAfterVisit, setInsertAfterVisit] = useState<number | null>(null);
+  const [regionPois, setRegionPois] = useState<RegionPoiPick[]>([]);
+  const [loadingPois, setLoadingPois] = useState(false);
+  const [poiSearch, setPoiSearch] = useState('');
   const [weatherAdvice, setWeatherAdvice] = useState<WeatherAdvice | null>(null);
   const [routeSegments, setRouteSegments] = useState<RouteSegment[]>([]);
   const [stopDurations, setStopDurations] = useState<Record<string, StopDuration>>({});
@@ -582,12 +725,158 @@ export default function MarsrutScreen() {
 
   function handleReset() {
     setPlan(null);
+    setEditingPlan(false);
+    setAddPlacesOpen(false);
+    setAddDayIdx(null);
+    setInsertAfterVisit(null);
+    setPoiSearch('');
+    setRegionPois([]);
     setWeatherAdvice(null);
     setRouteSegments([]);
     setStopDurations({});
     setErrorMessage(null);
     setMapSize(null);
     setSplitRatio(MARSRUT_FORM_SPLIT);
+  }
+
+  const loadEditPois = useCallback(async () => {
+    setLoadingPois(true);
+    try {
+      const { data, error } = await supabase
+        .from('pois')
+        .select('id, name, category, lat, lng')
+        .eq('region', regionId)
+        .eq('status', 'approved')
+        .neq('category', 'cafe')
+        .order('name');
+      if (error) {
+        throw error;
+      }
+      setRegionPois((data as RegionPoiPick[]) ?? []);
+    } catch (err) {
+      Alert.alert('Məkanlar', getErrorMessage(err));
+      setRegionPois([]);
+    } finally {
+      setLoadingPois(false);
+    }
+  }, [regionId]);
+
+  useEffect(() => {
+    if (!editingPlan || !addPlacesOpen || !plan) {
+      return;
+    }
+    void loadEditPois();
+  }, [editingPlan, addPlacesOpen, plan, loadEditPois]);
+
+  const filteredEditPois = useMemo(() => {
+    const q = poiSearch.trim().toLowerCase();
+    if (!q) {
+      return regionPois.slice(0, 40);
+    }
+    return regionPois.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 40);
+  }, [regionPois, poiSearch]);
+
+  function enablePlanEditing(next: boolean) {
+    if (!next) {
+      setEditingPlan(false);
+      setAddPlacesOpen(false);
+      setAddDayIdx(null);
+      setInsertAfterVisit(null);
+      setPoiSearch('');
+      return;
+    }
+    if (plan) {
+      const stripped = stripTravelFromPlan(plan);
+      setPlan(stripped);
+      void fetchRouteFromGoogle(stripped);
+    }
+    setEditingPlan(true);
+    setAddPlacesOpen(false);
+    setAddDayIdx(0);
+    setInsertAfterVisit(null);
+  }
+
+  function openAddPlaces(dayIdx?: number, afterVisit?: number | null) {
+    if (dayIdx != null) {
+      setAddDayIdx(dayIdx);
+    } else if (addDayIdx == null) {
+      setAddDayIdx(0);
+    }
+    setInsertAfterVisit(afterVisit ?? null);
+    setAddPlacesOpen(true);
+  }
+
+  function closeAddPlaces() {
+    setAddPlacesOpen(false);
+    setInsertAfterVisit(null);
+    setPoiSearch('');
+  }
+
+  function applyPlanEdit(next: GeneratedPlan) {
+    setPlan(next);
+    void fetchRouteFromGoogle(next);
+  }
+
+  function moveVisitStop(dayIdx: number, visitIndex: number, direction: -1 | 1) {
+    if (!plan) {
+      return;
+    }
+    const day = plan.days[dayIdx];
+    if (!day) {
+      return;
+    }
+    const visits = visitStopsOnly(day.stops);
+    const target = visitIndex + direction;
+    if (target < 0 || target >= visits.length) {
+      return;
+    }
+    const nextVisits = [...visits];
+    const [item] = nextVisits.splice(visitIndex, 1);
+    nextVisits.splice(target, 0, item);
+    applyPlanEdit(planWithDayStops(plan, dayIdx, nextVisits));
+  }
+
+  function removeVisitStop(dayIdx: number, visitIndex: number) {
+    if (!plan) {
+      return;
+    }
+    const day = plan.days[dayIdx];
+    if (!day) {
+      return;
+    }
+    const visits = visitStopsOnly(day.stops);
+    if (visits.length <= 1) {
+      Alert.alert('Marşrut', 'Gündə ən azı bir məkan qalmalıdır.');
+      return;
+    }
+    const nextVisits = visits.filter((_, i) => i !== visitIndex);
+    applyPlanEdit(planWithDayStops(plan, dayIdx, nextVisits));
+  }
+
+  function addPoiToDay(poi: RegionPoiPick) {
+    if (!plan || addDayIdx == null) {
+      return;
+    }
+    const day = plan.days[addDayIdx];
+    if (!day) {
+      return;
+    }
+    const visits = visitStopsOnly(day.stops);
+    if (visits.some((s) => s.poi_id === poi.id)) {
+      showInfo('Bu məkan artıq marşrutdadır');
+      return;
+    }
+    const stop = poiToPlanStop(poi);
+    const nextVisits = [...visits];
+    if (insertAfterVisit != null && insertAfterVisit >= 0 && insertAfterVisit < visits.length) {
+      nextVisits.splice(insertAfterVisit + 1, 0, stop);
+    } else {
+      nextVisits.push(stop);
+    }
+    applyPlanEdit(planWithDayStops(plan, addDayIdx, nextVisits));
+    setInsertAfterVisit(null);
+    setPoiSearch('');
+    showInfo(`Əlavə olundu: ${poi.name}`);
   }
 
   async function handleSavePlan() {
@@ -626,7 +915,7 @@ export default function MarsrutScreen() {
     }
   }
 
-  const fetchRouteFromGoogle = async (planData: GeneratedPlan) => {
+  async function fetchRouteFromGoogle(planData: GeneratedPlan) {
     try {
       const dayStopLists: Array<Array<{ lat: number; lng: number; name: string }>> = [];
       (planData.days ?? []).forEach((day) => {
@@ -765,7 +1054,7 @@ export default function MarsrutScreen() {
     } catch (err) {
       console.log('Route fetch xətası:', err);
     }
-  };
+  }
 
   const planRoute = async () => {
     try {
@@ -820,6 +1109,13 @@ export default function MarsrutScreen() {
           ranked.attractions.filter((p) => keep.has(p.id)),
           interests
         );
+        restaurants = keepInsideSelectedRegion(restaurants, regionId);
+        accommodations = keepInsideSelectedRegion(accommodations, regionId);
+        accommodations = filterAccommodationsByLodgingType(
+          accommodations,
+          lodgingType
+        );
+        attractions = keepInsideSelectedRegion(attractions, regionId);
       }
 
       // If API buckets are thin on attractions, top up directly from Supabase DB
@@ -840,7 +1136,10 @@ export default function MarsrutScreen() {
         }
 
         if (poisRaw && poisRaw.length > 0) {
-          const pois = applyWeatherPoiFilter(poisRaw, weather);
+          const pois = keepInsideSelectedRegion(
+            applyWeatherPoiFilter(poisRaw, weather),
+            regionId
+          );
           const byRating = (a: any, b: any) => {
             const ra = typeof a.rating === 'number' ? a.rating : -1;
             const rb = typeof b.rating === 'number' ? b.rating : -1;
@@ -859,6 +1158,9 @@ export default function MarsrutScreen() {
           };
           const hasAny = (p: any, allowed: string[]) =>
             poiCats(p).some((c) => allowed.includes(c));
+          const interestCats = interests.flatMap(
+            (id) => INTEREST_ATTRACTION_CATS[id] ?? []
+          );
 
           const mergeById = (primary: any[], extra: any[]) => {
             const seen = new Set(primary.map((p) => String(p.id)));
@@ -876,22 +1178,27 @@ export default function MarsrutScreen() {
             .filter((p) => hasAny(p, ['restaurant', 'home_restaurant', 'cafe']))
             .sort(byRating)
             .slice(0, 60);
-          const dbAccommodations = pois
-            .filter((p) => hasAny(p, ['hotel', 'hostel', 'guesthouse', 'camping']))
-            .sort(byRating)
-            .slice(0, 60);
+          const dbAccommodations = filterAccommodationsByLodgingType(
+            pois
+              .filter((p) => hasAny(p, ['hotel', 'hostel', 'guesthouse', 'camping']))
+              .sort(byRating)
+              .slice(0, 60),
+            lodgingType
+          );
           const dbAttractions = preferAttractionsForInterests(
             pois
               .filter((p) =>
-                hasAny(p, [
-                  'nature',
-                  'waterfall',
-                  'mountain',
-                  'lake',
-                  'historical',
-                  'monument',
-                  'other',
-                ])
+                interestCats.length > 0
+                  ? hasAny(p, interestCats)
+                  : hasAny(p, [
+                      'nature',
+                      'waterfall',
+                      'mountain',
+                      'lake',
+                      'historical',
+                      'monument',
+                      'other',
+                    ])
               )
               .sort(byRating),
             interests
@@ -927,6 +1234,7 @@ export default function MarsrutScreen() {
         budget,
         interests,
         groupType: group ?? 'solo',
+        lodgingType,
         weather: weather
           ? {
               prefer_indoor: weather.prefer_indoor,
@@ -1062,6 +1370,11 @@ export default function MarsrutScreen() {
       };
 
       setPlan(planData);
+      setEditingPlan(false);
+      setAddPlacesOpen(false);
+      setAddDayIdx(null);
+      setInsertAfterVisit(null);
+      setPoiSearch('');
       setSplitRatio(MARSRUT_PLAN_SPLIT);
       // Fit all days after layout; do not animateToRegion (hides day-1 cluster)
       await fetchRouteFromGoogle(planData);
@@ -1381,6 +1694,39 @@ export default function MarsrutScreen() {
                     })}
                   </View>
 
+                  <Text style={styles.label}>
+                    Gecələmə <Text style={styles.required}>*</Text>
+                  </Text>
+                  <Text style={styles.fromOriginHint}>
+                    {days < 2
+                      ? '2+ günlük marşrutlarda tətbiq olunur'
+                      : lodgingType === 'hotel'
+                        ? 'Yalnız otel kateqoriyası seçiləcək'
+                        : 'Fərdi ev, hostel və kempinq seçiləcək'}
+                  </Text>
+                  <View style={styles.optionRow}>
+                    {LODGING_OPTIONS.map((option) => {
+                      const selected = option.value === lodgingType;
+                      return (
+                        <Pressable
+                          key={option.value}
+                          onPress={() => setLodgingType(option.value)}
+                          style={[styles.optionChip, selected && styles.optionChipSelected]}
+                        >
+                          <Text
+                            style={[
+                              styles.optionChipText,
+                              selected && styles.optionChipTextSelected,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {option.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
                   <Text style={styles.label}>Neçə nəfər (istəyə bağlı)</Text>
                   <View style={styles.optionRow}>
                     {GROUP_OPTIONS.map((option) => {
@@ -1526,9 +1872,138 @@ export default function MarsrutScreen() {
                         <Text style={styles.navButtonText}>Naviqasiyanı başlat</Text>
                       </TouchableOpacity>
                     </View>
+
+                    <View style={styles.editPromptRow}>
+                      <View style={styles.editPromptTextCol}>
+                        <Text style={styles.editPromptTitle}>
+                          Dəyişiklik etmək istəyirsən?
+                        </Text>
+                        <Text style={styles.editPromptHint}>
+                          {editingPlan
+                            ? 'Sıra dəyiş, sil və ya yeni məkan əlavə et'
+                            : 'Yox — indiki plan olduğu kimi qalır'}
+                        </Text>
+                      </View>
+                      <Switch
+                        value={editingPlan}
+                        onValueChange={enablePlanEditing}
+                        trackColor={{ false: colors.border, true: colors.brand }}
+                        thumbColor="#FFFFFF"
+                      />
+                    </View>
                   </View>
 
-                  {plan.days.map((day, dayIdx) => (
+                  {editingPlan ? (
+                    <View style={styles.editPanel}>
+                      {!addPlacesOpen ? (
+                        <Pressable
+                          style={styles.editOpenBtn}
+                          onPress={() => openAddPlaces(addDayIdx ?? 0, null)}
+                        >
+                          <Ionicons name="add-circle-outline" size={18} color={colors.brand} />
+                          <Text style={styles.editOpenBtnText}>Məkan əlavə et</Text>
+                        </Pressable>
+                      ) : (
+                        <>
+                          <View style={styles.editPanelHeader}>
+                            <Text style={styles.editPanelTitle}>Məkan əlavə et</Text>
+                            <Pressable onPress={closeAddPlaces} hitSlop={8}>
+                              <Ionicons name="close" size={20} color={colors.textMuted} />
+                            </Pressable>
+                          </View>
+                          {plan.days.length > 1 ? (
+                            <View style={styles.editDayChips}>
+                              {plan.days.map((day, idx) => (
+                                <Pressable
+                                  key={`add-day-${day.day}`}
+                                  style={[
+                                    styles.editDayChip,
+                                    addDayIdx === idx && styles.editDayChipActive,
+                                  ]}
+                                  onPress={() => {
+                                    setAddDayIdx(idx);
+                                    setInsertAfterVisit(null);
+                                  }}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.editDayChipText,
+                                      addDayIdx === idx && styles.editDayChipTextActive,
+                                    ]}
+                                  >
+                                    Gün {day.day}
+                                  </Text>
+                                </Pressable>
+                              ))}
+                            </View>
+                          ) : null}
+                          {insertAfterVisit != null ? (
+                            <Text style={styles.editInsertHint}>
+                              Seçilmiş məkandan sonra əlavə olunacaq ·{' '}
+                              <Text
+                                style={styles.editInsertClear}
+                                onPress={() => setInsertAfterVisit(null)}
+                              >
+                                Ləğv et
+                              </Text>
+                            </Text>
+                          ) : (
+                            <Text style={styles.editInsertHint}>
+                              Siyahının sonuna əlavə olunur (və ya + ilə araya)
+                            </Text>
+                          )}
+                          <View style={styles.editSearchRow}>
+                            <Ionicons name="search" size={16} color={colors.textMuted} />
+                            <TextInput
+                              style={styles.editSearchInput}
+                              value={poiSearch}
+                              onChangeText={setPoiSearch}
+                              placeholder="Məkan axtar…"
+                              placeholderTextColor={colors.textMuted}
+                              autoCorrect={false}
+                              returnKeyType="search"
+                            />
+                            {poiSearch ? (
+                              <TouchableOpacity onPress={() => setPoiSearch('')} hitSlop={8}>
+                                <Ionicons
+                                  name="close-circle"
+                                  size={16}
+                                  color={colors.textMuted}
+                                />
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                          {loadingPois ? (
+                            <ActivityIndicator
+                              color={colors.brand}
+                              style={{ marginVertical: 8 }}
+                            />
+                          ) : (
+                            filteredEditPois.map((poi) => (
+                              <Pressable
+                                key={poi.id}
+                                style={styles.editPoiRow}
+                                onPress={() => addPoiToDay(poi)}
+                              >
+                                <CategoryIcon category={poi.category} size={14} />
+                                <Text style={styles.editPoiName} numberOfLines={1}>
+                                  {poi.name}
+                                </Text>
+                                <Ionicons name="add-circle" size={20} color={colors.brand} />
+                              </Pressable>
+                            ))
+                          )}
+                          {!loadingPois && filteredEditPois.length === 0 ? (
+                            <Text style={styles.editInsertHint}>Uyğun məkan tapılmadı</Text>
+                          ) : null}
+                        </>
+                      )}
+                    </View>
+                  ) : null}
+
+                  {plan.days.map((day, dayIdx) => {
+                    const visitList = visitStopsOnly(day.stops);
+                    return (
                     <View key={day.day} style={styles.dayBlock}>
                       <View style={styles.dayHeader}>
                         <View
@@ -1556,12 +2031,14 @@ export default function MarsrutScreen() {
                         ) : null}
                       </View>
 
-                      {day.stops.map((stop, stopIdx) => {
-                        const leg = stopDurations[legKey(dayIdx, stopIdx)];
+                      {(editingPlan ? visitList : day.stops).map((stop, stopIdx) => {
                         const travel = isTravelStop(stop);
+                        const visitIndex = editingPlan ? stopIdx : -1;
+                        const leg = stopDurations[legKey(dayIdx, stopIdx)];
+                        const listLen = editingPlan ? visitList.length : day.stops.length;
                         return (
                           <View
-                            key={`${stop.poi_id}-${stopIdx}`}
+                            key={`${stop.poi_id}-${stopIdx}-${stop.name}`}
                             style={styles.stopRow}
                           >
                             <View style={styles.stopTimeCol}>
@@ -1573,7 +2050,7 @@ export default function MarsrutScreen() {
                               >
                                 {stop.arrival_time || stop.visiting_time || stop.time}
                               </Text>
-                              {stopIdx < day.stops.length - 1 ? (
+                              {stopIdx < listLen - 1 ? (
                                 <View
                                   style={[
                                     styles.stopTimeline,
@@ -1591,6 +2068,7 @@ export default function MarsrutScreen() {
                               style={[
                                 styles.stopCard,
                                 travel && styles.stopCardTravel,
+                                editingPlan && !travel && styles.stopCardEditing,
                               ]}
                             >
                               {travel ? (
@@ -1642,13 +2120,23 @@ export default function MarsrutScreen() {
                                       {stop.name}
                                     </Text>
                                   </View>
+                                  {(() => {
+                                    const dp = String(stop.daypart || '').toLowerCase();
+                                    let label = '';
+                                    if (dp === 'lunch') label = 'Nahar';
+                                    else if (dp === 'breakfast') label = 'Səhər yeməyi';
+                                    else if (dp === 'hotel') label = 'Gecələmə';
+                                    if (!label) return null;
+                                    return (
+                                      <Text style={styles.stopDaypartBadge} numberOfLines={1}>
+                                        {label}
+                                      </Text>
+                                    );
+                                  })()}
                                   {stop.duration ? (
                                     <Text style={styles.stopDuration}>{stop.duration}</Text>
                                   ) : null}
-                                  {stop.tip?.trim() &&
-                                  !/səhər yemə|nahar üçün|istirahət və gecələ/i.test(
-                                    stop.tip
-                                  ) ? (
+                                  {stop.tip?.trim() ? (
                                     <Text style={styles.stopTip} numberOfLines={2}>
                                       {stop.tip.trim()}
                                     </Text>
@@ -1663,6 +2151,64 @@ export default function MarsrutScreen() {
                                       </Text>
                                     </View>
                                   ) : null}
+                                  {editingPlan && visitIndex >= 0 ? (
+                                    <View style={styles.stopEditActions}>
+                                      <TouchableOpacity
+                                        hitSlop={6}
+                                        disabled={visitIndex === 0}
+                                        onPress={() => moveVisitStop(dayIdx, visitIndex, -1)}
+                                      >
+                                        <Ionicons
+                                          name="chevron-up"
+                                          size={18}
+                                          color={
+                                            visitIndex === 0 ? colors.border : colors.text
+                                          }
+                                        />
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        hitSlop={6}
+                                        disabled={visitIndex >= visitList.length - 1}
+                                        onPress={() => moveVisitStop(dayIdx, visitIndex, 1)}
+                                      >
+                                        <Ionicons
+                                          name="chevron-down"
+                                          size={18}
+                                          color={
+                                            visitIndex >= visitList.length - 1
+                                              ? colors.border
+                                              : colors.text
+                                          }
+                                        />
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        hitSlop={6}
+                                        onPress={() => openAddPlaces(dayIdx, visitIndex)}
+                                      >
+                                        <Ionicons
+                                          name="add-circle-outline"
+                                          size={18}
+                                          color={
+                                            addPlacesOpen &&
+                                            addDayIdx === dayIdx &&
+                                            insertAfterVisit === visitIndex
+                                              ? colors.brand
+                                              : colors.textSecondary
+                                          }
+                                        />
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        hitSlop={6}
+                                        onPress={() => removeVisitStop(dayIdx, visitIndex)}
+                                      >
+                                        <Ionicons
+                                          name="trash-outline"
+                                          size={16}
+                                          color={colors.danger}
+                                        />
+                                      </TouchableOpacity>
+                                    </View>
+                                  ) : null}
                                 </>
                               )}
                             </View>
@@ -1671,12 +2217,12 @@ export default function MarsrutScreen() {
                       })}
 
                       {day.notes?.trim() &&
-                      !day.notes.includes('Səhər →') &&
-                      !day.notes.startsWith('Gecələmə:') ? (
+                      !day.notes.includes('Səhər →') ? (
                         <Text style={styles.dayNotes}>{day.notes.trim()}</Text>
                       ) : null}
                     </View>
-                  ))}
+                    );
+                  })}
 
                   <Pressable style={styles.secondaryButton} onPress={handleReset}>
                     <Text style={styles.secondaryButtonText}>Yeni marşrut hazırla</Text>
@@ -1690,7 +2236,8 @@ export default function MarsrutScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   flex: {
     flex: 1,
   },
@@ -1796,7 +2343,7 @@ const styles = StyleSheet.create({
     top: 12,
     left: 12,
     zIndex: 12,
-    backgroundColor: 'white',
+    backgroundColor: colors.surface,
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -2148,7 +2695,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.92)',
+    backgroundColor: colors.surface,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderSoft,
   },
@@ -2171,6 +2718,139 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     marginTop: 4,
+  },
+  editPromptRow: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderSoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  editPromptTextCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  editPromptTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  editPromptHint: {
+    marginTop: 2,
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '500',
+  },
+  editPanel: {
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    gap: 8,
+  },
+  editOpenBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 4,
+  },
+  editOpenBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.brand,
+  },
+  editPanelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  editPanelTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  editDayChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  editDayChip: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  editDayChipActive: {
+    backgroundColor: colors.brand,
+    borderColor: colors.brand,
+  },
+  editDayChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  editDayChipTextActive: {
+    color: '#FFFFFF',
+  },
+  editInsertHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '500',
+  },
+  editInsertClear: {
+    color: colors.brand,
+    fontWeight: '700',
+  },
+  editSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 4,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  editSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.text,
+    paddingVertical: 6,
+  },
+  editPoiRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.borderSoft,
+  },
+  editPoiName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  stopCardEditing: {
+    borderColor: colors.brand + '55',
+  },
+  stopEditActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderSoft,
   },
   saveButton: {
     flex: 1,
@@ -2351,6 +3031,18 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 1,
   },
+  stopDaypartBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.brand,
+    backgroundColor: colors.surfaceMuted,
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
   travelTip: {
     fontSize: 11,
     color: colors.textMuted,
@@ -2378,3 +3070,4 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
 });
+}

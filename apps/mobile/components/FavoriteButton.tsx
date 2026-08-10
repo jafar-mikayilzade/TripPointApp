@@ -1,8 +1,8 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet } from 'react-native';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
 import {
   isFavorited,
   toggleFavorite,
@@ -10,6 +10,7 @@ import {
   type LivePoiFavoriteSeed,
 } from '../lib/favorites';
 import { isDatabasePoiId } from '../lib/livePlaces';
+import { useThemeColors } from '../theme/ThemeProvider';
 import { useInfoToast } from './InfoToastProvider';
 
 type Props = {
@@ -32,6 +33,8 @@ export function FavoriteButton({
   liveSeed = null,
   onResolvedId,
 }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { showInfo } = useInfoToast();
   const [favorited, setFavorited] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -106,19 +109,21 @@ export function FavoriteButton({
   );
 }
 
-const styles = StyleSheet.create({
-  btn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 2,
-    borderColor: colors.favorite,
-    backgroundColor: '#FFF9EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  btnActive: {
-    backgroundColor: '#FFF3D0',
-    borderColor: '#D4A017',
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    btn: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      borderWidth: 2,
+      borderColor: colors.favorite,
+      backgroundColor: colors.warningSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    btnActive: {
+      backgroundColor: colors.warningSoft,
+      borderColor: colors.favorite,
+    },
+  });
+}

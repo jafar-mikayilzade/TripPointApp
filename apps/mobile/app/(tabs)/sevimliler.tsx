@@ -23,7 +23,8 @@ import { SubscribeMenuButton } from '../../components/SubscribeMenuButton';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useInfoToast } from '../../components/InfoToastProvider';
 import { REGIONS } from '../../constants/regions';
-import { colors } from '../../constants/theme';
+import type { ThemeColors } from '../../constants/theme';
+import { useThemeColors } from '../../theme/ThemeProvider';
 import { useResponsiveLayout } from '../../lib/layout';
 
 import { getCategoryLabel } from '../../lib/categoryUtils';
@@ -58,14 +59,16 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'notifications', label: 'Bildiriş' },
 ];
 
-const LISTING_TYPE_META: Record<
+function getListingTypeMeta(colors: ThemeColors): Record<
   ListingType,
   { label: string; tint: string; soft: string }
-> = {
-  carpool: { label: 'Carpool', tint: colors.accent, soft: colors.accentSoft },
-  tour: { label: 'Tur', tint: colors.success, soft: colors.successSoft },
-  local_service: { label: 'Yerli xidmət', tint: colors.warning, soft: colors.warningSoft },
-};
+> {
+  return {
+    carpool: { label: 'Carpool', tint: colors.accent, soft: colors.accentSoft },
+    tour: { label: 'Tur', tint: colors.success, soft: colors.successSoft },
+    local_service: { label: 'Yerli xidmət', tint: colors.warning, soft: colors.warningSoft },
+  };
+}
 
 function formatPrice(listing: Listing): string {
   if (listing.price_type === 'free' || listing.price === 0) {
@@ -89,6 +92,9 @@ function getRegionLabel(region: string | null): string {
 }
 
 export default function SevimlilerScreen() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { showInfo } = useInfoToast();
@@ -575,7 +581,10 @@ function FavoriteListingCard({
   listingSubscribed?: boolean;
   organizerSubscribed?: boolean;
 }) {
-  const meta = LISTING_TYPE_META[listing.type];
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
+  const meta = getListingTypeMeta(colors)[listing.type];
   const creatorName = listing.creator?.full_name?.trim() || 'İstifadəçi';
   const region = getRegionLabel(listing.region);
   const organizerId = listing.created_by ?? listing.creator?.id;
@@ -633,6 +642,9 @@ function FavoriteListingCard({
 const MemoFavoriteListingCard = memo(FavoriteListingCard);
 
 function FavoritePoiCard({ poi, onPress }: { poi: Poi; onPress: () => void }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const regionLabel = getRegionLabel(poi.region);
 
   return (
@@ -674,6 +686,9 @@ function SavedRouteCard({
   onUnsave: () => void;
   onShareAsTour?: () => void;
 }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const region = getRegionLabel(route.region);
   const sourceLabel = route.source === 'ai' ? 'AI' : 'Əl ilə';
   const stopCount = route.stops?.length ?? 0;
@@ -745,6 +760,9 @@ function SubscriptionCard({
   onPress: () => void;
   onUnsubscribe: () => void;
 }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const isTour = item.target_type === 'listing';
   const initial = item.title.charAt(0).toUpperCase() || '?';
 
@@ -819,6 +837,9 @@ function NotificationCard({
   item: AppNotification;
   onPress: () => void;
 }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const unread = !item.read_at;
   return (
     <Pressable
@@ -848,6 +869,9 @@ function NotificationCard({
 }
 
 function SkeletonCard() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   return (
     <View style={styles.skeletonCard}>
       <View style={styles.cardInner}>
@@ -868,7 +892,8 @@ function SkeletonCard() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   flex: {
     flex: 1,
   },
@@ -1156,3 +1181,4 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 });
+}

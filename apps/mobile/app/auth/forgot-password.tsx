@@ -1,5 +1,5 @@
 import { Link, router } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -17,10 +17,12 @@ import { getErrorMessage } from '../../lib/errors';
 import { validateEmail } from '../../lib/formValidation';
 import { AUTH_RESET_PASSWORD_URL } from '../../lib/passwordRecovery';
 import { supabase } from '../../lib/supabase';
-
-import { colors } from '../../constants/theme';
+import type { ThemeColors } from '../../constants/theme';
+import { useThemeColors } from '../../theme/ThemeProvider';
 
 export default function ForgotPasswordScreen() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -84,18 +86,19 @@ export default function ForgotPasswordScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>Şifrəni unutdum</Text>
+        <Text style={styles.title}>Şifrəni bərpa et</Text>
         <Text style={styles.subtitle}>
-          Qeydiyyat emailinizi yazın — sıfırlama linki göndərəcəyik.
+          E-poçt ünvanınızı daxil edin, sizə bərpa kodu göndərək.
         </Text>
 
         {errorMessage ? <ErrorBanner message={errorMessage} /> : null}
 
         <FormField
           label="E-poçt"
+          leftIcon="mail-outline"
           value={email}
           onChangeText={setEmail}
-          placeholder="example@mail.com"
+          placeholder="e-poçt@nümunə.com"
           autoCapitalize="none"
           autoComplete="email"
           keyboardType="email-address"
@@ -110,9 +113,9 @@ export default function ForgotPasswordScreen() {
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={colors.textOnAccent} />
           ) : (
-            <Text style={styles.buttonText}>Link göndər</Text>
+            <Text style={styles.buttonText}>Bərpa kodu göndər</Text>
           )}
         </Pressable>
 
@@ -126,51 +129,53 @@ export default function ForgotPasswordScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  container: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    padding: 24,
-    backgroundColor: colors.bg,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 24,
-    lineHeight: 20,
-  },
-  emailHighlight: {
-    fontWeight: '700',
-    color: colors.text,
-  },
-  button: {
-    backgroundColor: colors.accent,
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: {
-    color: colors.textOnAccent,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  footer: {
-    marginTop: 20,
-    textAlign: 'center',
-    color: colors.textSecondary,
-    fontSize: 14,
-  },
-  footerLink: {
-    color: colors.accent,
-    fontWeight: '600',
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    flex: { flex: 1 },
+    container: {
+      flexGrow: 1,
+      justifyContent: 'center',
+      padding: 24,
+      backgroundColor: colors.bg,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: 4,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      marginBottom: 24,
+      lineHeight: 20,
+    },
+    emailHighlight: {
+      fontWeight: '700',
+      color: colors.text,
+    },
+    button: {
+      backgroundColor: colors.accent,
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    buttonDisabled: { opacity: 0.6 },
+    buttonText: {
+      color: colors.textOnAccent,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    footer: {
+      marginTop: 20,
+      textAlign: 'center',
+      color: colors.textSecondary,
+      fontSize: 14,
+    },
+    footerLink: {
+      color: colors.accent,
+      fontWeight: '600',
+    },
+  });
+}

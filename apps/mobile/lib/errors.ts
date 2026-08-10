@@ -37,7 +37,16 @@ export function getErrorMessage(error: unknown): string {
 
   // DB xətaları
   if (msg.includes('violates check constraint')) {
+    if (msg.includes('ratings_target_type')) {
+      return 'Bu reytinq tipi dəstəklənmir. Yeniləmə lazımdır.';
+    }
+    if (msg.includes('ratings_score')) {
+      return 'Reytinq 1–5 arasında olmalıdır';
+    }
     return 'Məlumat formatı yanlışdır';
+  }
+  if (msg.includes('ratings_target_type_key') || msg.includes('ratings_rater_target')) {
+    return 'Reytinq yenilənə bilmədi. Yenidən cəhd edin.';
   }
   if (msg.includes('violates foreign key')) {
     return 'Əlaqəli məlumat tapılmadı';

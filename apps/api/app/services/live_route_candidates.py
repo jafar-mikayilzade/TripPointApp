@@ -6,13 +6,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Literal
 
 from app.config import GOOGLE_PLACES_API_KEY
-from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
+from app.constants.regions import (
+    CANONICAL_REGION_IDS,
+    REGION_COORDINATES,
+    REGION_DB_ID,
+)
 from app.constants.tourism_seeds import seeds_for_region
 from app.db import supabase
 from app.services.attraction_classify import (
     classify_attraction_rows,
     interest_attraction_cats,
 )
+from app.services.geo_route import haversine_km
 from app.services.places_clean import clean_place
 from app.services.places_google import fetch_places_from_google
 from app.services.places_osm import fetch_tourism_bundle_from_osm
@@ -162,6 +167,49 @@ def _cap_centers_for_osm(centers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return ranked[:OSM_MAX_CENTERS]
 
 
+def nearest_canonical_region(lat: float, lng: float) -> str:
+    """Nearest rayon by admin-centre distance (canonical ids only)."""
+    best_id = CANONICAL_REGION_IDS[0] if CANONICAL_REGION_IDS else ""
+    best_d = float("inf")
+    for rid in CANONICAL_REGION_IDS:
+        coords = REGION_COORDINATES.get(rid)
+        if not coords:
+            continue
+        d = haversine_km(
+            lat, lng, float(coords["latitude"]), float(coords["longitude"])
+        )
+        if d < best_d:
+            best_d = d
+            best_id = rid
+    return best_id
+
+
+def filter_rows_inside_region(
+    rows: list[dict[str, Any]],
+    region_key: str,
+) -> list[dict[str, Any]]:
+    """
+    Keep POIs that belong to the selected rayon only:
+    - `region` column matches (when set)
+    - nearest admin centre is that rayon (blocks neighbour spill)
+    """
+    target = REGION_DB_ID.get(region_key, region_key).strip().lower()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        region_val = str(row.get("region") or "").strip().lower()
+        if region_val and region_val != target:
+            continue
+        try:
+            lat = float(row["lat"])
+            lng = float(row["lng"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if nearest_canonical_region(lat, lng) != target:
+            continue
+        out.append(row)
+    return out
+
+
 def _load_buckets_from_db(
     region_key: str,
     *,
@@ -211,6 +259,7 @@ def _load_buckets_from_db(
         )
         rows = food_rows + lodging_rows + attraction_rows
 
+    rows = filter_rows_inside_region(rows, region_key)
     rows = classify_attraction_rows(rows)
     merged = filter_tourism_rows(rows, hubs=hubs)
     return bucket_route_candidates(
@@ -272,6 +321,7 @@ def _load_buckets_from_osm(
 
     seeds = seeds_for_region(region_key, db_region=db_region)
     classified = classify_attraction_rows(dedupe_poi_rows(seeds + merged_raw))
+    classified = filter_rows_inside_region(classified, region_key)
     merged = filter_tourism_rows(classified, hubs=hubs)
     buckets = bucket_route_candidates(
         merged,

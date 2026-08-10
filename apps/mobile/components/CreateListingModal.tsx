@@ -18,10 +18,12 @@ import { getErrorMessage } from '../lib/errors';
 import {
   FIELD_EMPTY_PLACEHOLDER,
   TEXT_FORMAT_ERROR,
+  AZ_PHONE_PREFIX,
   buildCarpoolTitle,
   formatAzPhoneE164,
   hasDisallowedTextSymbols,
   parsePositiveNumber,
+  parseAzPhoneLocal,
   sanitizeAzPhoneLocalInput,
   sanitizeFreeTextWordPatterns,
   sanitizeLettersOnlyInput,
@@ -43,7 +45,8 @@ import type {
 import { PhoneField } from './PhoneField';
 import { SimpleDateTimeField } from './SimpleDateTimeField';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 interface CreateListingModalProps {
   visible: boolean;
@@ -58,13 +61,14 @@ type FieldErrors = Partial<
   >
 >;
 
-const TYPE_CARDS: {
+function getTypeCards(colors: ThemeColors): {
   type: ListingType;
   title: string;
   subtitle: string;
   tint: string;
   soft: string;
-}[] = [
+}[] {
+  return [
   {
     type: 'tour',
     title: 'Tur',
@@ -87,6 +91,7 @@ const TYPE_CARDS: {
     soft: colors.accentSoft,
   },
 ];
+}
 
 const POI_PAGE_SIZE = 8;
 
@@ -106,6 +111,9 @@ const PRICE_TYPES: { value: ListingPriceType; label: string }[] = [
 
 export function CreateListingModal({ visible, onClose, onCreated }: CreateListingModalProps) {
   const insets = useSafeAreaInsets();
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const typeCards = useMemo(() => getTypeCards(colors), [colors]);
   const bottomSafe = Math.max(insets.bottom, 12);
 
   const [step, setStep] = useState<1 | 2>(1);
@@ -120,6 +128,9 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
   const [price, setPrice] = useState('');
   const [isFree, setIsFree] = useState(false);
   const [contactPhone, setContactPhone] = useState('');
+  /** ask = profil nömrəsi varmı seçimi; profile = avtomatik; manual = əl ilə */
+  const [phoneMode, setPhoneMode] = useState<'ask' | 'profile' | 'manual'>('manual');
+  const [profilePhoneLocal, setProfilePhoneLocal] = useState('');
   const [regionId, setRegionId] = useState(DEFAULT_REGION_ID);
   const [description, setDescription] = useState('');
   const [selectedPoiIds, setSelectedPoiIds] = useState<string[]>([]);
@@ -154,6 +165,8 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     setPrice('');
     setIsFree(false);
     setContactPhone('');
+    setPhoneMode('manual');
+    setProfilePhoneLocal('');
     setRegionId(DEFAULT_REGION_ID);
     setDescription('');
     setSelectedPoiIds([]);
@@ -165,6 +178,36 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     setIsRecurring(false);
     setFieldErrors({});
     setLoading(false);
+
+    let cancelled = false;
+    void (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user || cancelled) {
+        return;
+      }
+      const { data } = await supabase
+        .from('profiles')
+        .select('phone')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (cancelled) {
+        return;
+      }
+      const local = parseAzPhoneLocal(data?.phone);
+      if (local && !validateAzPhone(local, true)) {
+        setProfilePhoneLocal(local);
+        setPhoneMode('ask');
+      } else {
+        setProfilePhoneLocal('');
+        setPhoneMode('manual');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [visible]);
 
   useEffect(() => {
@@ -279,6 +322,86 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     setFieldErrors((prev) => ({ ...prev, [key]: message }));
   }
 
+  function resolveContactPhoneError(): string | null {
+    if (phoneMode === 'ask') {
+      return 'Profil nömrəsi ilə davam etmək istəyirsiniz?';
+    }
+    const source = phoneMode === 'profile' ? profilePhoneLocal : contactPhone;
+    return validateAzPhone(source, true);
+  }
+
+  function applyProfilePhone() {
+    clearFieldError('phone');
+    setContactPhone(profilePhoneLocal);
+    setPhoneMode('profile');
+  }
+
+  function applyManualPhone() {
+    clearFieldError('phone');
+    setContactPhone('');
+    setPhoneMode('manual');
+  }
+
+  function renderContactPhoneField() {
+    const profileDisplay = profilePhoneLocal
+      ? `${AZ_PHONE_PREFIX}${profilePhoneLocal}`
+      : '';
+
+    if (phoneMode === 'ask' && profilePhoneLocal) {
+      return (
+        <View style={styles.phoneChoiceBox}>
+          <Text style={styles.phoneChoiceTitle}>Əlaqə nömrəsi</Text>
+          <Text style={styles.phoneChoiceHint}>
+            Profilinizdə {profileDisplay} var. Bu nömrə ilə davam edilsin?
+          </Text>
+          <View style={styles.phoneChoiceRow}>
+            <Pressable
+              style={[styles.phoneChoiceBtn, styles.phoneChoiceBtnYes]}
+              onPress={applyProfilePhone}
+            >
+              <Text style={styles.phoneChoiceBtnYesText}>Bəli</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.phoneChoiceBtn, styles.phoneChoiceBtnNo]}
+              onPress={applyManualPhone}
+            >
+              <Text style={styles.phoneChoiceBtnNoText}>Xeyr</Text>
+            </Pressable>
+          </View>
+          {fieldErrors.phone ? (
+            <Text style={styles.phoneChoiceError}>{fieldErrors.phone}</Text>
+          ) : null}
+        </View>
+      );
+    }
+
+    if (phoneMode === 'profile' && profilePhoneLocal) {
+      return (
+        <View style={styles.phoneChoiceBox}>
+          <Text style={styles.phoneChoiceTitle}>Əlaqə nömrəsi</Text>
+          <Text style={styles.phoneChoiceValue}>{profileDisplay}</Text>
+          <Pressable onPress={applyManualPhone} hitSlop={8}>
+            <Text style={styles.phoneChangeLink}>Başqa nömrə daxil et</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
+    return (
+      <PhoneField
+        label="Əlaqə nömrəsi"
+        required
+        value={contactPhone}
+        onChangeLocal={(local) => {
+          clearFieldError('phone');
+          setContactPhone(sanitizeAzPhoneLocalInput(local));
+        }}
+        onValidationError={(err) => setFieldError('phone', err)}
+        error={fieldErrors.phone ?? null}
+      />
+    );
+  }
+
   function handleLettersChange(
     key: 'title' | 'origin' | 'destination',
     text: string,
@@ -357,7 +480,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
       if (!isFree && parsedPrice === null) {
         errors.price = 'empty';
       }
-      const phoneErr = validateAzPhone(contactPhone, true);
+      const phoneErr = resolveContactPhoneError();
       if (phoneErr) {
         errors.phone = phoneErr;
       }
@@ -375,7 +498,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
       if (!capacityText || !Number.isFinite(tourCapacity) || tourCapacity <= 0) {
         errors.capacity = 'empty';
       }
-      const phoneErr = validateAzPhone(contactPhone, true);
+      const phoneErr = resolveContactPhoneError();
       if (phoneErr) {
         errors.phone = phoneErr;
       }
@@ -389,7 +512,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
       if (priceType !== 'free' && priceType !== 'negotiable' && parsedPrice === null) {
         errors.price = 'empty';
       }
-      const phoneErr = validateAzPhone(contactPhone, true);
+      const phoneErr = resolveContactPhoneError();
       if (phoneErr) {
         errors.phone = phoneErr;
       }
@@ -406,7 +529,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     const errors = collectFieldErrors();
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
-      if (errors.phone && contactPhone.trim()) {
+      if (errors.phone && contactPhone.trim() && phoneMode === 'manual') {
         setContactPhone('');
       }
       return;
@@ -439,7 +562,9 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
             ? Number(capacityText)
             : capacity;
       const { price: priceValue, price_type: priceTypeValue } = resolvePriceFields();
-      const formattedPhone = formatAzPhoneE164(contactPhone);
+      const formattedPhone = formatAzPhoneE164(
+        phoneMode === 'profile' ? profilePhoneLocal : contactPhone
+      );
 
       let descriptionValue = description.trim() || null;
       if (listingType === 'local_service') {
@@ -598,7 +723,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
           >
             {step === 1 ? (
               <View style={styles.typeList}>
-                {TYPE_CARDS.map((card) => (
+                {typeCards.map((card) => (
                   <Pressable
                     key={card.type}
                     style={styles.typeCard}
@@ -717,17 +842,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   <Text style={styles.checkboxLabel}>Pulsuz</Text>
                 </Pressable>
 
-                <PhoneField
-                  label="Əlaqə nömrəsi"
-                  required
-                  value={contactPhone}
-                  onChangeLocal={(local) => {
-                    clearFieldError('phone');
-                    setContactPhone(sanitizeAzPhoneLocalInput(local));
-                  }}
-                  onValidationError={(err) => setFieldError('phone', err)}
-                  error={fieldErrors.phone ?? null}
-                />
+                {renderContactPhoneField()}
 
                 <CollapseToggle
                   open={regionOpen}
@@ -923,17 +1038,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   keyboardType="number-pad"
                 />
 
-                <PhoneField
-                  label="Əlaqə nömrəsi"
-                  required
-                  value={contactPhone}
-                  onChangeLocal={(local) => {
-                    clearFieldError('phone');
-                    setContactPhone(sanitizeAzPhoneLocalInput(local));
-                  }}
-                  onValidationError={(err) => setFieldError('phone', err)}
-                  error={fieldErrors.phone ?? null}
-                />
+                {renderContactPhoneField()}
 
                 <Pressable
                   style={styles.poiToggle}
@@ -1128,17 +1233,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                   <Text style={styles.checkboxLabel}>Daimi xidmət</Text>
                 </Pressable>
 
-                <PhoneField
-                  label="Əlaqə nömrəsi"
-                  required
-                  value={contactPhone}
-                  onChangeLocal={(local) => {
-                    clearFieldError('phone');
-                    setContactPhone(sanitizeAzPhoneLocalInput(local));
-                  }}
-                  onValidationError={(err) => setFieldError('phone', err)}
-                  error={fieldErrors.phone ?? null}
-                />
+                {renderContactPhoneField()}
 
                 <FieldLabel text="Ətraflı təsvir" />
                 <TextInput
@@ -1178,7 +1273,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
                 disabled={loading}
               >
                 {loading ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color={colors.textOnAccent} />
                 ) : (
                   <Text style={styles.submitButtonText}>Göndər</Text>
                 )}
@@ -1192,6 +1287,8 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
 }
 
 function FieldLabel({ text, required }: { text: string; required?: boolean }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <Text style={styles.label}>
       {text}
@@ -1215,6 +1312,8 @@ function CollapseToggle({
   hasError?: boolean;
   onPress: () => void;
 }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <Pressable
       style={[styles.collapseToggle, hasError && styles.collapseToggleError]}
@@ -1232,7 +1331,8 @@ function CollapseToggle({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -1422,6 +1522,69 @@ const styles = StyleSheet.create({
     color: colors.chipText,
     fontWeight: '600',
   },
+  phoneChoiceBox: {
+    marginTop: 10,
+    marginBottom: 4,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: colors.chip,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    gap: 8,
+  },
+  phoneChoiceTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.chipText,
+  },
+  phoneChoiceHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.text,
+  },
+  phoneChoiceValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  phoneChoiceRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  phoneChoiceBtn: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  phoneChoiceBtnYes: {
+    backgroundColor: colors.accent,
+  },
+  phoneChoiceBtnNo: {
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  phoneChoiceBtnYesText: {
+    color: colors.textOnAccent,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  phoneChoiceBtnNoText: {
+    color: colors.text,
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  phoneChangeLink: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.accent,
+  },
+  phoneChoiceError: {
+    fontSize: 12,
+    color: colors.danger,
+    fontWeight: '500',
+  },
   poiRow: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderSoft,
@@ -1590,3 +1753,4 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 });
+}

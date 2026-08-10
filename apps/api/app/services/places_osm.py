@@ -127,11 +127,30 @@ def build_tourism_bundle_query(
     )
 
 
+def _pick_osm_name(tags: dict[str, Any]) -> str | None:
+    """Prefer Azerbaijani / English labels; never prefer Russian-only names."""
+    for key in ("name:az", "name:en", "name:tr", "name"):
+        raw = tags.get(key)
+        if not raw:
+            continue
+        name = str(raw).strip()
+        if not name:
+            continue
+        # Drop Cyrillic-heavy labels (Russian / mixed garbage)
+        letters = [ch for ch in name if ch.isalpha()]
+        if letters:
+            cyr = sum(1 for ch in letters if "\u0400" <= ch <= "\u04FF")
+            if (cyr / len(letters)) >= 0.2:
+                continue
+        return name
+    return None
+
+
 def osm_element_to_place(element: dict[str, Any]) -> dict[str, Any] | None:
     element_type = element.get("type")
     element_id = element.get("id")
     tags = element.get("tags") or {}
-    name = tags.get("name") or tags.get("name:en") or tags.get("name:az")
+    name = _pick_osm_name(tags)
 
     if not element_type or element_id is None or not name:
         return None
@@ -141,7 +160,7 @@ def osm_element_to_place(element: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     lat, lng = coords
-    return {
+    place: dict[str, Any] = {
         "place_id": f"osm:{element_type}/{element_id}",
         "name": name,
         "latitude": lat,
@@ -149,10 +168,35 @@ def osm_element_to_place(element: dict[str, Any]) -> dict[str, Any] | None:
         "address": build_address_from_tags(tags),
         "phone": tags.get("phone") or tags.get("contact:phone"),
         "website": tags.get("website") or tags.get("contact:website") or tags.get("url"),
-        "description": tags.get("description") or tags.get("note"),
+        "description": tags.get("description:en")
+        or tags.get("description:az")
+        or tags.get("description")
+        or tags.get("note"),
         "rating": None,
         "category": category_from_osm_tags(tags),
+        "data_source": "osm",
     }
+    # Prefer lodging with star class / price when OSM tags exist
+    stars = tags.get("stars")
+    if stars is not None:
+        try:
+            star_i = int(float(str(stars).replace(",", ".")))
+            if 1 <= star_i <= 5:
+                place["hotel_class"] = star_i
+        except (TypeError, ValueError):
+            pass
+    price = tags.get("price") or tags.get("charge")
+    if price:
+        # Keep raw hint in description only if numeric parse fails
+        try:
+            digits = "".join(ch if (ch.isdigit() or ch == ".") else " " for ch in str(price))
+            num = next((float(p) for p in digits.split() if p), None)
+            if num is not None and num > 0:
+                place["price_from"] = num
+                place["price_currency"] = "AZN"
+        except (TypeError, ValueError, StopIteration):
+            pass
+    return place
 
 
 def _parse_overpass_places(
@@ -180,6 +224,7 @@ def _overpass_get(
     *,
     timeout_seconds: float | None = None,
     max_mirrors: int | None = None,
+    rotate: bool = True,
 ) -> dict[str, Any]:
     if _overpass_in_cooldown():
         raise requests.RequestException(
@@ -200,8 +245,9 @@ def _overpass_get(
     # (connect, read) — don't wait forever on dead mirrors
     timeout: float | tuple[float, float] = (5.0, read_timeout)
     endpoints = list(OVERPASS_ENDPOINTS)
-    # Rotate start mirror so one busy host doesn't always fail first
-    if endpoints:
+    # Rotate start mirror so one busy host doesn't always fail first.
+    # Callers that already sorted mirrors (e.g. import_osm_named) pass rotate=False.
+    if rotate and endpoints:
         start = int(time.time() / 120) % len(endpoints)
         endpoints = endpoints[start:] + endpoints[:start]
     if max_mirrors is not None and max_mirrors > 0:

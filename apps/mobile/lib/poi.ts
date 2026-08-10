@@ -1,19 +1,19 @@
 import type { PoiCategory } from '../types/database';
 
 const CATEGORY_COLORS: Record<PoiCategory, string> = {
-  restaurant: '#C47A2C',
-  cafe: '#B8952A',
-  hotel: '#4A8FE8',
-  hostel: '#6B9AF0',
-  home_restaurant: '#C47A2C',
-  guesthouse: '#7AA2F7',
-  camping: '#5A8F6C',
-  nature: '#3D8B6E',
-  waterfall: '#3D8B6E',
-  mountain: '#5A8F6C',
-  lake: '#4A90A4',
-  historical: '#8B6F5C',
-  monument: '#8B6F5C',
+  restaurant: '#FF6D00',
+  cafe: '#F59E0B',
+  hotel: '#7C3AED',
+  hostel: '#8B5CF6',
+  home_restaurant: '#FF6D00',
+  guesthouse: '#A78BFA',
+  camping: '#22C55E',
+  nature: '#16A34A',
+  waterfall: '#0EA5E9',
+  mountain: '#15803D',
+  lake: '#0284C7',
+  historical: '#A16207',
+  monument: '#B45309',
   other: '#9A9AA0',
 };
 

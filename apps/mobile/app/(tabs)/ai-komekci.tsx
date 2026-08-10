@@ -63,8 +63,8 @@ import {
 import { fetchRegionWeather, formatWeatherLabel, type WeatherAdvice } from '../../lib/weather';
 import type { Poi } from '../../types/database';
 
-import { colors } from '../../constants/theme';
-
+import type { ThemeColors } from '../../constants/theme';
+import { useThemeColors } from '../../theme/ThemeProvider';
 type LatLng = { latitude: number; longitude: number };
 
 type MapRef = {
@@ -88,6 +88,9 @@ type EditMode =
 const REGION_OPTIONS = REGIONS.map((r) => ({ label: r.label, value: r.id }));
 
 export default function AiKomekciScreen() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const mapRef = useRef<MapRef | null>(null);
   const { showInfo } = useInfoToast();
   const responsive = useResponsiveLayout();
@@ -1029,7 +1032,8 @@ function findNearestPoi(
   return best;
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   flex: { flex: 1 },
   safeArea: { flex: 1, backgroundColor: colors.bg },
   mapSection: {
@@ -1386,3 +1390,4 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
 });
+}

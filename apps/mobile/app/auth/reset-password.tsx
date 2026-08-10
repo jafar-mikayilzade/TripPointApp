@@ -26,8 +26,8 @@ import {
   setPasswordRecoveryPending,
 } from '../../lib/passwordRecovery';
 import { supabase } from '../../lib/supabase';
-
-import { colors } from '../../constants/theme';
+import type { ThemeColors } from '../../constants/theme';
+import { useThemeColors } from '../../theme/ThemeProvider';
 
 const BOOT_WAIT_MS = 4500;
 
@@ -49,6 +49,8 @@ export default function ResetPasswordScreen() {
   const [done, setDone] = useState(false);
   const [aborting, setAborting] = useState(false);
 
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const passwordRules = useMemo(() => getPasswordRuleStatus(password), [password]);
   const allRulesMet = passwordRules.every((rule) => rule.met);
 
@@ -317,7 +319,7 @@ export default function ResetPasswordScreen() {
           disabled={loading}
         >
           {loading ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={colors.textOnAccent} />
           ) : (
             <Text style={styles.buttonText}>Şifrəni yadda saxla</Text>
           )}
@@ -353,84 +355,86 @@ function buildUrlFromParams(params: Record<string, string | string[] | undefined
   return qs ? `trippoint://auth/reset-password?${qs}` : 'trippoint://auth/reset-password';
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-    backgroundColor: colors.bg,
-  },
-  bootText: {
-    marginTop: 16,
-    color: colors.textSecondary,
-    fontSize: 14,
-  },
-  container: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    padding: 24,
-    backgroundColor: colors.bg,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 24,
-    lineHeight: 20,
-    textAlign: 'center',
-  },
-  button: {
-    backgroundColor: colors.accent,
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 8,
-    paddingHorizontal: 18,
-  },
-  buttonDisabled: { opacity: 0.6 },
-  buttonText: {
-    color: colors.textOnAccent,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  linkButton: {
-    marginTop: 16,
-    paddingVertical: 10,
-  },
-  linkText: {
-    color: colors.accent,
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  passwordHints: {
-    marginTop: -4,
-    marginBottom: 12,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: colors.surfaceMuted,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-    gap: 4,
-  },
-  passwordHintsOk: {
-    borderColor: colors.success,
-    backgroundColor: colors.successSoft,
-  },
-  passwordHint: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  passwordHintUnmet: {
-    color: colors.textMuted,
-  },
-  passwordHintMet: {
-    color: colors.success,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    flex: { flex: 1 },
+    center: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 24,
+      backgroundColor: colors.bg,
+    },
+    bootText: {
+      marginTop: 16,
+      color: colors.textSecondary,
+      fontSize: 14,
+    },
+    container: {
+      flexGrow: 1,
+      justifyContent: 'center',
+      padding: 24,
+      backgroundColor: colors.bg,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: 4,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      marginBottom: 24,
+      lineHeight: 20,
+      textAlign: 'center',
+    },
+    button: {
+      backgroundColor: colors.accent,
+      borderRadius: 16,
+      paddingVertical: 14,
+      alignItems: 'center',
+      marginTop: 8,
+      paddingHorizontal: 18,
+    },
+    buttonDisabled: { opacity: 0.6 },
+    buttonText: {
+      color: colors.textOnAccent,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    linkButton: {
+      marginTop: 16,
+      paddingVertical: 10,
+    },
+    linkText: {
+      color: colors.accent,
+      fontWeight: '700',
+      fontSize: 14,
+    },
+    passwordHints: {
+      marginTop: -4,
+      marginBottom: 12,
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceMuted,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.borderSoft,
+      gap: 4,
+    },
+    passwordHintsOk: {
+      borderColor: colors.success,
+      backgroundColor: colors.successSoft,
+    },
+    passwordHint: {
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    passwordHintUnmet: {
+      color: colors.textMuted,
+    },
+    passwordHintMet: {
+      color: colors.success,
+    },
+  });
+}

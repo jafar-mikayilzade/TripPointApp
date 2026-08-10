@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -7,9 +7,10 @@ import {
   ListingDetailModal,
   type ListingWithCreator,
 } from '../../components/ListingDetailModal';
-import { colors } from '../../constants/theme';
+import type { ThemeColors } from '../../constants/theme';
 import { getErrorMessage } from '../../lib/errors';
 import { supabase } from '../../lib/supabase';
+import { useThemeColors } from '../../theme/ThemeProvider';
 import type { Listing, Profile } from '../../types/database';
 
 /**
@@ -17,6 +18,8 @@ import type { Listing, Profile } from '../../types/database';
  * Also works as /listing/<uuid> in-app.
  */
 export default function ListingDeepLinkScreen() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [listing, setListing] = useState<ListingWithCreator | null>(null);
@@ -117,22 +120,24 @@ export default function ListingDeepLinkScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  fill: { flex: 1, backgroundColor: colors.bg },
-  center: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    backgroundColor: colors.bg,
-    gap: 12,
-  },
-  error: { color: colors.dangerText, textAlign: 'center', fontSize: 15 },
-  btn: {
-    backgroundColor: colors.accent,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  btnText: { color: colors.textOnAccent, fontWeight: '700' },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    fill: { flex: 1, backgroundColor: colors.bg },
+    center: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 24,
+      backgroundColor: colors.bg,
+      gap: 12,
+    },
+    error: { color: colors.dangerText, textAlign: 'center', fontSize: 15 },
+    btn: {
+      backgroundColor: colors.accent,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 12,
+    },
+    btnText: { color: colors.textOnAccent, fontWeight: '700' },
+  });
+}

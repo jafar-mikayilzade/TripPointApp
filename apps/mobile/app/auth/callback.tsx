@@ -1,19 +1,23 @@
 import * as Linking from 'expo-linking';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { TripPointWordmark } from '../../components/TripPointWordmark';
 import { createSessionFromUrl } from '../../lib/authDeepLink';
 import { markEmailVerified } from '../../lib/emailVerification';
 import { ensureProfile } from '../../lib/ensureProfile';
 import { supabase } from '../../lib/supabase';
+import type { ThemeColors } from '../../constants/theme';
+import { useThemeColors } from '../../theme/ThemeProvider';
 
-import { colors } from '../../constants/theme';
 /**
  * Email təsdiq deep link: trippoint://auth/callback?...
  * "Unmatched Route" əvəzinə TripPoint ekranı göstərir və sessiyanı qurur.
  */
 export default function AuthCallbackScreen() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const params = useLocalSearchParams();
   const [status, setStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [message, setMessage] = useState('Email təsdiqlənir...');
@@ -77,7 +81,9 @@ export default function AuthCallbackScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.brand}>TripPoint</Text>
+      <View style={styles.brandWrap}>
+        <TripPointWordmark size={24} />
+      </View>
       {status === 'loading' ? <ActivityIndicator size="large" color={colors.accent} /> : null}
       <Text style={[styles.message, status === 'error' && styles.error]}>{message}</Text>
       {status === 'error' ? (
@@ -102,39 +108,38 @@ function buildUrlFromParams(params: Record<string, string | string[] | undefined
   return qs ? `trippoint://auth/callback?${qs}` : 'trippoint://auth/callback';
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.bg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 28,
-  },
-  brand: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: colors.text,
-    marginBottom: 24,
-  },
-  message: {
-    marginTop: 16,
-    fontSize: 15,
-    color: colors.chipText,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  error: {
-    color: colors.dangerText,
-  },
-  button: {
-    marginTop: 24,
-    backgroundColor: colors.accent,
-    borderRadius: 16,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-  },
-  buttonText: {
-    color: colors.textOnAccent,
-    fontWeight: '700',
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.bg,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 28,
+    },
+    brandWrap: {
+      marginBottom: 24,
+    },
+    message: {
+      marginTop: 16,
+      fontSize: 15,
+      color: colors.chipText,
+      textAlign: 'center',
+      lineHeight: 22,
+    },
+    error: {
+      color: colors.dangerText,
+    },
+    button: {
+      marginTop: 24,
+      backgroundColor: colors.accent,
+      borderRadius: 16,
+      paddingHorizontal: 18,
+      paddingVertical: 12,
+    },
+    buttonText: {
+      color: colors.textOnAccent,
+      fontWeight: '700',
+    },
+  });
+}

@@ -9,6 +9,20 @@ from typing import Any, Sequence
 EARTH_RADIUS_KM = 6371.0
 
 
+def _poi_category_set(row: dict[str, Any]) -> set[str]:
+    raw = row.get("categories")
+    out: set[str] = set()
+    if isinstance(raw, (list, tuple)):
+        for item in raw:
+            c = str(item or "").strip()
+            if c:
+                out.add(c)
+    primary = str(row.get("category") or "").strip()
+    if primary:
+        out.add(primary)
+    return out
+
+
 def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     """Great-circle distance in kilometers."""
     rlat1, rlat2 = math.radians(lat1), math.radians(lat2)
@@ -230,10 +244,12 @@ def grow_compact_tour(
         p
         for p in candidates
         if not prefer_categories
-        or str(p.get("category") or "") in prefer_categories
+        or bool(_poi_category_set(p) & set(prefer_categories))
     ]
-    # Prefer interest pool for seeding; only fall back if empty
-    seed_pool = preferred if preferred else candidates
+    # Hard interest filter: never seed from outside preferred set
+    if prefer_categories and not preferred:
+        return []
+    seed_pool = preferred if prefer_categories else (preferred if preferred else candidates)
 
     def seed_key(p: dict[str, Any]) -> tuple[float, float]:
         c = _coord(p)
@@ -256,57 +272,42 @@ def grow_compact_tour(
         base_len = tour_length_km(order_stops_geo(chosen)) if len(chosen) > 1 else 0.0
         chosen_coords = [_coord(p) for p in chosen if _coord(p)]
 
-        # First pass: interest matches only (if any remain nearby)
-        search_pools = [preferred, candidates] if preferred else [candidates]
-        for pool_i, search in enumerate(search_pools):
-            for poi in search:
-                pid = str(poi.get("id") or "")
-                if not pid or pid in chosen_ids:
-                    continue
-                coord = _coord(poi)
-                if coord is None:
-                    continue
-                min_d = min(
-                    haversine_km(coord[0], coord[1], c[0], c[1])
-                    for c in chosen_coords
-                    if c
-                )
-                if min_d > max_add_from_path_km:
-                    continue
-                trial = chosen + [poi]
-                if cluster_diameter_km(trial) > max_diameter_km:
-                    continue
-                ordered = order_stops_geo(trial)
-                length = tour_length_km(ordered)
-                growth = length - base_len
-                rating = float(poi.get("rating") or 0)
-                interest_miss = (
-                    0
-                    if (
-                        not prefer_categories
-                        or str(poi.get("category") or "") in prefer_categories
-                    )
-                    else 1
-                )
-                # Interest match first, then compact geography
-                score = (interest_miss, growth, min_d, -rating)
-                scored.append((score, poi))
-
-            if scored and pool_i == 0:
-                # Found interest-matching neighbours — do not fall back yet
-                break
+        # Only search interest matches when filter is active
+        search = preferred if prefer_categories else candidates
+        for poi in search:
+            pid = str(poi.get("id") or "")
+            if not pid or pid in chosen_ids:
+                continue
+            coord = _coord(poi)
+            if coord is None:
+                continue
+            min_d = min(
+                haversine_km(coord[0], coord[1], c[0], c[1])
+                for c in chosen_coords
+                if c
+            )
+            if min_d > max_add_from_path_km:
+                continue
+            trial = chosen + [poi]
+            if cluster_diameter_km(trial) > max_diameter_km:
+                continue
+            ordered = order_stops_geo(trial)
+            length = tour_length_km(ordered)
+            growth = length - base_len
+            rating = float(poi.get("rating") or 0)
+            score = (growth, min_d, -rating)
+            scored.append((score, poi))
 
         if not scored:
             break
 
         scored.sort(key=lambda t: t[0])
         if rng is not None and len(scored) > 1:
-            # Random among top-3 near-ties for variety
             best_score = scored[0][0]
             near = [
                 p
                 for s, p in scored[:5]
-                if s[0] == best_score[0] and abs(float(s[1]) - float(best_score[1])) < 1.5
+                if abs(float(s[0]) - float(best_score[0])) < 1.5
             ]
             best = rng.choice(near) if near else scored[0][1]
         else:

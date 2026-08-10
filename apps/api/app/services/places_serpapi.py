@@ -101,13 +101,28 @@ def map_serpapi_property_to_place(
         amenities = None
 
     images = prop.get("images") or []
+    photo_urls: list[str] = []
     thumbnail = None
-    if isinstance(images, list) and images:
-        first = images[0] if isinstance(images[0], dict) else {}
-        thumbnail = first.get("thumbnail") or first.get("original_image")
+    if isinstance(images, list):
+        for img in images:
+            if not isinstance(img, dict):
+                continue
+            url = img.get("original_image") or img.get("thumbnail")
+            if isinstance(url, str) and url.startswith("http") and url not in photo_urls:
+                photo_urls.append(url)
+            if len(photo_urls) >= 12:
+                break
+        if photo_urls:
+            thumbnail = photo_urls[0]
+        elif images:
+            first = images[0] if isinstance(images[0], dict) else {}
+            thumbnail = first.get("thumbnail") or first.get("original_image")
     if not thumbnail:
         thumbnail = prop.get("thumbnail")
+        if isinstance(thumbnail, str) and thumbnail.startswith("http"):
+            photo_urls = [thumbnail]
 
+    link = prop.get("link")
     return {
         "place_id": f"serpapi:{token}",
         "name": name,
@@ -120,7 +135,8 @@ def map_serpapi_property_to_place(
         "rating": prop.get("overall_rating"),
         "user_ratings_total": prop.get("reviews"),
         "description": prop.get("description"),
-        "website": prop.get("link"),
+        "website": link,
+        "external_url": link,
         "address": prop.get("address"),
         "phone": prop.get("phone"),
         "vicinity": prop.get("address"),
@@ -132,6 +148,7 @@ def map_serpapi_property_to_place(
         "check_out_time": prop.get("check_out_time"),
         "data_source": "serpapi",
         "thumbnail_url": thumbnail,
+        "photo_urls": photo_urls or None,
     }
 
 

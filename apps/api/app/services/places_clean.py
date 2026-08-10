@@ -6,6 +6,10 @@ from typing import Any
 
 from app.constants.categories import APP_CATEGORIES
 from app.constants.regions import REGION_DB_ID
+from app.services.places_tourism_filter import (
+    name_has_forbidden_script,
+    name_is_blacklisted,
+)
 
 
 def to_db_region(region: str) -> str:
@@ -95,6 +99,19 @@ def clean_place(
     if not place_id or not name or latitude is None or longitude is None:
         return None
 
+    name_s = str(name).strip()
+    # Reject Russian / Arabic-Persian / blacklisted / garbled labels
+    if name_is_blacklisted(name_s) or name_has_forbidden_script(name_s):
+        return None
+    letters = [ch for ch in name_s if ch.isalpha()]
+    if letters:
+        cyr = sum(1 for ch in letters if "\u0400" <= ch <= "\u04FF")
+        if cyr > 0 and (cyr / len(letters)) >= 0.15:
+            return None
+    # Reject names that are mostly punctuation/digits or single-token junk
+    if len(name_s) < 2 or name_s.isdigit():
+        return None
+
     db_category = resolve_db_category(place, category)
     if db_category in IGNORED_SYNC_CATEGORIES or str(category).strip().lower() in IGNORED_SYNC_CATEGORIES:
         return None
@@ -124,7 +141,7 @@ def clean_place(
             rating_count = None
 
     row: dict[str, Any] = {
-        "name": str(name).strip(),
+        "name": name_s,
         "category": db_category,
         "status": "approved",
         "region": to_db_region(region),
@@ -177,5 +194,40 @@ def clean_place(
         row["data_source"] = str(place["data_source"])[:32]
     if place.get("thumbnail_url"):
         row["thumbnail_url"] = str(place["thumbnail_url"])[:2000]
+
+    # Gallery URLs (DB column photo_urls if present; also used for poi_photos sync)
+    gallery: list[str] = []
+    raw_photos = place.get("photo_urls")
+    if isinstance(raw_photos, list):
+        for item in raw_photos:
+            url = None
+            if isinstance(item, str):
+                url = item.strip()
+            elif isinstance(item, dict):
+                url = str(
+                    item.get("url")
+                    or item.get("original_image")
+                    or item.get("thumbnail")
+                    or ""
+                ).strip()
+            if url and url.startswith("http") and url not in gallery:
+                gallery.append(url[:2000])
+            if len(gallery) >= 12:
+                break
+    thumb = row.get("thumbnail_url")
+    if isinstance(thumb, str) and thumb.startswith("http") and thumb not in gallery:
+        gallery.insert(0, thumb)
+    if gallery:
+        row["photo_urls"] = gallery[:12]
+
+    cuisine = place.get("cuisine")
+    if cuisine:
+        row["cuisine"] = str(cuisine).strip()[:120]
+
+    external = place.get("external_url") or place.get("link")
+    if external and not row.get("website"):
+        row["website"] = str(external).strip()[:2000]
+    if external:
+        row["external_url"] = str(external).strip()[:2000]
 
     return row

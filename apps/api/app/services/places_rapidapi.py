@@ -32,7 +32,7 @@ _CAMPING_RE = re.compile(
     r"\b(camp|camping|campground|campsite|glamping|çarə|camp\s*site)\b",
     re.IGNORECASE,
 )
-_MAX_ATTEMPTS = 3
+_MAX_ATTEMPTS = 5
 _HTTP_TIMEOUT = 35
 
 
@@ -91,7 +91,8 @@ def _get_json(
                 last_err = RapidApiEndpointError(
                     f"{label}: rate limited (429). URL={url}"
                 )
-                time.sleep(1.5 * attempt)
+                # RapidAPI free/basic tiers need longer cool-downs
+                time.sleep(12.0 * attempt)
                 continue
             if resp.status_code >= 500:
                 last_err = RapidApiEndpointError(
@@ -447,22 +448,73 @@ def map_booking_property_to_place(
         except (TypeError, ValueError):
             continue
 
-    thumb = None
-    photos = flat.get("photoUrls") or flat.get("photos")
-    if isinstance(photos, list) and photos:
-        first = photos[0]
-        if isinstance(first, str) and first.startswith("http"):
-            thumb = first
-        elif isinstance(first, dict):
-            url = first.get("url") or first.get("absolute_url")
-            if isinstance(url, str) and url.startswith("http"):
-                thumb = url
+    photo_urls: list[str] = []
+    photos = flat.get("photoUrls") or flat.get("photos") or flat.get("photo_urls")
+    if isinstance(photos, list):
+        for item in photos:
+            url = None
+            if isinstance(item, str):
+                url = item
+            elif isinstance(item, dict):
+                url = item.get("url") or item.get("absolute_url") or item.get("photoUri")
+            if isinstance(url, str) and url.startswith("http") and url not in photo_urls:
+                photo_urls.append(url)
+            if len(photo_urls) >= 12:
+                break
+    thumb = photo_urls[0] if photo_urls else None
     if thumb is None:
         for key in ("main_photo_url", "photoUrl", "image", "thumbnail_url"):
             val = flat.get(key)
             if isinstance(val, str) and val.startswith("http"):
                 thumb = val
+                photo_urls = [val]
                 break
+
+    amenities: list[str] = []
+    for key in (
+        "facilities",
+        "facilityIds",
+        "amenities",
+        "propertyFacilities",
+        "hotelFacilities",
+    ):
+        raw = flat.get(key)
+        if isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, str) and item.strip():
+                    amenities.append(item.strip())
+                elif isinstance(item, dict):
+                    label = (
+                        item.get("name")
+                        or item.get("title")
+                        or item.get("facilityName")
+                        or item.get("text")
+                    )
+                    if isinstance(label, str) and label.strip():
+                        amenities.append(label.strip())
+        if len(amenities) >= 40:
+            break
+    # Dedupe while preserving order
+    if amenities:
+        seen_am: set[str] = set()
+        deduped: list[str] = []
+        for a in amenities:
+            if a.lower() in seen_am:
+                continue
+            seen_am.add(a.lower())
+            deduped.append(a)
+            if len(deduped) >= 40:
+                break
+        amenities = deduped
+
+    booking_url = None
+    for key in ("url", "deepLink", "deeplink", "shareUrl", "hotelUrl"):
+        val = flat.get(key)
+        if isinstance(val, str) and val.startswith("http"):
+            booking_url = val
+            break
+    if booking_url is None and prop_id:
+        booking_url = f"https://www.booking.com/hotel/az/{prop_id}.html"
 
     place: dict[str, Any] = {
         "name": name,
@@ -484,6 +536,13 @@ def map_booking_property_to_place(
         place["hotel_class"] = stars
     if thumb:
         place["thumbnail_url"] = thumb
+    if photo_urls:
+        place["photo_urls"] = photo_urls
+    if amenities:
+        place["amenities"] = amenities
+    if booking_url:
+        place["website"] = booking_url
+        place["external_url"] = booking_url
     checkin = flat.get("checkin")
     if isinstance(checkin, dict) and checkin.get("fromTime"):
         place["check_in_time"] = str(checkin["fromTime"])[:40]
@@ -494,7 +553,6 @@ def map_booking_property_to_place(
     if address:
         place["address"] = str(address)
     return place
-
 
 def search_tripadvisor_location(region_key: str) -> str:
     """Resolve TripAdvisor geo id.
@@ -671,13 +729,53 @@ def map_tripadvisor_restaurant_to_place(row: dict[str, Any]) -> dict[str, Any] |
     address = row.get("address") or row.get("locationString")
     if address:
         place["address"] = str(address)
-    thumb = row.get("thumbnail") or row.get("image") or row.get("photo")
+    cuisine = row.get("cuisine") or row.get("cuisines") or row.get("establishmentTypeAndCuisineTags")
+    if isinstance(cuisine, list):
+        labels = []
+        for item in cuisine:
+            if isinstance(item, str) and item.strip():
+                labels.append(item.strip())
+            elif isinstance(item, dict):
+                label = item.get("name") or item.get("tag") or item.get("title")
+                if isinstance(label, str) and label.strip():
+                    labels.append(label.strip())
+        if labels:
+            place["cuisine"] = ", ".join(labels[:6])
+            place["amenities"] = labels[:20]
+    elif isinstance(cuisine, str) and cuisine.strip():
+        place["cuisine"] = cuisine.strip()[:120]
+
+    photo_urls: list[str] = []
+    thumb = row.get("thumbnail") or row.get("image") or row.get("photo") or row.get("heroImgUrl")
     if isinstance(thumb, dict):
-        thumb = thumb.get("url") or thumb.get("images", {}).get("medium", {}).get("url")
+        thumb = (
+            thumb.get("url")
+            or (thumb.get("images") or {}).get("medium", {}).get("url")
+            or (thumb.get("images") or {}).get("large", {}).get("url")
+        )
     if isinstance(thumb, str) and thumb.startswith("http"):
         place["thumbnail_url"] = thumb
-    return place
+        photo_urls.append(thumb)
+    photos = row.get("photos") or row.get("photoUrls")
+    if isinstance(photos, list):
+        for item in photos:
+            url = item if isinstance(item, str) else None
+            if isinstance(item, dict):
+                url = item.get("url") or item.get("photoUrl")
+            if isinstance(url, str) and url.startswith("http") and url not in photo_urls:
+                photo_urls.append(url)
+            if len(photo_urls) >= 12:
+                break
+    if photo_urls:
+        place["photo_urls"] = photo_urls
 
+    for key in ("website", "webUrl", "url", "restaurantUrl"):
+        val = row.get(key)
+        if isinstance(val, str) and val.startswith("http"):
+            place["website"] = val
+            place["external_url"] = val
+            break
+    return place
 
 def fetch_standardized_for_region(
     region_key: str,
@@ -707,9 +805,14 @@ def fetch_standardized_for_region(
             if not booking_raw:
                 booking_raw = fetch_booking_hotels_by_coords(key, currency=currency)
         except (RapidApiConfigError, RapidApiEndpointError, ValueError) as exc:
-            out["errors"].append(str(exc))
-            raise
-
+            msg = str(exc)
+            out["errors"].append(msg)
+            logger.warning("booking dest/search failed for %s: %s — trying coords", key, msg)
+            try:
+                booking_raw = fetch_booking_hotels_by_coords(key, currency=currency)
+            except (RapidApiConfigError, RapidApiEndpointError, ValueError) as exc2:
+                out["errors"].append(str(exc2))
+                raise
     if "hotel" in wanted:
         hotels: list[dict[str, Any]] = []
         skipped = 0

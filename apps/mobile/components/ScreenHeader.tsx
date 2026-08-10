@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
 import { layout, useResponsiveLayout } from '../lib/layout';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 type Props = {
   title: string;
@@ -16,6 +17,8 @@ type Props = {
  * Universal screen header: title never clashes with corner actions on any width.
  */
 export function ScreenHeader({ title, subtitle, right, style }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const { padH, titleSize, subtitleSize } = useResponsiveLayout();
 
   return (
@@ -40,24 +43,26 @@ export function ScreenHeader({ title, subtitle, right, style }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: {
-    paddingTop: 4,
-    paddingBottom: 8,
-  },
-  title: {
-    fontWeight: '700',
-    color: colors.text,
-    letterSpacing: -0.4,
-  },
-  subtitle: {
-    marginTop: 3,
-    fontWeight: '500',
-    color: colors.textMuted,
-    lineHeight: 16,
-  },
-  right: {
-    flexShrink: 0,
-    paddingTop: 2,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    wrap: {
+      paddingTop: 4,
+      paddingBottom: 8,
+    },
+    title: {
+      fontWeight: '700',
+      color: colors.text,
+      letterSpacing: -0.4,
+    },
+    subtitle: {
+      marginTop: 3,
+      fontWeight: '500',
+      color: colors.textMuted,
+      lineHeight: 16,
+    },
+    right: {
+      flexShrink: 0,
+      paddingTop: 2,
+    },
+  });
+}

@@ -9,7 +9,9 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.auth import verify_user
+from app.db import supabase
 from app.services.poi_upsert_google import upsert_google_place
+from app.services.telegram_notify import admin_action_keyboard, notify_all_admins
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,19 @@ class UpsertGooglePlaceBody(BaseModel):
     region: str | None = None
     rating: float | None = None
     rating_count: int | None = None
+
+
+class PendingPhotoItem(BaseModel):
+    photo_url: str = Field(..., min_length=8, max_length=2000)
+    thumb_url: str | None = Field(default=None, max_length=2000)
+    medium_url: str | None = Field(default=None, max_length=2000)
+    order_index: int = Field(default=0, ge=0, le=100)
+
+
+class PendingPhotosBody(BaseModel):
+    poi_id: str = Field(..., min_length=8, max_length=64)
+    poi_name: str | None = Field(default=None, max_length=200)
+    photos: list[PendingPhotoItem] = Field(..., min_length=1, max_length=6)
 
 
 @router.post("/upsert-google-place")
@@ -53,3 +68,72 @@ def api_upsert_google_place(
             status_code=502,
             detail={"error": "upsert_failed", "message": "Could not save the place."},
         ) from None
+
+
+@router.post("/photos/pending")
+def api_create_pending_photos(
+    body: PendingPhotosBody,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    """Insert user-uploaded POI photos as pending (service role bypasses RLS).
+
+    Needed until/alongside the INSERT RLS policy on poi_photos is applied.
+    Also notifies admins for Telegram moderation.
+    """
+    user_id = verify_user(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+
+    poi = (
+        supabase.table("pois")
+        .select("id, name, status")
+        .eq("id", body.poi_id)
+        .limit(1)
+        .execute()
+    )
+    row = (poi.data or [None])[0]
+    if not row:
+        raise HTTPException(status_code=404, detail={"error": "poi_not_found"})
+
+    payload = [
+        {
+            "poi_id": body.poi_id,
+            "photo_url": item.photo_url,
+            "thumb_url": item.thumb_url or item.photo_url,
+            "medium_url": item.medium_url or item.photo_url,
+            "order_index": item.order_index,
+            "status": "pending",
+            "uploaded_by": user_id,
+        }
+        for item in body.photos
+    ]
+
+    try:
+        result = supabase.table("poi_photos").insert(payload).execute()
+    except Exception:
+        logger.exception("pending photo insert failed")
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "insert_failed", "message": "Şəkillər yazılmadı."},
+        ) from None
+
+    inserted = list(result.data or [])
+    first_id = str(inserted[0].get("id")) if inserted else None
+    poi_name = body.poi_name or str(row.get("name") or "POI")
+    notify_text = f'🛡 TripPoint · yeni şəkil təsdiqi\n"{poi_name}" üçün {len(payload)} şəkil'
+    sent = 0
+    try:
+        keyboard = (
+            admin_action_keyboard("photo_pending", first_id) if first_id else None
+        )
+        notify_result = notify_all_admins(notify_text, reply_markup=keyboard)
+        sent = int(notify_result.get("sent") or 0)
+    except Exception:
+        logger.exception("pending photo admin notify failed")
+
+    return {
+        "success": True,
+        "inserted": len(inserted) if inserted else len(payload),
+        "ids": [str(r.get("id")) for r in inserted if r.get("id")],
+        "notify_sent": sent,
+    }

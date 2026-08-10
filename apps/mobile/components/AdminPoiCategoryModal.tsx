@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -15,7 +15,8 @@ import { ADMIN_POI_CATEGORIES, type GoogleMapPoiPayload } from '../lib/adminMap'
 import { getCategoryLabel } from '../lib/categoryUtils';
 import type { PoiCategory } from '../types/database';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 type Props = {
   visible: boolean;
@@ -33,6 +34,8 @@ export function AdminPoiCategoryModal({
   onCancel,
   onConfirm,
 }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [categories, setCategories] = useState<PoiCategory[]>([]);
   const [name, setName] = useState('');
 
@@ -155,7 +158,8 @@ export function AdminPoiCategoryModal({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: colors.overlay,
@@ -293,3 +297,4 @@ const styles = StyleSheet.create({
     color: colors.textOnAccent,
   },
 });
+}

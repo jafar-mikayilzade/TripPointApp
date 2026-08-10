@@ -10,9 +10,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, space } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { space } from '../constants/theme';
 import { nextSelectableHour } from '../lib/listingSchedule';
 import { startOfDay } from '../lib/tripSchedule';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 interface SimpleDateTimeFieldProps {
   value: Date;
@@ -99,6 +101,8 @@ export function SimpleDateTimeField({
   anyHour = false,
   style,
 }: SimpleDateTimeFieldProps) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const bottomSafe = Math.max(insets.bottom, 12);
   const [open, setOpen] = useState(false);
@@ -370,207 +374,209 @@ export function SimpleDateTimeField({
   );
 }
 
-const styles = StyleSheet.create({
-  trigger: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: colors.surface,
-    justifyContent: 'center',
-  },
-  triggerCompact: {
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 0,
-    height: 40,
-  },
-  triggerError: {
-    borderColor: colors.danger,
-  },
-  triggerLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.textMuted,
-    marginBottom: 2,
-  },
-  triggerLabelCompact: {
-    fontSize: 10,
-    marginBottom: 0,
-    lineHeight: 12,
-  },
-  triggerText: {
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  triggerTextCompact: {
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  triggerTextError: {
-    color: colors.danger,
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: colors.overlay,
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingHorizontal: 12,
-    paddingTop: 12,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.text,
-    textAlign: 'center',
-    letterSpacing: -0.2,
-  },
-  monthBar: {
-    marginTop: space.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  monthNav: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-  },
-  monthNavDisabled: {
-    opacity: 0.35,
-  },
-  monthNavText: {
-    fontSize: 20,
-    color: colors.text,
-    fontWeight: '500',
-    lineHeight: 24,
-  },
-  monthLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  weekRow: {
-    marginTop: space.sm,
-    flexDirection: 'row',
-  },
-  weekday: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.textMuted,
-  },
-  grid: {
-    marginTop: 6,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  dayCell: {
-    width: '14.28%',
-    aspectRatio: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 2,
-  },
-  dayInner: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dayInnerSelected: {
-    backgroundColor: colors.accent,
-  },
-  dayInnerDisabled: {
-    opacity: 0.35,
-  },
-  dayText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  dayTextSelected: {
-    color: colors.textOnAccent,
-  },
-  dayTextDisabled: {
-    color: colors.textMuted,
-  },
-  hint: {
-    marginTop: space.md,
-    textAlign: 'center',
-    fontSize: 12,
-    color: colors.textMuted,
-  },
-  timeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  backLink: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.accent,
-    width: 64,
-  },
-  backSpacer: {
-    width: 64,
-  },
-  selectedDateLabel: {
-    marginTop: space.md,
-    marginBottom: space.sm,
-    textAlign: 'center',
-    fontSize: 12,
-    color: colors.textMuted,
-  },
-  hourGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  hourChip: {
-    minWidth: 68,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-    alignItems: 'center',
-  },
-  hourText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  emptyHours: {
-    marginTop: space.lg,
-    textAlign: 'center',
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  cancelBtn: {
-    marginTop: space.lg,
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  cancelText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textMuted,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    trigger: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.borderSoft,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      backgroundColor: colors.surface,
+      justifyContent: 'center',
+    },
+    triggerCompact: {
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 0,
+      height: 40,
+    },
+    triggerError: {
+      borderColor: colors.danger,
+    },
+    triggerLabel: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textMuted,
+      marginBottom: 2,
+    },
+    triggerLabelCompact: {
+      fontSize: 10,
+      marginBottom: 0,
+      lineHeight: 12,
+    },
+    triggerText: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    triggerTextCompact: {
+      fontSize: 12,
+      lineHeight: 16,
+    },
+    triggerTextError: {
+      color: colors.danger,
+    },
+    overlay: {
+      flex: 1,
+      backgroundColor: colors.overlay,
+      justifyContent: 'flex-end',
+    },
+    sheet: {
+      backgroundColor: colors.bg,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      paddingHorizontal: 12,
+      paddingTop: 12,
+    },
+    title: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.text,
+      textAlign: 'center',
+      letterSpacing: -0.2,
+    },
+    monthBar: {
+      marginTop: space.md,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    monthNav: {
+      width: 34,
+      height: 34,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.borderSoft,
+    },
+    monthNavDisabled: {
+      opacity: 0.35,
+    },
+    monthNavText: {
+      fontSize: 20,
+      color: colors.text,
+      fontWeight: '500',
+      lineHeight: 24,
+    },
+    monthLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    weekRow: {
+      marginTop: space.sm,
+      flexDirection: 'row',
+    },
+    weekday: {
+      flex: 1,
+      textAlign: 'center',
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.textMuted,
+    },
+    grid: {
+      marginTop: 6,
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+    },
+    dayCell: {
+      width: '14.28%',
+      aspectRatio: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 2,
+    },
+    dayInner: {
+      width: 34,
+      height: 34,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    dayInnerSelected: {
+      backgroundColor: colors.accent,
+    },
+    dayInnerDisabled: {
+      opacity: 0.35,
+    },
+    dayText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    dayTextSelected: {
+      color: colors.textOnAccent,
+    },
+    dayTextDisabled: {
+      color: colors.textMuted,
+    },
+    hint: {
+      marginTop: space.md,
+      textAlign: 'center',
+      fontSize: 12,
+      color: colors.textMuted,
+    },
+    timeHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    backLink: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.accent,
+      width: 64,
+    },
+    backSpacer: {
+      width: 64,
+    },
+    selectedDateLabel: {
+      marginTop: space.md,
+      marginBottom: space.sm,
+      textAlign: 'center',
+      fontSize: 12,
+      color: colors.textMuted,
+    },
+    hourGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+      justifyContent: 'center',
+      marginTop: 8,
+    },
+    hourChip: {
+      minWidth: 68,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.borderSoft,
+      alignItems: 'center',
+    },
+    hourText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    emptyHours: {
+      marginTop: space.lg,
+      textAlign: 'center',
+      color: colors.textMuted,
+      fontSize: 12,
+    },
+    cancelBtn: {
+      marginTop: space.lg,
+      alignItems: 'center',
+      paddingVertical: 10,
+    },
+    cancelText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textMuted,
+    },
+  });
+}

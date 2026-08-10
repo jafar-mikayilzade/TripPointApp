@@ -7,6 +7,7 @@ import {
   Alert,
   Dimensions,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -35,14 +36,17 @@ import {
   shouldTrackMarkerViewChanges,
 } from '../../components/PoiMapMarker';
 import { FavoriteButton } from '../../components/FavoriteButton';
+import { PoiPhotoGallery } from '../../components/PoiPhotoGallery';
 import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
 import { useToast } from '../../components/Toast';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
-import { colors } from '../../constants/theme';
+import type { ThemeColors } from '../../constants/theme';
+import { useThemeColors } from '../../theme/ThemeProvider';
 import {
   insertApprovedPoiFromGoogle,
   updatePoiCoordinates,
+  deletePoiAsAdmin,
   fetchGooglePlaceRating,
   type GoogleMapPoiPayload,
 } from '../../lib/adminMap';
@@ -54,7 +58,7 @@ import {
 } from '../../lib/poiDisplay';
 import { getErrorMessage } from '../../lib/errors';
 import { isPoiSponsored, summarizeOpeningHours } from '../../lib/openingHours';
-import { pickPhotoUrl } from '../../lib/photoUrls';
+import { collectPoiPhotoUrls } from '../../lib/photoUrls';
 import {
   fetchRegionWeather,
   formatWeatherLabel,
@@ -67,6 +71,7 @@ import type { Poi, PoiCategory, PoiPhoto } from '../../types/database';
 
 type PoiListItem = Poi & {
   photoUrl: string | null;
+  photoUrls: string[];
   averageRating: number | null;
   ratingCount: number;
 };
@@ -121,6 +126,9 @@ function calculateDistance(
 }
 
 export default function HomeScreen() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const router = useRouter();
   const mapRef = useRef<{ animateToRegion: (region: MapRegion, duration?: number) => void } | null>(
     null
@@ -258,9 +266,11 @@ export default function HomeScreen() {
         .filter((photo) => !('status' in photo) || photo.status === 'approved')
         .sort((a, b) => a.order_index - b.order_index);
       const { poi_photos: _ignored, ...rest } = poi;
+      const photoUrls = collectPoiPhotoUrls(rest, photos, 'thumb');
       return {
         ...rest,
-        photoUrl: pickPhotoUrl(photos[0], 'thumb'),
+        photoUrl: photoUrls[0] ?? null,
+        photoUrls,
         averageRating:
           typeof rest.rating === 'number' && Number.isFinite(rest.rating)
             ? rest.rating
@@ -273,6 +283,12 @@ export default function HomeScreen() {
     });
 
     mapped.sort((a, b) => {
+      // Dağ zirvələrini axıra — digər kateqoriyalar əvvəl
+      const mountainA = a.category === 'mountain' ? 1 : 0;
+      const mountainB = b.category === 'mountain' ? 1 : 0;
+      if (mountainA !== mountainB) {
+        return mountainA - mountainB;
+      }
       const sa = isPoiSponsored(a) ? 1 : 0;
       const sb = isPoiSponsored(b) ? 1 : 0;
       if (sb !== sa) {
@@ -794,7 +810,8 @@ export default function HomeScreen() {
 
       const listItem: PoiListItem = {
         ...data,
-        photoUrl: null,
+        photoUrl: data.thumbnail_url?.trim() || null,
+        photoUrls: collectPoiPhotoUrls(data, null, 'thumb'),
         averageRating:
           typeof data.rating === 'number' && Number.isFinite(data.rating) ? data.rating : null,
         ratingCount:
@@ -957,8 +974,8 @@ export default function HomeScreen() {
                 <View style={styles.adminBadge} pointerEvents="none">
                   <Text style={styles.adminBadgeText}>
                     {Platform.OS === 'web'
-                      ? 'ADMIN · sürüşdür / xəritəyə və ya Google məkanına klik'
-                      : 'ADMIN · sürüşdür / Google məkanına klik'}
+                      ? 'ADMIN · sürüşdür / əlavə et / sil'
+                      : 'ADMIN · sürüşdür / Google məkanına klik / sil'}
                   </Text>
                 </View>
               ) : null}
@@ -1014,7 +1031,13 @@ export default function HomeScreen() {
               {selectedPoi ? (
                 <SelectedPoiPanel
                   poi={selectedPoi}
+                  isAdmin={isAdmin}
                   onBack={clearSelectedPoi}
+                  onDeleted={(poiId) => {
+                    setPois((current) => current.filter((p) => p.id !== poiId));
+                    clearSelectedPoi();
+                    showToast('Məkan silindi');
+                  }}
                   onPoiIdResolved={(previousId, dbId) => {
                     setSelectedPoi((current) =>
                       current && current.id === previousId
@@ -1227,12 +1250,24 @@ export default function HomeScreen() {
 function SelectedPoiPanel({
   poi,
   onBack,
+  onDeleted,
   onPoiIdResolved,
+  isAdmin = false,
 }: {
   poi: Poi;
   onBack: () => void;
+  onDeleted?: (poiId: string) => void;
   onPoiIdResolved?: (previousId: string, dbId: string) => void;
+  isAdmin?: boolean;
 }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const [deleting, setDeleting] = useState(false);
+  const seededUrls = (poi as PoiListItem).photoUrls ?? collectPoiPhotoUrls(poi, null, 'medium');
+  const [photoUrls, setPhotoUrls] = useState<string[]>(seededUrls);
+  const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
+
   const initialRating =
     typeof (poi as PoiListItem).averageRating === 'number'
       ? (poi as PoiListItem).averageRating
@@ -1244,9 +1279,13 @@ function SelectedPoiPanel({
 
   const regionLabel =
     REGIONS.find((region) => region.id === poi.region)?.label ?? poi.region;
+  const canDelete = isAdmin && isDatabasePoiId(poi.id);
 
   useEffect(() => {
     setAmenitiesOpen(false);
+    const next = (poi as PoiListItem).photoUrls ?? collectPoiPhotoUrls(poi, null, 'medium');
+    setPhotoUrls(next);
+    setActivePhotoIndex(0);
   }, [poi.id]);
 
   useEffect(() => {
@@ -1266,29 +1305,79 @@ function SelectedPoiPanel({
     }
 
     (async () => {
-      const { data, error } = await supabase
-        .from('ratings')
-        .select('score')
-        .eq('target_type', 'poi')
-        .eq('target_id', poi.id);
+      setLoadingPhotos(true);
+      const [ratingsResult, photosResult] = await Promise.all([
+        supabase
+          .from('ratings')
+          .select('score')
+          .eq('target_type', 'poi')
+          .eq('target_id', poi.id),
+        supabase
+          .from('poi_photos')
+          .select('photo_url, thumb_url, medium_url, order_index, status')
+          .eq('poi_id', poi.id)
+          .eq('status', 'approved')
+          .order('order_index', { ascending: true }),
+      ]);
 
-      if (!active || error) {
+      if (!active) {
         return;
       }
 
-      const rows = data ?? [];
-      if (rows.length === 0) {
-        setAverageRating(fallback);
-      } else {
-        const sum = rows.reduce((acc, row) => acc + row.score, 0);
-        setAverageRating(sum / rows.length);
+      if (!ratingsResult.error) {
+        const rows = ratingsResult.data ?? [];
+        if (rows.length === 0) {
+          setAverageRating(fallback);
+        } else {
+          const sum = rows.reduce((acc, row) => acc + row.score, 0);
+          setAverageRating(sum / rows.length);
+        }
       }
+
+      if (!photosResult.error) {
+        const approved = (photosResult.data ?? []).filter(
+          (photo) => !('status' in photo) || photo.status === 'approved'
+        );
+        const next = collectPoiPhotoUrls(poi, approved, 'medium');
+        setPhotoUrls(next);
+        setActivePhotoIndex(0);
+      }
+      setLoadingPhotos(false);
     })();
 
     return () => {
       active = false;
     };
   }, [poi]);
+
+  function confirmDeletePoi() {
+    if (!canDelete || deleting) {
+      return;
+    }
+    Alert.alert(
+      'Məkanı sil',
+      `"${poi.name}" DB-dən silinsin? Bu əməliyyat geri qaytarılmır.`,
+      [
+        { text: 'Ləğv et', style: 'cancel' },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setDeleting(true);
+              const { error } = await deletePoiAsAdmin(poi.id);
+              setDeleting(false);
+              if (error) {
+                Alert.alert('Silinmədi', error);
+                return;
+              }
+              onDeleted?.(poi.id);
+            })();
+          },
+        },
+      ]
+    );
+  }
 
   return (
     <ScrollView style={styles.detailPanel} contentContainerStyle={styles.detailPanelContent}>
@@ -1331,6 +1420,23 @@ function SelectedPoiPanel({
           </Text>
         </View>
       </View>
+
+      {loadingPhotos && photoUrls.length === 0 ? (
+        <View style={styles.panelGalleryPlaceholder}>
+          <ActivityIndicator color={colors.accent} />
+        </View>
+      ) : photoUrls.length > 0 ? (
+        <PoiPhotoGallery
+          urls={photoUrls}
+          activeIndex={activePhotoIndex}
+          onActiveIndexChange={setActivePhotoIndex}
+          compact
+        />
+      ) : (
+        <View style={styles.panelGalleryPlaceholder}>
+          <CategoryIcon category={poi.category} size={28} color={colors.textMuted} />
+        </View>
+      )}
 
       <View style={styles.detailNameRow}>
         <Text style={styles.detailName} numberOfLines={2}>
@@ -1428,6 +1534,17 @@ function SelectedPoiPanel({
         >
           <Text style={styles.actionButtonText}>🗺️ Maps-də aç</Text>
         </TouchableOpacity>
+        {canDelete ? (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.deleteActionButton]}
+            onPress={confirmDeletePoi}
+            disabled={deleting}
+          >
+            <Text style={styles.deleteActionButtonText}>
+              {deleting ? 'Silinir…' : '🗑 Məkanı sil'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     </ScrollView>
   );
@@ -1446,6 +1563,9 @@ function PoiListCard({
   userLocation: { latitude: number; longitude: number } | null;
   onPress: () => void;
 }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   const distanceLabel = userLocation
     ? calculateDistance(
         userLocation.latitude,
@@ -1464,13 +1584,17 @@ function PoiListCard({
         dimmed && styles.cardDimmed,
       ]}
     >
-      <View style={styles.cardEmojiWrap}>
-        <CategoryIcon
-          category={item.category}
-          size={15}
-          color={highlighted ? colors.accentPressed : colors.text}
-        />
-      </View>
+      {item.photoUrl ? (
+        <Image source={{ uri: item.photoUrl }} style={styles.cardThumb} />
+      ) : (
+        <View style={styles.cardEmojiWrap}>
+          <CategoryIcon
+            category={item.category}
+            size={15}
+            color={highlighted ? colors.accentPressed : colors.text}
+          />
+        </View>
+      )}
 
       <View style={styles.cardBody}>
         <View style={styles.cardTopRow}>
@@ -1497,6 +1621,7 @@ function PoiListCard({
 
         <Text style={styles.cardCategory} numberOfLines={1}>
           {getCategoryLabel(item.category)}
+          {item.photoUrls.length > 1 ? ` · ${item.photoUrls.length} şəkil` : ''}
         </Text>
       </View>
     </Pressable>
@@ -1505,7 +1630,8 @@ function PoiListCard({
 
 const MemoPoiListCard = memo(PoiListCard);
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -1631,7 +1757,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.94)',
+    backgroundColor: colors.surface,
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -1823,6 +1949,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
+  deleteActionButton: {
+    backgroundColor: colors.dangerSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.danger,
+  },
+  deleteActionButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.danger,
+  },
   actionButtonText: {
     fontSize: 12,
     fontWeight: '600',
@@ -1909,15 +2045,58 @@ const styles = StyleSheet.create({
     opacity: 0.45,
   },
   cardEmojiWrap: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
+    width: 48,
+    height: 48,
+    borderRadius: 10,
     backgroundColor: colors.chip,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  cardThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: colors.chip,
+  },
   cardEmoji: {
     fontSize: 15,
+  },
+  panelGalleryBlock: {
+    marginBottom: 10,
+    gap: 8,
+  },
+  panelHeroImage: {
+    width: '100%',
+    height: 150,
+    borderRadius: 12,
+    backgroundColor: colors.chip,
+  },
+  panelThumbRow: {
+    gap: 6,
+    paddingRight: 4,
+  },
+  panelThumbWrap: {
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    overflow: 'hidden',
+  },
+  panelThumbWrapActive: {
+    borderColor: colors.accent,
+  },
+  panelThumb: {
+    width: 64,
+    height: 48,
+    borderRadius: 6,
+    backgroundColor: colors.chip,
+  },
+  panelGalleryPlaceholder: {
+    height: 100,
+    borderRadius: 12,
+    marginBottom: 10,
+    backgroundColor: colors.chip,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cardBody: {
     flex: 1,
@@ -1999,3 +2178,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+}

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text } from 'react-native';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 type ToastState = {
   message: string;
@@ -9,6 +10,8 @@ type ToastState = {
 };
 
 export function useToast() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [toast, setToast] = useState<ToastState>({ message: '', visible: false });
   const opacity = useRef(new Animated.Value(0)).current;
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,27 +64,29 @@ export function useToast() {
   return { showToast, ToastHost };
 }
 
-const styles = StyleSheet.create({
-  toast: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 28,
-    backgroundColor: colors.chipSelected,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    zIndex: 100,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-  },
-  toastText: {
-    color: colors.textOnAccent,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    toast: {
+      position: 'absolute',
+      left: 16,
+      right: 16,
+      bottom: 28,
+      backgroundColor: colors.chipSelected,
+      borderRadius: 16,
+      paddingHorizontal: 16,
+      paddingVertical: 13,
+      zIndex: 100,
+      elevation: 8,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.12,
+      shadowRadius: 10,
+    },
+    toastText: {
+      color: colors.textOnAccent,
+      fontSize: 14,
+      fontWeight: '600',
+      textAlign: 'center',
+    },
+  });
+}

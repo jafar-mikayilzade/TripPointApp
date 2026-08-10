@@ -1,5 +1,5 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
-import { useCallback, useEffect, useState } from 'react';
+import { useMemo, useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -25,7 +25,8 @@ import { confirmDelete } from '../lib/userContentDelete';
 import { supabase } from '../lib/supabase';
 import type { ListingReport, Poi, PoiPhoto } from '../types/database';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 type ModTab = 'pois' | 'photos' | 'reports';
 
@@ -45,6 +46,8 @@ export function AdminModerationModal({
   onClose,
   initialTab = 'pois',
 }: AdminModerationModalProps) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [tab, setTab] = useState<ModTab>(initialTab);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -418,7 +421,8 @@ export function AdminModerationModal({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',
@@ -565,3 +569,4 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
 });
+}

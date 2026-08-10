@@ -1,5 +1,5 @@
 import { Link, router } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -14,6 +14,7 @@ import {
 
 import { ErrorBanner } from '../../components/ErrorBanner';
 import { FormField } from '../../components/FormField';
+import { TripPointWordmark } from '../../components/TripPointWordmark';
 import { AUTH_CALLBACK_URL } from '../../lib/authDeepLink';
 import { sendEmailVerificationLink } from '../../lib/emailVerification';
 import { ensureProfile } from '../../lib/ensureProfile';
@@ -21,10 +22,14 @@ import { getErrorMessage } from '../../lib/errors';
 import { validateEmail } from '../../lib/formValidation';
 import { signInWithGoogle } from '../../lib/googleAuth';
 import { supabase } from '../../lib/supabase';
-
-import { colors } from '../../constants/theme';
+import type { ThemeColors } from '../../constants/theme';
+import { radii, shadows } from '../../constants/theme';
+import { useTheme, useThemeColors } from '../../theme/ThemeProvider';
 
 export default function LoginScreen() {
+  const colors = useThemeColors();
+  const { isDark } = useTheme();
+  const styles = useMemo(() => createStyles(colors, isDark), [colors, isDark]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -155,46 +160,38 @@ export default function LoginScreen() {
 
   if (awaitingGoogleConfirm) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Emailinizi yoxlayın</Text>
-        <Text style={styles.subtitle}>
-          Google hesabınız üçün təsdiq linki göndərildi:{'\n'}
-          <Text style={{ fontWeight: '700' }}>{googleConfirmEmail}</Text>
-        </Text>
-        <Text style={styles.subtitle}>
-          Poçtdakı linkə basın. Sonra avtomatik daxil olacaqsınız.
-        </Text>
-
-        {errorMessage ? <ErrorBanner message={errorMessage} /> : null}
-        {infoMessage ? (
-          <Text style={{ color: '#166534', marginBottom: 12, textAlign: 'center' }}>
-            {infoMessage}
+      <View style={styles.screen}>
+        <View style={styles.card}>
+          <Text style={styles.title}>Emailinizi yoxlayın</Text>
+          <Text style={styles.subtitle}>
+            Google hesabınız üçün təsdiq linki göndərildi:{'\n'}
+            <Text style={{ fontWeight: '700' }}>{googleConfirmEmail}</Text>
           </Text>
-        ) : null}
-
-        <Pressable
-          style={[styles.button, resendLoading && styles.buttonDisabled]}
-          onPress={() => {
-            void handleResendGoogleConfirm();
-          }}
-          disabled={resendLoading}
-        >
-          {resendLoading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Linki yenidən göndər</Text>
-          )}
-        </Pressable>
-
-        <Pressable
-          style={styles.linkButton}
-          onPress={() => {
-            setAwaitingGoogleConfirm(false);
-            setGoogleConfirmEmail('');
-          }}
-        >
-          <Text style={styles.linkText}>Geri</Text>
-        </Pressable>
+          {errorMessage ? <ErrorBanner message={errorMessage} /> : null}
+          {infoMessage ? <Text style={styles.infoText}>{infoMessage}</Text> : null}
+          <Pressable
+            style={[styles.button, resendLoading && styles.buttonDisabled]}
+            onPress={() => {
+              void handleResendGoogleConfirm();
+            }}
+            disabled={resendLoading}
+          >
+            {resendLoading ? (
+              <ActivityIndicator color={colors.textOnAccent} />
+            ) : (
+              <Text style={styles.buttonText}>Linki yenidən göndər</Text>
+            )}
+          </Pressable>
+          <Pressable
+            style={styles.linkButton}
+            onPress={() => {
+              setAwaitingGoogleConfirm(false);
+              setGoogleConfirmEmail('');
+            }}
+          >
+            <Text style={styles.linkText}>Geri</Text>
+          </Pressable>
+        </View>
       </View>
     );
   }
@@ -206,106 +203,111 @@ export default function LoginScreen() {
       keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
     >
       <ScrollView
-        contentContainerStyle={styles.container}
+        contentContainerStyle={styles.screen}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>Daxil ol</Text>
-        <Text style={styles.subtitle}>TripPoint hesabınıza daxil olun</Text>
+        <TripPointWordmark size={30} showDecor style={{ marginBottom: 18 }} />
+        <View style={styles.card}>
+          <Text style={styles.title}>Daxil ol</Text>
+          <Text style={styles.subtitle}>TripPoint ilə Azərbaycanı kəşf edin</Text>
 
-        {errorMessage ? <ErrorBanner message={errorMessage} /> : null}
-        {infoMessage ? (
-          <View style={styles.infoBanner}>
-            <Text style={styles.infoText}>{infoMessage}</Text>
-          </View>
-        ) : null}
+          {errorMessage ? <ErrorBanner message={errorMessage} /> : null}
+          {infoMessage ? (
+            <View style={styles.infoBanner}>
+              <Text style={styles.infoText}>{infoMessage}</Text>
+            </View>
+          ) : null}
 
-        <FormField
-          label="E-poçt"
-          value={email}
-          onChangeText={setEmail}
-          placeholder="example@mail.com"
-          autoCapitalize="none"
-          autoComplete="email"
-          keyboardType="email-address"
-          editable={!loading && !googleLoading}
-        />
+          <FormField
+            label="E-poçt"
+            leftIcon="mail-outline"
+            value={email}
+            onChangeText={setEmail}
+            placeholder="example@mail.com"
+            autoCapitalize="none"
+            autoComplete="email"
+            keyboardType="email-address"
+            editable={!loading && !googleLoading}
+          />
 
-        <FormField
-          label="Şifrə"
-          value={password}
-          onChangeText={setPassword}
-          placeholder="••••••••"
-          secureTextEntry
-          showPasswordToggle
-          autoCapitalize="none"
-          editable={!loading && !googleLoading}
-        />
+          <FormField
+            label="Şifrə"
+            leftIcon="lock-closed-outline"
+            value={password}
+            onChangeText={setPassword}
+            placeholder="••••••••"
+            secureTextEntry
+            showPasswordToggle
+            autoCapitalize="none"
+            editable={!loading && !googleLoading}
+          />
 
-        <Pressable
-          style={styles.forgotLink}
-          onPress={() => router.push('/auth/forgot-password')}
-          disabled={loading || googleLoading}
-          hitSlop={8}
-        >
-          <Text style={styles.forgotLinkText}>Şifrəni unutdum?</Text>
-        </Pressable>
-
-        <Pressable
-          style={[styles.button, (loading || googleLoading) && styles.buttonDisabled]}
-          onPress={handleLogin}
-          disabled={loading || googleLoading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Daxil ol</Text>
-          )}
-        </Pressable>
-
-        {needsEmailConfirm ? (
           <Pressable
-            style={[styles.resendButton, resendLoading && styles.buttonDisabled]}
-            onPress={() => {
-              void handleResendConfirm();
-            }}
-            disabled={resendLoading || loading}
+            style={styles.forgotLink}
+            onPress={() => router.push('/auth/forgot-password')}
+            disabled={loading || googleLoading}
+            hitSlop={8}
           >
-            {resendLoading ? (
-              <ActivityIndicator color={colors.accent} />
+            <Text style={styles.forgotLinkText}>Şifrəni unutmusunuz?</Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.button, (loading || googleLoading) && styles.buttonDisabled]}
+            onPress={handleLogin}
+            disabled={loading || googleLoading}
+          >
+            {loading ? (
+              <ActivityIndicator color={colors.textOnAccent} />
             ) : (
-              <Text style={styles.resendButtonText}>Təsdiq linkini yenidən göndər</Text>
+              <Text style={styles.buttonText}>Daxil ol</Text>
             )}
           </Pressable>
-        ) : null}
 
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>və ya</Text>
-          <View style={styles.dividerLine} />
+          {needsEmailConfirm ? (
+            <Pressable
+              style={[styles.resendButton, resendLoading && styles.buttonDisabled]}
+              onPress={() => {
+                void handleResendConfirm();
+              }}
+              disabled={resendLoading || loading}
+            >
+              {resendLoading ? (
+                <ActivityIndicator color={colors.brand} />
+              ) : (
+                <Text style={styles.resendButtonText}>Təsdiq linkini yenidən göndər</Text>
+              )}
+            </Pressable>
+          ) : null}
+
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>Və ya</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <TouchableOpacity
+            onPress={handleGoogleSignIn}
+            disabled={googleLoading || loading}
+            style={[styles.googleButton, (googleLoading || loading) && styles.buttonDisabled]}
+          >
+            {googleLoading ? (
+              <ActivityIndicator size="small" color="#4285F4" />
+            ) : (
+              <>
+                <View style={styles.googleIcon}>
+                  <Text style={styles.googleIconText}>G</Text>
+                </View>
+                <Text style={styles.googleButtonText}>Google ilə daxil ol</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          onPress={handleGoogleSignIn}
-          disabled={googleLoading || loading}
-          style={[styles.googleButton, (googleLoading || loading) && styles.buttonDisabled]}
-        >
-          {googleLoading ? (
-            <ActivityIndicator size="small" color="#4285F4" />
-          ) : (
-            <>
-              <View style={styles.googleIcon}>
-                <Text style={styles.googleIconText}>G</Text>
-              </View>
-              <Text style={styles.googleButtonText}>Google ilə daxil ol</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
         <Text style={styles.footer}>
-          Hesabın yoxdur?{' '}
+          Hesabınız yoxdur?{' '}
           <Link href="/auth/register" style={styles.footerLink}>
-            Qeydiyyat
+            Qeydiyyatdan keçin
           </Link>
         </Text>
       </ScrollView>
@@ -313,147 +315,148 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
-  },
-  container: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    padding: 24,
-    backgroundColor: colors.bg,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.textSecondary,
-    marginBottom: 24,
-  },
-  infoBanner: {
-    backgroundColor: colors.successSoft,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.successSoft,
-  },
-  infoText: {
-    color: '#065F46',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  forgotLink: {
-    alignSelf: 'flex-end',
-    marginTop: 4,
-    marginBottom: 4,
-    paddingVertical: 4,
-  },
-  forgotLinkText: {
-    color: colors.accent,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  button: {
-    backgroundColor: colors.accent,
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  resendButton: {
-    marginTop: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-    backgroundColor: colors.accentSoft,
-  },
-  resendButtonText: {
-    color: colors.accent,
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: colors.textOnAccent,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 16,
-    gap: 12,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: colors.border,
-  },
-  dividerText: {
-    color: colors.textMuted,
-    fontSize: 13,
-  },
-  googleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingVertical: 14,
-    backgroundColor: 'white',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    elevation: 2,
-  },
-  googleIcon: {
-    width: 20,
-    height: 20,
-    borderRadius: 16,
-    backgroundColor: '#4285F4',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  googleIconText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  googleButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.chipText,
-  },
-  footer: {
-    marginTop: 20,
-    textAlign: 'center',
-    color: colors.textSecondary,
-    fontSize: 14,
-  },
-  footerLink: {
-    color: colors.accent,
-    fontWeight: '600',
-  },
-  linkButton: {
-    marginTop: 16,
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  linkText: {
-    color: colors.accent,
-    fontWeight: '700',
-    fontSize: 14,
-  },
-});
+function createStyles(colors: ThemeColors, isDark: boolean) {
+  return StyleSheet.create({
+    flex: { flex: 1, backgroundColor: colors.bg },
+    screen: {
+      flexGrow: 1,
+      justifyContent: 'center',
+      padding: 20,
+      backgroundColor: colors.bg,
+    },
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: radii.xl,
+      padding: 22,
+      ...shadows.card,
+      borderWidth: isDark ? 1 : 0,
+      borderColor: colors.border,
+    },
+    title: {
+      fontSize: 26,
+      fontWeight: '800',
+      color: colors.text,
+      marginBottom: 4,
+    },
+    subtitle: {
+      fontSize: 14,
+      color: colors.textSecondary,
+      marginBottom: 22,
+    },
+    infoBanner: {
+      backgroundColor: colors.successSoft,
+      borderRadius: radii.sm,
+      padding: 12,
+      marginBottom: 12,
+    },
+    infoText: {
+      color: colors.success,
+      fontSize: 13,
+      fontWeight: '600',
+      marginBottom: 8,
+    },
+    forgotLink: {
+      alignSelf: 'flex-end',
+      marginTop: -4,
+      marginBottom: 8,
+      paddingVertical: 4,
+    },
+    forgotLinkText: {
+      color: colors.brand,
+      fontSize: 13,
+      fontWeight: '600',
+      textDecorationLine: 'underline',
+    },
+    button: {
+      backgroundColor: isDark ? colors.accent : colors.brand,
+      borderRadius: radii.pill,
+      paddingVertical: 15,
+      alignItems: 'center',
+      marginTop: 4,
+    },
+    resendButton: {
+      marginTop: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+      borderRadius: radii.pill,
+      borderWidth: 1,
+      borderColor: colors.brand,
+      backgroundColor: colors.accentSoft,
+    },
+    resendButtonText: {
+      color: colors.brand,
+      fontWeight: '700',
+      fontSize: 14,
+    },
+    buttonDisabled: { opacity: 0.6 },
+    buttonText: {
+      color: isDark ? colors.textOnAccent : '#FFFFFF',
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    dividerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginVertical: 18,
+      gap: 12,
+    },
+    dividerLine: {
+      flex: 1,
+      height: 1,
+      backgroundColor: colors.border,
+    },
+    dividerText: {
+      color: colors.textMuted,
+      fontSize: 13,
+    },
+    googleButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 12,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      borderRadius: radii.pill,
+      paddingVertical: 14,
+      backgroundColor: colors.surface,
+    },
+    googleIcon: {
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: '#4285F4',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    googleIconText: {
+      color: '#fff',
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    googleButtonText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    footer: {
+      marginTop: 20,
+      textAlign: 'center',
+      color: colors.textSecondary,
+      fontSize: 14,
+    },
+    footerLink: {
+      color: colors.brand,
+      fontWeight: '700',
+    },
+    linkButton: {
+      marginTop: 16,
+      alignItems: 'center',
+      paddingVertical: 10,
+    },
+    linkText: {
+      color: colors.brand,
+      fontWeight: '700',
+      fontSize: 14,
+    },
+  });
+}

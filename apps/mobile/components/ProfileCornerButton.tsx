@@ -1,10 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
 import { supabase } from '../lib/supabase';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 type Props = {
   /** Absolute yerləşdirmə üçün əlavə stil */
@@ -13,6 +14,8 @@ type Props = {
 
 /** Sağ üst künc — öz profilə keçid. */
 export function ProfileCornerButton({ style }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const router = useRouter();
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
@@ -58,21 +61,23 @@ export function ProfileCornerButton({ style }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  btn: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    btn: {
+      width: 34,
+      height: 34,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+    avatar: {
+      width: 34,
+      height: 34,
+      borderRadius: 10,
+    },
+  });
+}

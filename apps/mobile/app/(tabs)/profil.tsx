@@ -27,7 +27,8 @@ import {
 } from '../../components/ListingDetailModal';
 import { PhoneField } from '../../components/PhoneField';
 import { REGIONS } from '../../constants/regions';
-import { colors } from '../../constants/theme';
+import type { ThemeColors, ThemePreference } from '../../constants/theme';
+import { useTheme, useThemeColors } from '../../theme/ThemeProvider';
 import { deleteOwnAccount } from '../../lib/deleteAccount';
 import { getErrorMessage } from '../../lib/errors';
 import { ensureProfile } from '../../lib/ensureProfile';
@@ -76,19 +77,23 @@ type ReviewRow = Rating & {
   rater_name: string | null;
 };
 
-const ROLE_META: Record<UserRole, { label: string; color: string }> = {
-  user: { label: 'Səyahətçi', color: colors.textSecondary },
-  guide: { label: 'Tur Bələdçisi', color: colors.success },
-  business_owner: { label: 'Biznes Sahibi', color: colors.accent },
-  local_provider: { label: 'Yerli Xidmət', color: colors.warning },
-  admin: { label: 'Admin', color: colors.danger },
-};
+function getRoleMeta(colors: ThemeColors): Record<UserRole, { label: string; color: string }> {
+  return {
+    user: { label: 'Səyahətçi', color: colors.textSecondary },
+    guide: { label: 'Tur Bələdçisi', color: colors.success },
+    business_owner: { label: 'Biznes Sahibi', color: colors.accent },
+    local_provider: { label: 'Yerli Xidmət', color: colors.warning },
+    admin: { label: 'Admin', color: colors.danger },
+  };
+}
 
-const TYPE_META: Record<ListingType, { label: string; tint: string; soft: string }> = {
-  carpool: { label: 'Carpool', tint: colors.accent, soft: colors.accentSoft },
-  tour: { label: 'Tur', tint: colors.success, soft: colors.successSoft },
-  local_service: { label: 'Yerli xidmət', tint: colors.warning, soft: colors.warningSoft },
-};
+function getTypeMeta(colors: ThemeColors): Record<ListingType, { label: string; tint: string; soft: string }> {
+  return {
+    carpool: { label: 'Carpool', tint: colors.accent, soft: colors.accentSoft },
+    tour: { label: 'Tur', tint: colors.success, soft: colors.successSoft },
+    local_service: { label: 'Yerli xidmət', tint: colors.warning, soft: colors.warningSoft },
+  };
+}
 
 function formatDate(value: string | null): string {
   if (!value) {
@@ -139,6 +144,10 @@ function normalizeParam(value: string | string[] | undefined): string | null {
 }
 
 export default function ProfilScreen() {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const { preference, setPreference } = useTheme();
+
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ userId?: string | string[] }>();
@@ -751,7 +760,8 @@ export default function ProfilScreen() {
     );
   }
 
-  const roleMeta = ROLE_META[profile.role] ?? ROLE_META.user;
+  const roleMetaMap = getRoleMeta(colors);
+  const roleMeta = roleMetaMap[profile.role] ?? roleMetaMap.user;
 
   return (
     <KeyboardAvoidingView
@@ -1116,6 +1126,44 @@ export default function ProfilScreen() {
         )}
 
         {isOwnProfile ? (
+          <View style={styles.appearanceSection}>
+            <Text style={styles.sectionTitle}>Görünüş</Text>
+            <View style={styles.appearanceRow}>
+              {(
+                [
+                  { id: 'system' as ThemePreference, label: 'Sistem' },
+                  { id: 'light' as ThemePreference, label: 'Açıq' },
+                  { id: 'dark' as ThemePreference, label: 'Qaranlıq' },
+                ] as const
+              ).map((option) => {
+                const selected = preference === option.id;
+                return (
+                  <Pressable
+                    key={option.id}
+                    style={[
+                      styles.appearanceChip,
+                      selected && styles.appearanceChipSelected,
+                    ]}
+                    onPress={() => setPreference(option.id)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                  >
+                    <Text
+                      style={[
+                        styles.appearanceChipText,
+                        selected && styles.appearanceChipTextSelected,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        {isOwnProfile ? (
           <View style={styles.bottomActionRow}>
             <Pressable style={styles.dangerButton} onPress={handleSignOut}>
               <Text style={styles.dangerButtonText}>Çıxış</Text>
@@ -1296,6 +1344,9 @@ function StatBox({
   selected: boolean;
   onPress: () => void;
 }) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   return (
     <Pressable
       style={[styles.statBox, selected && styles.statBoxSelected]}
@@ -1316,7 +1367,10 @@ function ProfileListingCard({
   listing: ListingWithCreator;
   onPress: () => void;
 }) {
-  const meta = TYPE_META[listing.type];
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
+  const meta = getTypeMeta(colors)[listing.type];
   const creatorName = listing.creator?.full_name?.trim() || 'İstifadəçi';
 
   return (
@@ -1346,7 +1400,8 @@ function ProfileListingCard({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -1980,4 +2035,34 @@ const styles = StyleSheet.create({
     marginTop: 14,
     marginBottom: 16,
   },
+  appearanceSection: {
+    marginTop: 16,
+    marginBottom: 4,
+  },
+  appearanceRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  appearanceChip: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+  },
+  appearanceChipSelected: {
+    backgroundColor: colors.chipSelected,
+    borderColor: colors.chipSelected,
+  },
+  appearanceChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.chipText,
+  },
+  appearanceChipTextSelected: {
+    color: colors.textOnAccent,
+  },
 });
+}

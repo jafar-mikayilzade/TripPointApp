@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from app.constants.regions import REGION_COORDINATES, REGION_LABELS
 from app.services.places_clean import clean_place, to_db_region
 from app.services.places_serpapi import fetch_hotels_from_serpapi
-from app.services.places_sync import _insert_if_missing
+from app.services.places_sync import upsert_hospitality_places
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,10 @@ def import_serpapi_hotels_for_region(
             continue
         cleaned.append(row)
 
-    inserted, skipped = _insert_if_missing(cleaned)
+    stats = upsert_hospitality_places(cleaned)
+    inserted = int(stats.get("inserted") or 0)
+    updated = int(stats.get("updated") or 0)
+    skipped = int(stats.get("skipped") or 0)
     db_region = to_db_region(region_key)
     return {
         "success": True,
@@ -50,12 +53,14 @@ def import_serpapi_hotels_for_region(
         "fetched": len(raw),
         "cleaned": len(cleaned),
         "inserted": inserted,
+        "updated": updated,
         "skipped": skipped,
+        "photos_added": int(stats.get("photos_added") or 0),
         "currency": currency,
         "max_pages": max_pages,
         "message": (
             f"{REGION_LABELS.get(region_key, region_key)}: "
-            f"{inserted} new hotels, {skipped} already in DB "
+            f"{inserted} new, {updated} enriched, {skipped} unchanged "
             f"(fetched {len(raw)})."
         ),
     }

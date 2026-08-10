@@ -8,6 +8,26 @@ from app.services.geo_route import haversine_km
 
 RESTAURANT_CATS = frozenset({"restaurant", "home_restaurant", "cafe"})
 ACCOMMODATION_CATS = frozenset({"hotel", "hostel", "guesthouse", "camping"})
+LODGING_HOTEL_CATS = frozenset({"hotel"})
+LODGING_PRIVATE_CATS = frozenset({"guesthouse", "hostel", "camping"})
+
+
+def lodging_type_categories(lodging_type: str | None) -> frozenset[str]:
+    """hotel → hotels only; private/homestay → guesthouse/hostel/camping."""
+    key = str(lodging_type or "hotel").strip().lower()
+    if key in {"private", "homestay", "ferdi", "ev", "guesthouse"}:
+        return LODGING_PRIVATE_CATS
+    return LODGING_HOTEL_CATS
+
+
+def filter_accommodations_by_lodging_type(
+    rows: list[dict[str, Any]],
+    lodging_type: str | None,
+) -> list[dict[str, Any]]:
+    allowed = lodging_type_categories(lodging_type)
+    return [r for r in rows if poi_categories(r) & set(allowed)]
+
+
 ATTRACTION_CATS = frozenset(
     {
         "nature",
@@ -246,31 +266,8 @@ def bucket_route_candidates(
         preferred = [
             r for r in attractions if poi_categories(r) & prefer_attraction_cats
         ]
-        others = [
-            r
-            for r in attractions
-            if not (poi_categories(r) & prefer_attraction_cats)
-        ]
-        # ~85% interest match, fill remainder so geo still has options
-        n_pref = max(1, int(per_bucket * 0.85))
-        n_other = max(0, per_bucket - n_pref)
-        picked = prefer_high_rated(preferred, limit=n_pref, hubs=hubs)
-        if len(picked) < n_pref:
-            n_other += n_pref - len(picked)
-        picked.extend(prefer_high_rated(others, limit=n_other, hubs=hubs))
-        # Dedupe preserve order
-        seen: set[str] = set()
-        attr_out: list[dict[str, Any]] = []
-        for row in picked:
-            pid = str(row.get("id") or row.get("place_id") or "")
-            if pid and pid in seen:
-                continue
-            if pid:
-                seen.add(pid)
-            attr_out.append(row)
-            if len(attr_out) >= per_bucket:
-                break
-        attractions_out = attr_out
+        # Hard interest filter: never fill with other attraction categories
+        attractions_out = prefer_high_rated(preferred, limit=per_bucket, hubs=hubs)
     else:
         attractions_out = prefer_high_rated(attractions, limit=per_bucket, hubs=hubs)
 

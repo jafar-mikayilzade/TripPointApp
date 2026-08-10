@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
 
 import {
@@ -8,8 +9,8 @@ import {
   sanitizeAzPhoneLocalInput,
   validateAzPhone,
 } from '../lib/formValidation';
-
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 type PhoneFieldProps = Omit<TextInputProps, 'value' | 'onChangeText' | 'keyboardType'> & {
   label?: string;
@@ -40,6 +41,8 @@ export function PhoneField({
   onBlur,
   ...inputProps
 }: PhoneFieldProps) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const raw = (value ?? '').trim();
   const displayValue =
     !raw
@@ -104,62 +107,64 @@ export function PhoneField({
   );
 }
 
-const styles = StyleSheet.create({
-  field: {
-    marginBottom: 8,
-    marginTop: 4,
-    minWidth: 0,
-    width: '100%',
-  },
-  label: {
-    fontSize: 12,
-    color: colors.chipText,
-    marginBottom: 4,
-    fontWeight: '600',
-  },
-  requiredMark: {
-    color: colors.danger,
-    fontWeight: '700',
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-    borderRadius: 10,
-    backgroundColor: colors.surface,
-    overflow: 'hidden',
-    minWidth: 0,
-  },
-  rowError: {
-    borderColor: colors.danger,
-  },
-  rowDisabled: {
-    opacity: 0.6,
-  },
-  prefix: {
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text,
-    backgroundColor: colors.chip,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderRightColor: colors.borderSoft,
-  },
-  input: {
-    flex: 1,
-    minWidth: 0,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: colors.text,
-  },
-  errorText: {
-    marginTop: 4,
-    fontSize: 12,
-    color: colors.danger,
-    lineHeight: 16,
-    flexShrink: 1,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    field: {
+      marginBottom: 8,
+      marginTop: 4,
+      minWidth: 0,
+      width: '100%',
+    },
+    label: {
+      fontSize: 12,
+      color: colors.chipText,
+      marginBottom: 4,
+      fontWeight: '600',
+    },
+    requiredMark: {
+      color: colors.danger,
+      fontWeight: '700',
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.borderSoft,
+      borderRadius: 10,
+      backgroundColor: colors.surface,
+      overflow: 'hidden',
+      minWidth: 0,
+    },
+    rowError: {
+      borderColor: colors.danger,
+    },
+    rowDisabled: {
+      opacity: 0.6,
+    },
+    prefix: {
+      paddingHorizontal: 10,
+      paddingVertical: 10,
+      fontSize: 13,
+      fontWeight: '700',
+      color: colors.text,
+      backgroundColor: colors.chip,
+      borderRightWidth: StyleSheet.hairlineWidth,
+      borderRightColor: colors.borderSoft,
+    },
+    input: {
+      flex: 1,
+      minWidth: 0,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 14,
+      color: colors.text,
+    },
+    errorText: {
+      marginTop: 4,
+      fontSize: 12,
+      color: colors.danger,
+      lineHeight: 16,
+      flexShrink: 1,
+    },
+  });
+}

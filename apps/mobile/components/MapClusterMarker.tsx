@@ -1,7 +1,9 @@
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Marker } from './AppMap';
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 type MapClusterMarkerProps = {
   geometry: { coordinates: [number, number] };
@@ -17,6 +19,8 @@ export function MapClusterMarker({
   onPress,
   tracksViewChanges = false,
 }: MapClusterMarkerProps) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const count = properties.point_count;
   const size = count >= 50 ? 52 : count >= 20 ? 46 : count >= 10 ? 42 : 38;
 
@@ -63,26 +67,28 @@ export function MapClusterMarker({
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  halo: {
-    position: 'absolute',
-    backgroundColor: colors.accentSoft,
-    opacity: 0.85,
-  },
-  core: {
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-  },
-  count: {
-    color: colors.textOnAccent,
-    fontWeight: '800',
-    fontSize: 13,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    wrap: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    halo: {
+      position: 'absolute',
+      backgroundColor: colors.accentSoft,
+      opacity: 0.85,
+    },
+    core: {
+      backgroundColor: colors.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: colors.surface,
+    },
+    count: {
+      color: colors.textOnAccent,
+      fontWeight: '800',
+      fontSize: 13,
+    },
+  });
+}

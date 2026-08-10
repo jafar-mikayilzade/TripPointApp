@@ -32,7 +32,8 @@ import type {
   Region,
 } from 'react-native-maps';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 const GOOGLE_MAPS_KEY =
   process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY ||
@@ -106,6 +107,8 @@ const MapView = forwardRef(function AppMapWeb(
   props: WebMapProps,
   ref: ForwardedRef<MapHandle>
 ) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const {
     googleMapsApiKey,
     initialRegion,
@@ -396,13 +399,15 @@ type WebPolylineProps = {
   strokeWidth?: number;
 };
 
-function Polyline({ coordinates, strokeColor = colors.accent, strokeWidth = 3 }: WebPolylineProps) {
+function Polyline({ coordinates, strokeColor, strokeWidth = 3 }: WebPolylineProps) {
+  const colors = useThemeColors();
+  const resolvedStroke = strokeColor ?? colors.accent;
   const path = coordinates.map((c) => ({ lat: c.latitude, lng: c.longitude }));
   return (
     <GMPolyline
       path={path}
       options={{
-        strokeColor,
+        strokeColor: resolvedStroke,
         strokeWeight: strokeWidth,
         strokeOpacity: 0.9,
       }}
@@ -410,7 +415,8 @@ function Polyline({ coordinates, strokeColor = colors.accent, strokeWidth = 3 }:
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   fill: {
     flex: 1,
     width: '100%',
@@ -445,6 +451,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 });
+}
 
 export default MapView;
 export { Marker, Polyline };

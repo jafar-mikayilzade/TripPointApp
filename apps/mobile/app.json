@@ -6,7 +6,7 @@
     "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true
     },
@@ -15,7 +15,7 @@
       "versionCode": 15,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0E5837",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -101,8 +101,8 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/icon.png",
-          "color": "#1B4D3E"
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#0E5837"
         }
       ],
       "expo-web-browser"

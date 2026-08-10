@@ -1,7 +1,7 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { useEffect, useState } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -22,7 +22,8 @@ import { uploadImage } from '../lib/uploadImage';
 import type { Poi, TravelPrivacy } from '../types/database';
 import { SimpleDateTimeField } from './SimpleDateTimeField';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 interface AddTravelHistoryModalProps {
   visible: boolean;
@@ -41,6 +42,8 @@ const MAX_IMAGES = 5;
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
 export function AddTravelHistoryModal({ visible, onClose, onCreated }: AddTravelHistoryModalProps) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [title, setTitle] = useState('');
   const [visitedAt, setVisitedAt] = useState(new Date());
   const [notes, setNotes] = useState('');
@@ -359,7 +362,7 @@ export function AddTravelHistoryModal({ visible, onClose, onCreated }: AddTravel
                   <View key={image.uri} style={styles.imageWrap}>
                     <Image source={{ uri: image.uri }} style={styles.preview} />
                     <Pressable style={styles.removeImage} onPress={() => removeImage(image.uri)}>
-                      <FontAwesome name="times" size={12} color="#fff" />
+                      <FontAwesome name="times" size={12} color={colors.textOnAccent} />
                     </Pressable>
                   </View>
                 ))}
@@ -396,7 +399,7 @@ export function AddTravelHistoryModal({ visible, onClose, onCreated }: AddTravel
               disabled={loading}
             >
               {loading ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={colors.textOnAccent} />
               ) : (
                 <Text style={styles.submitText}>Göndər</Text>
               )}
@@ -408,7 +411,8 @@ export function AddTravelHistoryModal({ visible, onClose, onCreated }: AddTravel
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -588,3 +592,4 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 });
+}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 type Option = { label: string; value: string };
 
@@ -45,6 +46,8 @@ export function DropdownButton({
   onOpenChange,
   style,
 }: Props) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const [openInternal, setOpenInternal] = useState(false);
@@ -150,124 +153,126 @@ export function DropdownButton({
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: {
-    minWidth: 0,
-  },
-  trigger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.surface,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-    gap: 6,
-  },
-  triggerCompact: {
-    borderRadius: 8,
-  },
-  triggerActive: {
-    borderColor: colors.borderSoft,
-  },
-  triggerTextCol: {
-    flex: 1,
-    minWidth: 0,
-    justifyContent: 'center',
-  },
-  caption: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: colors.textMuted,
-    marginBottom: 1,
-  },
-  captionCompact: {
-    fontSize: 10,
-  },
-  triggerText: {
-    fontSize: 12,
-    color: colors.textMuted,
-    fontWeight: '500',
-  },
-  triggerTextCompact: {
-    fontSize: 12,
-  },
-  triggerTextActive: {
-    color: colors.text,
-    fontWeight: '600',
-  },
-  caret: {
-    fontSize: 10,
-    color: colors.textMuted,
-    fontWeight: '700',
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: colors.overlay,
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    paddingHorizontal: 12,
-    paddingTop: 14,
-  },
-  sheetTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: 10,
-    letterSpacing: -0.2,
-  },
-  menuScroll: {
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-  },
-  menu: {
-    overflow: 'hidden',
-  },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.borderSoft,
-  },
-  optionLast: {
-    borderBottomWidth: 0,
-  },
-  optionSelected: {
-    backgroundColor: colors.accentSoft,
-  },
-  optionText: {
-    fontSize: 14,
-    color: colors.chipText,
-    fontWeight: '500',
-  },
-  optionTextSelected: {
-    color: colors.accent,
-    fontWeight: '700',
-  },
-  check: {
-    color: colors.accent,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  cancelBtn: {
-    marginTop: 10,
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  cancelText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textMuted,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    wrap: {
+      minWidth: 0,
+    },
+    trigger: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: colors.surface,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.borderSoft,
+      gap: 6,
+    },
+    triggerCompact: {
+      borderRadius: 8,
+    },
+    triggerActive: {
+      borderColor: colors.borderSoft,
+    },
+    triggerTextCol: {
+      flex: 1,
+      minWidth: 0,
+      justifyContent: 'center',
+    },
+    caption: {
+      fontSize: 10,
+      fontWeight: '600',
+      color: colors.textMuted,
+      marginBottom: 1,
+    },
+    captionCompact: {
+      fontSize: 10,
+    },
+    triggerText: {
+      fontSize: 12,
+      color: colors.textMuted,
+      fontWeight: '500',
+    },
+    triggerTextCompact: {
+      fontSize: 12,
+    },
+    triggerTextActive: {
+      color: colors.text,
+      fontWeight: '600',
+    },
+    caret: {
+      fontSize: 10,
+      color: colors.textMuted,
+      fontWeight: '700',
+    },
+    overlay: {
+      flex: 1,
+      backgroundColor: colors.overlay,
+      justifyContent: 'flex-end',
+    },
+    sheet: {
+      backgroundColor: colors.bg,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
+      paddingHorizontal: 12,
+      paddingTop: 14,
+    },
+    sheetTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: colors.text,
+      textAlign: 'center',
+      marginBottom: 10,
+      letterSpacing: -0.2,
+    },
+    menuScroll: {
+      backgroundColor: colors.surface,
+      borderRadius: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.borderSoft,
+    },
+    menu: {
+      overflow: 'hidden',
+    },
+    option: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.borderSoft,
+    },
+    optionLast: {
+      borderBottomWidth: 0,
+    },
+    optionSelected: {
+      backgroundColor: colors.accentSoft,
+    },
+    optionText: {
+      fontSize: 14,
+      color: colors.chipText,
+      fontWeight: '500',
+    },
+    optionTextSelected: {
+      color: colors.accent,
+      fontWeight: '700',
+    },
+    check: {
+      color: colors.accent,
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    cancelBtn: {
+      marginTop: 10,
+      alignItems: 'center',
+      paddingVertical: 10,
+    },
+    cancelText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: colors.textMuted,
+    },
+  });
+}

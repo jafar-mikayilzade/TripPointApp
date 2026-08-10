@@ -155,16 +155,9 @@ def _prioritize_attractions_for_interests(
     preferred = [
         p for p in pool if poi_categories(p) & interest_cats
     ]
-    others = [
-        p for p in pool if not (poi_categories(p) & interest_cats)
-    ]
     rng.shuffle(preferred)
-    rng.shuffle(others)
-
-    if len(preferred) >= 3:
-        # Keep FULL geo pool (preferred first) so multi-day clustering is not starved
-        return preferred + others
-    return preferred + others
+    # Hard filter: only interest-matching attractions
+    return preferred
 
 
 def _stop_payload(
@@ -172,9 +165,17 @@ def _stop_payload(
     *,
     time_min: int,
     daypart: str,
+    tip: str = "",
 ) -> dict[str, Any]:
     mins = _poi_duration(poi)
     pub = public_poi_fields(poi)
+    default_tip = ""
+    if daypart == "lunch":
+        default_tip = "Nahar etmək üçün dayanacaq"
+    elif daypart == "breakfast":
+        default_tip = "Səhər yeməyi"
+    elif daypart == "hotel":
+        default_tip = "Gecələmə"
     return {
         **pub,
         "poi_id": str(poi.get("id") or ""),
@@ -182,7 +183,7 @@ def _stop_payload(
         "duration": _duration_label(mins),
         "duration_minutes": mins,
         "daypart": daypart,
-        "tip": "",
+        "tip": (tip or default_tip).strip(),
     }
 
 
@@ -273,25 +274,13 @@ def _take_along_tour(
         return items[offset : offset + n]
 
     if prefer_categories:
-        chosen: list[dict[str, Any]] = []
-        for p in available:
-            if len(chosen) >= limit:
-                break
-            if str(p.get("category") or "") in prefer_categories:
-                chosen.append(p)
-        if len(chosen) < min(2, limit):
-            return contiguous_slice(available, limit)
-        if len(chosen) < limit:
-            chosen_ids = {str(p.get("id") or "") for p in chosen}
-            for p in available:
-                if len(chosen) >= limit:
-                    break
-                pid = str(p.get("id") or "")
-                if pid not in chosen_ids:
-                    chosen.append(p)
-        order = {str(p.get("id") or ""): i for i, p in enumerate(available)}
-        chosen.sort(key=lambda p: order.get(str(p.get("id") or ""), 10**9))
-        return chosen
+        matched = [
+            p
+            for p in available
+            if poi_categories(p) & set(prefer_categories)
+        ]
+        # Hard interest filter — never pad with other categories
+        return contiguous_slice(matched, limit)
 
     return contiguous_slice(available, limit)
 
@@ -347,14 +336,6 @@ def pick_day_pieces(
         prefer_categories=interest_cats or None,
         rng=rng,
     )
-    if interest_cats and len(attractions) < min(2, limit):
-        attractions = _take_along_tour(
-            cluster,
-            used=used,
-            limit=limit,
-            prefer_categories=None,
-            rng=rng,
-        )
 
     # Top up until day limit — a 2-POI gap segment must still grow to a full day
     if pool and len(attractions) < limit:
@@ -380,7 +361,7 @@ def pick_day_pieces(
             rng=rng,
         )
         attractions = attractions + extra
-        # Still thin? one more pass without interest filter / wider radius
+        # Still thin? wider radius but KEEP interest filter
         if len(attractions) < min(4, limit):
             already = {str(p.get("id") or "") for p in attractions}
             fill_used = set(used) | already
@@ -392,11 +373,11 @@ def pick_day_pieces(
                 limit=limit - len(attractions),
                 max_diameter_km=45.0,
                 max_add_from_path_km=25.0,
-                prefer_categories=None,
+                prefer_categories=interest_cats or None,
                 rng=rng,
             )
             attractions = attractions + extra2
-        # Last resort: take nearest unused pool members by distance (ignore diameter)
+        # Last resort: nearest unused pool members (interest-matched only)
         if len(attractions) < min(3, limit):
             already = {str(p.get("id") or "") for p in attractions}
             ranked = sorted(
@@ -407,17 +388,22 @@ def pick_day_pieces(
                     and str(p.get("id") or "") not in already
                     and str(p.get("id") or "") not in used
                     and poi_coord(p) is not None
+                    and (
+                        not interest_cats
+                        or bool(poi_categories(p) & interest_cats)
+                    )
                 ],
                 key=lambda p: haversine_km(
                     seed_lat,
                     seed_lng,
-                    *(poi_coord(p) or (seed_lat, seed_lng)),
+                    float(poi_coord(p)[0]),  # type: ignore[index]
+                    float(poi_coord(p)[1]),  # type: ignore[index]
                 ),
             )
-            for poi in ranked:
-                if len(attractions) >= limit:
+            for p in ranked:
+                if len(attractions) >= min(3, limit):
                     break
-                attractions.append(poi)
+                attractions.append(p)
 
     for poi in attractions:
         pid = str(poi.get("id") or "")
@@ -469,14 +455,15 @@ def assemble_day_stops(
     window_start_min: int | None = None,
     window_end_min: int | None = None,
     allow_hotel: bool = True,
+    shared_hotel: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Domain rule: walk order = map order.
 
     1) Compact attractions geo-ordered
-    2) Food only if detour is tiny
+    2) Midday lunch stop (always try hard)
     3) Times fit [window_start, window_end] — trim stops that don't fit
-    4) Hotel last only if allowed + near path end (multi-day)
+    4) Same base hotel last on overnight days (multi-day)
     """
     restaurants = restaurants or []
     used_ids = used if used is not None else set()
@@ -548,6 +535,20 @@ def assemble_day_stops(
                         insert_at = min(len(path), max(1, len(path) // 2))
                         path = list(path[:insert_at]) + [lunch] + list(path[insert_at:])
                         break
+        if lunch is None and restaurants:
+            # Force a lunch stop from the best remaining restaurant in-region
+            candidates = [
+                r
+                for r in restaurants
+                if _role_id(r) and _role_id(r) not in used_ids and poi_coord(r)
+            ]
+            if candidates:
+                lunch = max(candidates, key=rating_sort_key)
+                lid = _role_id(lunch)
+                if lid:
+                    used_ids.add(lid)
+                insert_at = min(len(path), max(1, len(path) // 2))
+                path = list(path[:insert_at]) + [lunch] + list(path[insert_at:])
         # Breakfast only if day starts early and the visit window is long enough
         # (short last-day windows prioritize sightseeing + lunch)
         if start_anchor <= 11 * 60 and (end_anchor - start_anchor) >= 7 * 60 + 30:
@@ -576,18 +577,22 @@ def assemble_day_stops(
     for i, poi in enumerate(path):
         pid = _role_id(poi)
         dur = _poi_duration(poi)
+        tip = ""
         if breakfast_id and pid == breakfast_id:
             daypart = "breakfast"
             time_min = t if i > 0 else max(start_anchor, min(t, BREAKFAST_AT + 60))
+            tip = "Səhər yeməyi"
         elif lunch_id and pid == lunch_id:
             daypart = "lunch"
             time_min = max(lunch_anchor, t)
+            tip = "Nahar etmək üçün dayanacaq"
         else:
             daypart = "attraction"
             cat = str(poi.get("category") or "")
             if not lunch_id and cat in FOOD_CATS and 0 < i < len(path) - 1:
                 daypart = "lunch"
                 time_min = max(lunch_anchor, t)
+                tip = "Nahar etmək üçün dayanacaq"
             else:
                 time_min = t
 
@@ -600,13 +605,24 @@ def assemble_day_stops(
             else:
                 continue
 
-        stops.append(_stop_payload(poi, time_min=time_min, daypart=daypart))
+        stops.append(
+            _stop_payload(poi, time_min=time_min, daypart=daypart, tip=tip)
+        )
         # Short transfer so a normal day can fit 4–6 sightseeing stops
         t = time_min + dur + 8
 
     if allow_hotel and hotel is not None:
         hotel_time = max(EVENING_HOTEL_AT, t if stops else start_anchor)
-        stops.append(_stop_payload(hotel, time_min=hotel_time, daypart="hotel"))
+        hotel_tip = (
+            "Gecələmə — bütün gecələr eyni məkan"
+            if shared_hotel
+            else "Gecələmə"
+        )
+        stops.append(
+            _stop_payload(
+                hotel, time_min=hotel_time, daypart="hotel", tip=hotel_tip
+            )
+        )
 
     return stops
 
@@ -686,8 +702,10 @@ def build_skeleton(
     return_by_time: str | None = "21:00",
     variety_seed: int | None = None,
     exclude_poi_ids: list[str] | None = None,
+    lodging_type: str | None = "hotel",
 ) -> dict[str, Any]:
     from app.services.travel_window import build_travel_context, parse_hhmm
+    from app.services.rank_pois import filter_accommodations_by_lodging_type
 
     region_key = region.strip().lower()
     db_region = REGION_DB_ID.get(region_key, region_key)
@@ -703,6 +721,9 @@ def build_skeleton(
 
     restaurants = apply_weather_filter(list(restaurants), weather)
     accommodations = apply_weather_filter(list(accommodations), weather)
+    accommodations = filter_accommodations_by_lodging_type(
+        accommodations, lodging_type
+    )
     attractions = apply_weather_filter(list(attractions), weather)
 
     restaurants = sorted(restaurants, key=rating_sort_key, reverse=True)
@@ -897,6 +918,7 @@ def build_skeleton(
             window_start_min=w_start,
             window_end_min=w_end,
             allow_hotel=allow_hotel and day_i < days_n,
+            shared_hotel=bool(base_hotel) and days_n >= 2,
         )
 
         region_label = str(db_region or region).replace("_", " ").title()
@@ -963,6 +985,27 @@ def build_skeleton(
                 f"yola çıxın — {travel.get('return_origin_by')} evdə olun."
             )
             notes = (notes + extra).strip()
+
+        has_lunch = any(str(s.get("daypart") or "") == "lunch" for s in stops)
+        has_hotel = any(str(s.get("daypart") or "") == "hotel" for s in stops)
+        meal_bits: list[str] = []
+        if has_lunch:
+            meal_bits.append("Günortaya nahar dayanacağı əlavə olunub.")
+        if has_hotel and base_hotel:
+            hotel_name = str(base_hotel.get("name") or "məkan")
+            lodging_label = (
+                "otel"
+                if str(lodging_type or "hotel").lower() in {"hotel", "otel"}
+                else "fərdi ev / hostel"
+            )
+            if days_n > 2:
+                meal_bits.append(
+                    f"Gecələmə ({lodging_label}): {hotel_name} (bütün gecələr eyni məkan)."
+                )
+            else:
+                meal_bits.append(f"Gecələmə ({lodging_label}): {hotel_name}.")
+        if meal_bits:
+            notes = (notes + " " + " ".join(meal_bits)).strip()
 
         if not stops:
             continue
@@ -1093,11 +1136,16 @@ def template_enrich(plan: dict[str, Any], *, region_label: str, days: int) -> di
         if (
             not notes
             or "Səhər →" in notes
-            or notes.startswith("Gecələmə:")
             or "gəzinti → nahar" in notes.lower()
         ):
-            # Preserve outbound/return timing if present
-            if "Çıxış" in notes or "Geri dönüş" in notes or "yola çıx" in notes.lower():
+            # Preserve outbound/return timing + meal/lodging notices
+            if (
+                "Çıxış" in notes
+                or "Geri dönüş" in notes
+                or "yola çıx" in notes.lower()
+                or "nahar" in notes.lower()
+                or "gecələmə" in notes.lower()
+            ):
                 day["notes"] = notes
             else:
                 day["notes"] = ""
@@ -1110,10 +1158,16 @@ def template_enrich(plan: dict[str, Any], *, region_label: str, days: int) -> di
                 # Keep short travel tip (arrive time); drop fluff
                 tip = str(stop.get("tip") or "").strip()
                 stop["tip"] = tip if tip.startswith("Çatış") or tip.startswith("Evə") else ""
-            elif not (stop.get("tip") or "").strip():
-                stop["tip"] = ""
             else:
-                stop["tip"] = sanitize_tip_text(str(stop.get("tip") or ""))
+                tip = sanitize_tip_text(str(stop.get("tip") or ""))
+                dp = str(stop.get("daypart") or "").lower()
+                if not tip and dp == "lunch":
+                    tip = "Nahar etmək üçün dayanacaq"
+                elif not tip and dp == "breakfast":
+                    tip = "Səhər yeməyi"
+                elif not tip and dp == "hotel":
+                    tip = "Gecələmə"
+                stop["tip"] = tip
             stops.append(stop)
         day["stops"] = stops
         new_days.append(day)
@@ -1271,12 +1325,28 @@ def _merge_tips(
                 continue
             pid = str(stop.get("poi_id") or "")
             tip = tip_map.get(pid) or ""
+            dp = str(stop.get("daypart") or "").lower()
+            existing = str(stop.get("tip") or "").strip()
             if tip and not _claude_tip_mismatch(stop, tip) and len(tip.split()) <= 12:
                 stop["tip"] = sanitize_tip_text(tip)
+            elif existing:
+                stop["tip"] = sanitize_tip_text(existing)
+            elif dp == "lunch":
+                stop["tip"] = "Nahar etmək üçün dayanacaq"
+            elif dp == "breakfast":
+                stop["tip"] = "Səhər yeməyi"
+            elif dp == "hotel":
+                stop["tip"] = (
+                    "Gecələmə — bütün gecələr eyni məkan"
+                    if days >= 2
+                    else "Gecələmə"
+                )
             else:
                 stop["tip"] = ""
             if name_has_forbidden_script(str(stop.get("name") or "")):
-                stop["tip"] = ""
+                # Keep meal/lodging labels even if name is odd
+                if dp not in {"lunch", "breakfast", "hotel"}:
+                    stop["tip"] = ""
             stops.append(stop)
         day["stops"] = stops
         merged_days.append(day)

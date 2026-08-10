@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
-import { useEffect, useState } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -19,8 +19,11 @@ import {
 import { REGIONS } from '../constants/regions';
 import { CategoryIcon } from './CategoryIcon';
 import { FavoriteButton } from './FavoriteButton';
+import { PoiPhotoGallery } from './PoiPhotoGallery';
 import { TransientHint } from './TransientHint';
 import { notifyAdmins } from '../lib/adminNotify';
+import { getApiBaseUrl } from '../lib/apiBase';
+import { getAuthHeaders } from '../lib/authHeaders';
 import { getErrorMessage } from '../lib/errors';
 import { isDatabasePoiId } from '../lib/livePlaces';
 import { isPoiSponsored, summarizeOpeningHours } from '../lib/openingHours';
@@ -31,12 +34,13 @@ import {
   translateAmenities,
 } from '../lib/poiDisplay';
 import { getCategoryColor } from '../lib/poi';
-import { pickPhotoUrl } from '../lib/photoUrls';
+import { collectPoiPhotoUrls } from '../lib/photoUrls';
 import { supabase } from '../lib/supabase';
 import { uploadImageVariants } from '../lib/uploadImage';
 import type { Poi } from '../types/database';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 interface PoiDetailModalProps {
   poi: Poi | null;
@@ -56,7 +60,10 @@ export function PoiDetailModal({
   onClose,
   onPoiIdResolved,
 }: PoiDetailModalProps) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [photos, setPhotos] = useState<string[]>([]);
+  const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [averageRating, setAverageRating] = useState<number | null>(null);
   const [ratingCount, setRatingCount] = useState(0);
@@ -92,6 +99,7 @@ export function PoiDetailModal({
       setErrorMessage(null);
       setInfoToast(null);
       setPhotos([]);
+      setActivePhotoIndex(0);
       setAverageRating(null);
       setRatingCount(0);
 
@@ -119,12 +127,13 @@ export function PoiDetailModal({
 
       if (photosResult.error) {
         setErrorMessage(getErrorMessage(photosResult.error));
+        const fallback = collectPoiPhotoUrls(poi!, null, 'medium');
+        setPhotos(fallback);
+        setActivePhotoIndex(0);
       } else {
-        setPhotos(
-          (photosResult.data ?? [])
-            .map((photo) => pickPhotoUrl(photo, 'medium'))
-            .filter((url): url is string => Boolean(url))
-        );
+        const next = collectPoiPhotoUrls(poi!, photosResult.data ?? [], 'medium');
+        setPhotos(next);
+        setActivePhotoIndex(0);
       }
 
       if (ratingsResult.error) {
@@ -209,31 +218,72 @@ export function PoiDetailModal({
         const basePath = `${currentUserId}/${poi.id}-u${Date.now()}-${i}`;
         const variants = await uploadImageVariants(uri, STORAGE_BUCKET, basePath);
         rows.push({
-          poi_id: poi.id,
           photo_url: variants.original,
           medium_url: variants.medium,
           thumb_url: variants.thumb,
           order_index: photos.length + i,
-          status: 'pending' as const,
-          uploaded_by: currentUserId,
         });
       }
 
-      const { data: insertedPhotos, error } = await supabase
-        .from('poi_photos')
-        .insert(rows)
-        .select('id');
-      if (error) {
-        setErrorMessage(getErrorMessage(error));
-        return;
+      const base = getApiBaseUrl();
+      const headers = await getAuthHeaders();
+      let insertedIds: string[] = [];
+      let notifySent = 0;
+
+      if (base && headers) {
+        const res = await fetch(`${base}/api/pois/photos/pending`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            poi_id: poi.id,
+            poi_name: poi.name,
+            photos: rows,
+          }),
+        });
+        const json = (await res.json().catch(() => null)) as {
+          success?: boolean;
+          ids?: string[];
+          notify_sent?: number;
+          detail?: { message?: string };
+        } | null;
+        if (!res.ok) {
+          setErrorMessage(
+            json?.detail?.message || `Şəkillər yazılmadı (HTTP ${res.status})`
+          );
+          return;
+        }
+        insertedIds = json?.ids ?? [];
+        notifySent = json?.notify_sent ?? 0;
+      } else {
+        // Fallback: direct Supabase insert (needs INSERT RLS policy)
+        const { data: insertedPhotos, error } = await supabase
+          .from('poi_photos')
+          .insert(
+            rows.map((row) => ({
+              ...row,
+              poi_id: poi.id,
+              status: 'pending' as const,
+              uploaded_by: currentUserId,
+            }))
+          )
+          .select('id');
+        if (error) {
+          setErrorMessage(getErrorMessage(error));
+          return;
+        }
+        insertedIds = (insertedPhotos ?? []).map((r) => r.id);
+        const notify = await notifyAdmins(
+          'photo_pending',
+          `"${poi.name}" üçün ${rows.length} şəkil`,
+          insertedIds[0]
+        );
+        notifySent = notify.sent ? 1 : 0;
       }
 
-      showInfoToast('Şəkillər təsdiqə göndərildi');
-      const firstId = insertedPhotos?.[0]?.id;
-      void notifyAdmins(
-        'photo_pending',
-        `"${poi.name}" üçün ${rows.length} şəkil`,
-        firstId ?? undefined
+      showInfoToast(
+        notifySent > 0
+          ? 'Şəkillər təsdiqə göndərildi'
+          : 'Şəkillər gözləmədədir — admin paneldə təsdiqləyin'
       );
     } catch (err) {
       setErrorMessage(getErrorMessage(err));
@@ -292,16 +342,11 @@ export function PoiDetailModal({
                 <ActivityIndicator color={colors.accent} />
               </View>
             ) : photos.length > 0 ? (
-              <ScrollView
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                style={styles.gallery}
-              >
-                {photos.map((url) => (
-                  <Image key={url} source={{ uri: url }} style={styles.galleryImage} />
-                ))}
-              </ScrollView>
+              <PoiPhotoGallery
+                urls={photos}
+                activeIndex={activePhotoIndex}
+                onActiveIndexChange={setActivePhotoIndex}
+              />
             ) : (
               <View style={[styles.galleryPlaceholder, { backgroundColor: `${color}22` }]}>
                 <CategoryIcon category={poi.category} size={36} color={color} />
@@ -453,7 +498,7 @@ export function PoiDetailModal({
                   openUrl(`https://maps.google.com/?q=${poi.lat},${poi.lng}`)
                 }
               >
-                <FontAwesome name="map" size={14} color="#fff" />
+                <FontAwesome name="map" size={14} color={colors.textOnAccent} />
                 <Text style={styles.primaryButtonText}>Google Maps-də aç</Text>
               </Pressable>
             </View>
@@ -473,7 +518,8 @@ export function PoiDetailModal({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -511,13 +557,42 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   gallery: {
+    marginBottom: 8,
+  },
+  galleryBlock: {
     marginBottom: 16,
+    gap: 8,
+  },
+  galleryHero: {
+    width: GALLERY_WIDTH,
+    height: 200,
+    borderRadius: 12,
+    backgroundColor: colors.chip,
   },
   galleryImage: {
     width: GALLERY_WIDTH,
     height: 200,
     borderRadius: 12,
     marginRight: 8,
+  },
+  galleryThumbRow: {
+    gap: 6,
+    paddingTop: 2,
+  },
+  galleryThumbWrap: {
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    overflow: 'hidden',
+  },
+  galleryThumbWrapActive: {
+    borderColor: colors.accent,
+  },
+  galleryThumb: {
+    width: 56,
+    height: 42,
+    borderRadius: 6,
+    backgroundColor: colors.chip,
   },
   galleryPlaceholder: {
     height: 200,
@@ -749,3 +824,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
+}

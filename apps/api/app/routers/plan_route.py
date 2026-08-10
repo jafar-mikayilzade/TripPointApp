@@ -12,6 +12,7 @@ from app.auth import verify_user
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID, REGION_LABELS
 from app.services.live_route_candidates import load_live_route_candidates
 from app.services.plan_itinerary import build_skeleton, enrich_with_claude
+from app.services.rank_pois import filter_accommodations_by_lodging_type
 
 router = APIRouter(tags=["route"])
 
@@ -47,6 +48,8 @@ class PlanRouteIn(BaseModel):
     varietySeed: int | None = None
     # Soft-exclude stops from the previous plan the user is replacing
     excludePoiIds: list[str] = Field(default_factory=list)
+    # Overnight preference: hotel | private (guesthouse/hostel/camping)
+    lodgingType: str | None = "hotel"
 
 
 @router.post("/api/plan-route")
@@ -124,6 +127,11 @@ def plan_route_endpoint(
             "client+db" if candidate_source == "client" else str(loaded.get("source") or "db")
         )
 
+    lodging_type = (body.lodgingType or "hotel").strip() or "hotel"
+    accommodations = filter_accommodations_by_lodging_type(
+        accommodations, lodging_type
+    )
+
     if not (restaurants or accommodations or attractions):
         raise HTTPException(
             status_code=400,
@@ -151,6 +159,7 @@ def plan_route_endpoint(
             return_by_time=body.returnByTime or "21:00",
             variety_seed=body.varietySeed,
             exclude_poi_ids=list(body.excludePoiIds or []),
+            lodging_type=lodging_type,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc

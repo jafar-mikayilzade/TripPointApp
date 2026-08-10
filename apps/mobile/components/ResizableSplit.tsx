@@ -9,7 +9,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 /** Hit area for drag; visually only a thin blue line is shown */
 const HANDLE_HIT = 24;
@@ -54,6 +55,8 @@ export function ResizableSplit({
   storageKey,
   style,
 }: ResizableSplitProps) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const isControlled = controlledRatio != null;
   const [containerHeight, setContainerHeight] = useState(0);
   const [internalRatio, setInternalRatio] = useState(initialTopRatio);
@@ -214,37 +217,39 @@ export function ResizableSplit({
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    minHeight: 0,
-    overflow: 'hidden',
-  },
-  pane: {
-    minHeight: 0,
-    overflow: 'hidden',
-  },
-  paneFlex: {
-    flex: 1,
-  },
-  handle: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: HANDLE_HIT,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    zIndex: 30,
-  },
-  handleFallback: {
-    top: '50%',
-    marginTop: -HANDLE_HIT / 2,
-  },
-  handlePill: {
-    width: 40,
-    height: PILL_HEIGHT,
-    borderRadius: 999,
-    backgroundColor: colors.accent,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    root: {
+      flex: 1,
+      minHeight: 0,
+      overflow: 'hidden',
+    },
+    pane: {
+      minHeight: 0,
+      overflow: 'hidden',
+    },
+    paneFlex: {
+      flex: 1,
+    },
+    handle: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      height: HANDLE_HIT,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'transparent',
+      zIndex: 30,
+    },
+    handleFallback: {
+      top: '50%',
+      marginTop: -HANDLE_HIT / 2,
+    },
+    handlePill: {
+      width: 40,
+      height: PILL_HEIGHT,
+      borderRadius: 999,
+      backgroundColor: colors.accent,
+    },
+  });
+}

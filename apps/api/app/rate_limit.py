@@ -23,6 +23,8 @@ _DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     "/api/sync-places": (10, 60),
     "/api/import-serpapi-hotels": (5, 60),
     "/api/pois/upsert-google-place": (20, 60),
+    "/api/pois/photos/pending": (20, 60),
+    "/api/ratings/upsert": (40, 60),
     # Paid third-party quota (Google Places / OpenWeather) — generous but capped
     "/api/route-candidates": (60, 60),
     "/api/weather": (60, 60),

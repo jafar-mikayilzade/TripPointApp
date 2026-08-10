@@ -1,8 +1,9 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { CategoryIcon } from './CategoryIcon';
-import { colors } from '../constants/theme';
+import type { ThemeColors } from '../constants/theme';
+import { useThemeColors } from '../theme/ThemeProvider';
 
 type PoiMarkerBubbleProps = {
   category: string;
@@ -14,6 +15,9 @@ export const PoiMarkerBubble = memo(function PoiMarkerBubble({
   category,
   selected = false,
 }: PoiMarkerBubbleProps) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   return (
     <View
       collapsable={false}
@@ -40,23 +44,25 @@ export function shouldTrackMarkerViewChanges(opts: {
   );
 }
 
-const styles = StyleSheet.create({
-  bubble: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bubbleSelected: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderColor: colors.danger,
-    borderWidth: 3,
-    backgroundColor: '#FFFFFF',
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    bubble: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.surface,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    bubbleSelected: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      borderColor: colors.danger,
+      borderWidth: 3,
+      backgroundColor: colors.surface,
+    },
+  });
+}

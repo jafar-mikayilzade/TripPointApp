@@ -17,6 +17,7 @@ from app.routers import (
     telegram,
     jobs,
     pois,
+    ratings,
     notify_push,
 )
 
@@ -61,5 +62,6 @@ def create_app() -> FastAPI:
     application.include_router(telegram.router)
     application.include_router(jobs.router)
     application.include_router(pois.router)
+    application.include_router(ratings.router)
     application.include_router(notify_push.router)
     return application

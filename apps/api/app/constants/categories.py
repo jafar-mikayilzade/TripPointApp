@@ -21,19 +21,14 @@ APP_CATEGORIES = {
 # all = region sync; tourist_attraction = legacy alias
 ALLOWED_CATEGORIES = APP_CATEGORIES | {"all", "tourist_attraction"}
 
-# Food/lodging — curated via admin/Google; OSM sync must not stampede/override
+# Cafe stays noisy in regional OSM; food/lodging with ["name"] are allowed.
 OSM_SKIP_SYNC_CATEGORIES = frozenset(
     {
-        "restaurant",
         "cafe",
-        "hotel",
-        "hostel",
-        "guesthouse",
-        "home_restaurant",
     }
 )
 
-# OSM sync / lazy fill — attractions (+ camping). "all" expands to this set.
+# OSM sync / lazy fill — attractions + named lodging/food. "all" expands to this set.
 OSM_SYNC_ATTRACTION_CATEGORIES = frozenset(
     {
         "nature",
@@ -44,10 +39,19 @@ OSM_SYNC_ATTRACTION_CATEGORIES = frozenset(
         "monument",
         "camping",
         "other",
+        "restaurant",
+        "hotel",
+        "hostel",
+        "guesthouse",
+        "home_restaurant",
     }
 )
 
 OSM_SYNC_ATTRACTION_ORDER = [
+    "hotel",
+    "guesthouse",
+    "hostel",
+    "restaurant",
     "nature",
     "waterfall",
     "mountain",
