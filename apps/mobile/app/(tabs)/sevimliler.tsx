@@ -29,6 +29,7 @@ import { useResponsiveLayout } from '../../lib/layout';
 
 import { getCategoryLabel } from '../../lib/categoryUtils';
 import { getErrorMessage } from '../../lib/errors';
+import { LISTING_PUBLIC_COLUMNS } from '../../lib/listingColumns';
 import {
   listFavoriteListingIdsOrdered,
   listFavoritePoiIdsOrdered,
@@ -141,7 +142,7 @@ export default function SevimlilerScreen() {
       } else {
         const { data, error } = await supabase
           .from('listings')
-          .select('*')
+          .select(LISTING_PUBLIC_COLUMNS)
           .in('id', listingIds)
           .eq('status', 'active');
 
@@ -264,7 +265,7 @@ export default function SevimlilerScreen() {
     }
     const { data, error } = await supabase
       .from('listings')
-      .select('*')
+      .select(LISTING_PUBLIC_COLUMNS)
       .eq('id', item.target_id)
       .maybeSingle();
     if (error || !data) {

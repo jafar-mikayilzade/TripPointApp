@@ -40,24 +40,54 @@ def _require_notify_secret(x_notify_secret: str | None) -> None:
         raise HTTPException(status_code=401, detail={"error": "unauthorized"})
 
 
-def _require_user_or_secret(
-    authorization: str | None,
-    x_notify_secret: str | None,
-) -> None:
-    """App users authenticate with their Supabase session; servers with a secret."""
-    if _has_server_secret(x_notify_secret):
-        return
-    if verify_user(authorization):
-        return
-    raise HTTPException(status_code=401, detail={"error": "unauthorized"})
-
-
 def _require_webhook_secret(x_telegram_bot_api_secret_token: str | None) -> None:
-    expected = TELEGRAM_WEBHOOK_SECRET
+    """Fail closed when the bot is configured — unsigned webhooks must not moderate."""
+    from app.config import TELEGRAM_BOT_TOKEN
+
+    expected = (TELEGRAM_WEBHOOK_SECRET or "").strip()
     if not expected:
+        if TELEGRAM_BOT_TOKEN:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "webhook_secret_unset",
+                    "message": (
+                        "Set TELEGRAM_WEBHOOK_SECRET and configure "
+                        "setWebhook secret_token."
+                    ),
+                },
+            )
         return
     if not secret_matches(x_telegram_bot_api_secret_token, expected):
         raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+
+
+_ALLOWED_USER_NOTIFY_PREFIXES = (
+    "🛡 TripPoint · yeni məkan təsdiqi",
+    "🛡 TripPoint · yeni şəkil təsdiqi",
+    "🛡 TripPoint · elan şikayəti",
+)
+
+
+def _sanitize_user_notify_text(text: str, kind: str | None) -> str:
+    """Authenticated clients may only send short, prefixed moderation alerts."""
+    cleaned = (text or "").strip()
+    if not kind:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "kind_required", "message": "kind tələb olunur."},
+        )
+    if len(cleaned) > 500:
+        cleaned = cleaned[:500]
+    if not any(cleaned.startswith(prefix) for prefix in _ALLOWED_USER_NOTIFY_PREFIXES):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "invalid_notify_text",
+                "message": "Bildiriş formatı yanlışdır.",
+            },
+        )
+    return cleaned
 
 
 class NotifyBody(BaseModel):
@@ -92,7 +122,14 @@ def telegram_notify(
     x_notify_secret: str | None = Header(default=None, alias="X-Notify-Secret"),
 ) -> dict[str, object]:
     """Admin notify hook — bütün bağlı adminlərə + TELEGRAM_CHAT_ID."""
-    _require_user_or_secret(authorization, x_notify_secret)
+    server = _has_server_secret(x_notify_secret)
+    if not server:
+        if not verify_user(authorization):
+            raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+        text = _sanitize_user_notify_text(body.text, body.kind)
+    else:
+        text = body.text
+
     markup = None
     if (
         body.kind
@@ -100,7 +137,7 @@ def telegram_notify(
         and moderation_target_is_open(body.kind, body.target_id)
     ):
         markup = admin_action_keyboard(body.kind, body.target_id)
-    result = notify_all_admins(body.text, reply_markup=markup)
+    result = notify_all_admins(text, reply_markup=markup)
     return {"ok": result["sent"] > 0, **result}
 
 

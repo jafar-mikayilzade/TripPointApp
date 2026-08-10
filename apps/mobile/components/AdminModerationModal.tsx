@@ -18,6 +18,7 @@ import { getErrorMessage } from '../lib/errors';
 import {
   setListingReportStatus,
   setPoiPhotoStatus,
+  setPostPhotoStatus,
   setPoiStatus,
   updateListingAsAdmin,
   deleteListingAsAdminOrOwner,
@@ -25,12 +26,21 @@ import {
 import { pickPhotoUrl } from '../lib/photoUrls';
 import { confirmDelete } from '../lib/userContentDelete';
 import { supabase } from '../lib/supabase';
-import type { ListingReport, Poi, PoiPhoto } from '../types/database';
+import type { ListingReport, Poi, PoiPhoto, PostPhoto } from '../types/database';
 
 import type { ThemeColors } from '../constants/theme';
 import { useThemeColors } from '../theme/ThemeProvider';
 
 type ModTab = 'pois' | 'photos' | 'reports';
+
+type PendingModPhoto = {
+  id: string;
+  kind: 'poi' | 'post';
+  photo_url: string;
+  thumb_url?: string | null;
+  medium_url?: string | null;
+  label: string;
+};
 
 type ReportRow = ListingReport & {
   listing_title?: string | null;
@@ -54,7 +64,7 @@ export function AdminModerationModal({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingPois, setPendingPois] = useState<Poi[]>([]);
-  const [pendingPhotos, setPendingPhotos] = useState<(PoiPhoto & { poi_name?: string })[]>([]);
+  const [pendingPhotos, setPendingPhotos] = useState<PendingModPhoto[]>([]);
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editListingId, setEditListingId] = useState<string | null>(null);
@@ -68,38 +78,74 @@ export function AdminModerationModal({
     const base = getApiBaseUrl();
     const headers = await getAuthHeaders();
 
-    let photoRows: (PoiPhoto & { poi_name?: string })[] = [];
-    let photosLoadedViaApi = false;
+    const modPhotos: PendingModPhoto[] = [];
+    let poiPhotosLoadedViaApi = false;
+    let postPhotosLoadedViaApi = false;
 
     if (base && headers) {
       try {
-        const res = await fetch(`${base}/api/pois/photos/pending`, { headers });
-        if (res.ok) {
-          const json = (await res.json()) as {
+        const [poiRes, postRes] = await Promise.all([
+          fetch(`${base}/api/pois/photos/pending`, { headers }),
+          fetch(`${base}/api/posts/photos/pending`, { headers }),
+        ]);
+        if (poiRes.ok) {
+          const json = (await poiRes.json()) as {
             photos?: (PoiPhoto & { poi_name?: string })[];
           };
-          photoRows = json.photos ?? [];
-          photosLoadedViaApi = true;
+          for (const photo of json.photos ?? []) {
+            modPhotos.push({
+              id: photo.id,
+              kind: 'poi',
+              photo_url: photo.photo_url,
+              thumb_url: photo.thumb_url,
+              medium_url: photo.medium_url,
+              label: photo.poi_name ? `Məkan · ${photo.poi_name}` : 'Məkan şəkli',
+            });
+          }
+          poiPhotosLoadedViaApi = true;
+        }
+        if (postRes.ok) {
+          const json = (await postRes.json()) as {
+            photos?: (PostPhoto & { post_caption?: string })[];
+          };
+          for (const photo of json.photos ?? []) {
+            const caption = photo.post_caption?.trim();
+            modPhotos.push({
+              id: photo.id,
+              kind: 'post',
+              photo_url: photo.photo_url,
+              label: caption ? `Paylaşım · ${caption}` : 'Paylaşım şəkli',
+            });
+          }
+          postPhotosLoadedViaApi = true;
         }
       } catch {
         // fall back to supabase
       }
     }
 
-    const [poisRes, photosRes, reportsRes] = await Promise.all([
+    const [poisRes, photosRes, postPhotosRes, reportsRes] = await Promise.all([
       supabase
         .from('pois')
         .select('*')
         .eq('status', 'pending')
         .order('created_at', { ascending: false })
         .limit(50),
-      photosLoadedViaApi
+      poiPhotosLoadedViaApi
         ? Promise.resolve({ data: [] as PoiPhoto[], error: null })
         : supabase
             .from('poi_photos')
             .select(
               'id, poi_id, photo_url, thumb_url, medium_url, order_index, status, uploaded_by, created_at'
             )
+            .eq('status', 'pending')
+            .order('created_at', { ascending: false })
+            .limit(50),
+      postPhotosLoadedViaApi
+        ? Promise.resolve({ data: [] as PostPhoto[], error: null })
+        : supabase
+            .from('post_photos')
+            .select('id, post_id, photo_url, order_index, status, created_at')
             .eq('status', 'pending')
             .order('created_at', { ascending: false })
             .limit(50),
@@ -119,16 +165,49 @@ export function AdminModerationModal({
       return;
     }
 
-    if (!photosLoadedViaApi) {
-      photoRows = (photosRes.data ?? []) as PoiPhoto[];
-      const poiIds = [...new Set(photoRows.map((p) => p.poi_id))];
+    if (!poiPhotosLoadedViaApi) {
+      const rows = (photosRes.data ?? []) as PoiPhoto[];
+      const poiIds = [...new Set(rows.map((p) => p.poi_id))];
+      let poiNameById = new Map<string, string>();
       if (poiIds.length > 0) {
         const { data: poiNames } = await supabase.from('pois').select('id, name').in('id', poiIds);
-        const poiNameById = new Map((poiNames ?? []).map((p) => [p.id, p.name]));
-        photoRows = photoRows.map((photo) => ({
-          ...photo,
-          poi_name: poiNameById.get(photo.poi_id),
-        }));
+        poiNameById = new Map((poiNames ?? []).map((p) => [p.id, p.name]));
+      }
+      for (const photo of rows) {
+        modPhotos.push({
+          id: photo.id,
+          kind: 'poi',
+          photo_url: photo.photo_url,
+          thumb_url: photo.thumb_url,
+          medium_url: photo.medium_url,
+          label: poiNameById.get(photo.poi_id)
+            ? `Məkan · ${poiNameById.get(photo.poi_id)}`
+            : 'Məkan şəkli',
+        });
+      }
+    }
+
+    if (!postPhotosLoadedViaApi && !postPhotosRes.error) {
+      const rows = (postPhotosRes.data ?? []) as PostPhoto[];
+      const postIds = [...new Set(rows.map((p) => p.post_id))];
+      let captionById = new Map<string, string>();
+      if (postIds.length > 0) {
+        const { data: posts } = await supabase
+          .from('posts')
+          .select('id, caption')
+          .in('id', postIds);
+        captionById = new Map(
+          (posts ?? []).map((p) => [p.id, (p.caption || '').trim().slice(0, 80)])
+        );
+      }
+      for (const photo of rows) {
+        const caption = captionById.get(photo.post_id);
+        modPhotos.push({
+          id: photo.id,
+          kind: 'post',
+          photo_url: photo.photo_url,
+          label: caption ? `Paylaşım · ${caption}` : 'Paylaşım şəkli',
+        });
       }
     }
 
@@ -144,7 +223,7 @@ export function AdminModerationModal({
     }
 
     setPendingPois((poisRes.data ?? []) as Poi[]);
-    setPendingPhotos(photoRows);
+    setPendingPhotos(modPhotos);
     setReports(
       reportRows.map((report) => ({
         ...report,
@@ -183,9 +262,12 @@ export function AdminModerationModal({
     await load();
   }
 
-  async function approvePhoto(id: string) {
-    setBusyId(id);
-    const { error } = await setPoiPhotoStatus(id, 'approved');
+  async function approvePhoto(photo: PendingModPhoto) {
+    setBusyId(photo.id);
+    const { error } =
+      photo.kind === 'post'
+        ? await setPostPhotoStatus(photo.id, 'approved')
+        : await setPoiPhotoStatus(photo.id, 'approved');
     setBusyId(null);
     if (error) {
       setErrorMessage(error);
@@ -194,9 +276,12 @@ export function AdminModerationModal({
     await load();
   }
 
-  async function rejectPhoto(id: string) {
-    setBusyId(id);
-    const { error } = await setPoiPhotoStatus(id, 'rejected');
+  async function rejectPhoto(photo: PendingModPhoto) {
+    setBusyId(photo.id);
+    const { error } =
+      photo.kind === 'post'
+        ? await setPostPhotoStatus(photo.id, 'rejected')
+        : await setPoiPhotoStatus(photo.id, 'rejected');
     setBusyId(null);
     if (error) {
       setErrorMessage(error);
@@ -345,24 +430,27 @@ export function AdminModerationModal({
                 ? pendingPhotos.length === 0
                   ? <Text style={styles.empty}>Gözləyən şəkil yoxdur</Text>
                   : pendingPhotos.map((photo) => (
-                      <View key={photo.id} style={styles.card}>
+                      <View key={`${photo.kind}-${photo.id}`} style={styles.card}>
                         <Image
-                          source={{ uri: pickPhotoUrl(photo, 'thumb') ?? photo.photo_url }}
+                          source={{
+                            uri:
+                              pickPhotoUrl(photo, 'thumb') ?? photo.photo_url,
+                          }}
                           style={styles.thumb}
                         />
-                        <Text style={styles.meta}>{photo.poi_name ?? 'Məkan'}</Text>
+                        <Text style={styles.meta}>{photo.label}</Text>
                         <View style={styles.row}>
                           <Pressable
                             style={[styles.btn, styles.approve]}
                             disabled={busyId === photo.id}
-                            onPress={() => void approvePhoto(photo.id)}
+                            onPress={() => void approvePhoto(photo)}
                           >
                             <Text style={styles.btnText}>Təsdiq et</Text>
                           </Pressable>
                           <Pressable
                             style={[styles.btn, styles.reject]}
                             disabled={busyId === photo.id}
-                            onPress={() => void rejectPhoto(photo.id)}
+                            onPress={() => void rejectPhoto(photo)}
                           >
                             <Text style={styles.btnTextDark}>Rədd et</Text>
                           </Pressable>

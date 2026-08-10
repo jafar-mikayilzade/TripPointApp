@@ -73,6 +73,20 @@ def _limits() -> dict[str, tuple[int, int]]:
             ),
             60,
         ),
+        "/api/pois/photos/pending": (
+            _env_int(
+                "RATE_LIMIT_POI_PHOTOS_PENDING",
+                _DEFAULT_LIMITS["/api/pois/photos/pending"][0],
+            ),
+            60,
+        ),
+        "/api/ratings/upsert": (
+            _env_int(
+                "RATE_LIMIT_RATINGS_UPSERT",
+                _DEFAULT_LIMITS["/api/ratings/upsert"][0],
+            ),
+            60,
+        ),
         "/api/route-candidates": (
             _env_int(
                 "RATE_LIMIT_ROUTE_CANDIDATES",
@@ -116,9 +130,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._last_evict = time.time()
 
     def _client_ip(self, request: Request) -> str:
+        # Prefer platform-injected client IP. Do not trust the first
+        # X-Forwarded-For hop from an untrusted client (spoof resets buckets).
+        real_ip = (request.headers.get("x-real-ip") or "").strip()
+        if real_ip:
+            return real_ip
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+            # Railway / typical reverse proxies append the real client as the
+            # left-most value when they control the header; when clients can
+            # inject XFF, prefer the right-most hop (closest to our edge).
+            if parts:
+                return parts[-1]
         if request.client:
             return request.client.host
         return "unknown"

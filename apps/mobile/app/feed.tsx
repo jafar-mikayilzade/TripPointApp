@@ -37,6 +37,8 @@ import { useThemeColors } from '../theme/ThemeProvider';
 type FeedPost = Post & {
   author: Pick<Profile, 'id' | 'full_name' | 'avatar_url'> | null;
   photos: PostPhoto[];
+  /** Owner-visible: photos waiting for admin approval */
+  pendingPhotoCount: number;
   poi: Pick<Poi, 'id' | 'name' | 'lat' | 'lng'> | null;
   averageRating: number | null;
   ratingCount: number;
@@ -137,7 +139,7 @@ export default function FeedScreen() {
       supabase.from('profiles').select('id, full_name, avatar_url').in('id', userIds),
       supabase
         .from('post_photos')
-        .select('id, post_id, photo_url, order_index, created_at')
+        .select('id, post_id, photo_url, order_index, created_at, status')
         .in('post_id', postIds)
         .order('order_index', { ascending: true }),
       poiIds.length > 0
@@ -150,11 +152,23 @@ export default function FeedScreen() {
         .in('target_id', postIds),
     ]);
 
+    let photoRows = photosResult.data ?? [];
+    if (photosResult.error) {
+      // status column may be missing before migration — fall back
+      const legacy = await supabase
+        .from('post_photos')
+        .select('id, post_id, photo_url, order_index, created_at')
+        .in('post_id', postIds)
+        .order('order_index', { ascending: true });
+      if (legacy.error) {
+        setErrorMessage(getErrorMessage(photosResult.error));
+      } else {
+        photoRows = legacy.data ?? [];
+      }
+    }
+
     if (profilesResult.error) {
       setErrorMessage(getErrorMessage(profilesResult.error));
-    }
-    if (photosResult.error) {
-      setErrorMessage(getErrorMessage(photosResult.error));
     }
     if (poisResult.error) {
       setErrorMessage(getErrorMessage(poisResult.error));
@@ -166,9 +180,19 @@ export default function FeedScreen() {
     const profileMap = new Map((profilesResult.data ?? []).map((item) => [item.id, item]));
     const poiMap = new Map((poisResult.data ?? []).map((item) => [item.id, item]));
     const photosByPost = new Map<string, PostPhoto[]>();
-    for (const photo of photosResult.data ?? []) {
+    const pendingByPost = new Map<string, number>();
+    for (const photo of photoRows) {
+      const status = (photo as PostPhoto).status;
+      if (status === 'pending') {
+        pendingByPost.set(photo.post_id, (pendingByPost.get(photo.post_id) ?? 0) + 1);
+        continue;
+      }
+      // Legacy rows without status stay visible; rejected stay hidden
+      if (status && status !== 'approved') {
+        continue;
+      }
       const list = photosByPost.get(photo.post_id) ?? [];
-      list.push(photo);
+      list.push(photo as PostPhoto);
       photosByPost.set(photo.post_id, list);
     }
 
@@ -190,6 +214,7 @@ export default function FeedScreen() {
           ...row,
           author: profileMap.get(row.user_id) ?? null,
           photos: photosByPost.get(row.id) ?? [],
+          pendingPhotoCount: pendingByPost.get(row.id) ?? 0,
           poi: row.poi_id ? (poiMap.get(row.poi_id) ?? null) : null,
           averageRating: agg && agg.count > 0 ? agg.sum / agg.count : null,
           ratingCount: agg?.count ?? 0,
@@ -383,10 +408,16 @@ export default function FeedScreen() {
           }
         } else {
           const { error: photosError } = await supabase.from('post_photos').insert(
-            photoRows.map((row) => ({ ...row, post_id: post.id }))
+            photoRows.map((row) => ({ ...row, post_id: post.id, status: 'pending' as const }))
           );
           if (photosError) {
-            photosErrorMessage = getErrorMessage(photosError);
+            // Older schema without status
+            const retry = await supabase.from('post_photos').insert(
+              photoRows.map((row) => ({ ...row, post_id: post.id }))
+            );
+            if (retry.error) {
+              photosErrorMessage = getErrorMessage(photosError);
+            }
           }
         }
 
@@ -396,6 +427,11 @@ export default function FeedScreen() {
           await fetchPosts(true);
           return;
         }
+
+        setShareVisible(false);
+        setErrorMessage('Şəkillər admin təsdiqinə göndərildi — təsdiqdən sonra feed-də görünəcək.');
+        await fetchPosts(true);
+        return;
       }
 
       setShareVisible(false);
@@ -610,6 +646,12 @@ export default function FeedScreen() {
               />
             ))}
           </ScrollView>
+        ) : isOwner && item.pendingPhotoCount > 0 ? (
+          <View style={styles.pendingPhotoBox}>
+            <Text style={styles.pendingPhotoText}>
+              Şəkillər yoxlamadan dərhal sonra əlavə olunacaq
+            </Text>
+          </View>
         ) : null}
 
         {item.caption?.trim() ? (
@@ -1003,6 +1045,23 @@ function createStyles(colors: ThemeColors) {
   },
   photoScroll: {
     marginBottom: 10,
+  },
+  pendingPhotoBox: {
+    marginBottom: 10,
+    minHeight: 88,
+    borderRadius: 12,
+    backgroundColor: colors.chip,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  pendingPhotoText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    fontWeight: '600',
   },
   postPhoto: {
     width: PHOTO_WIDTH,

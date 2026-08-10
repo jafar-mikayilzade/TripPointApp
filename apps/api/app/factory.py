@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -45,7 +47,19 @@ def create_app() -> FastAPI:
     validate_settings()
     _init_sentry()
 
-    application = FastAPI(title="TripPoint Backend", version="1.0.0")
+    disable_docs = (os.getenv("DISABLE_API_DOCS") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    } or (os.getenv("RAILWAY_ENVIRONMENT") or "").strip().lower() == "production"
+
+    application = FastAPI(
+        title="TripPoint Backend",
+        version="1.0.0",
+        docs_url=None if disable_docs else "/docs",
+        redoc_url=None if disable_docs else "/redoc",
+        openapi_url=None if disable_docs else "/openapi.json",
+    )
     application.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ALLOW_ORIGINS,

@@ -107,9 +107,9 @@ def validate_settings() -> None:
             "Missing required environment variables: SUPABASE_URL, SUPABASE_SERVICE_KEY"
         )
     if TELEGRAM_BOT_TOKEN and not TELEGRAM_WEBHOOK_SECRET:
-        logging.getLogger(__name__).warning(
-            "TELEGRAM_WEBHOOK_SECRET is unset — /api/telegram/webhook accepts "
-            "unverified updates. Set it and pass secret_token to setWebhook."
+        logging.getLogger(__name__).error(
+            "TELEGRAM_WEBHOOK_SECRET is unset while TELEGRAM_BOT_TOKEN is set — "
+            "webhook endpoint will fail closed until the secret is configured."
         )
     if DATA_SOURCE not in ALLOWED_DATA_SOURCES:
         raise RuntimeError(

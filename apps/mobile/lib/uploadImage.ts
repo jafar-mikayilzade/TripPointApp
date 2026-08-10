@@ -19,11 +19,26 @@ async function uploadFile(
   path: string,
   contentType = 'image/jpeg'
 ): Promise<string> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id) {
+    throw new Error('Şəkil yükləmək üçün daxil olun.');
+  }
+  const normalized = path.replace(/^\/+/, '');
+  if (
+    normalized.includes('..') ||
+    normalized.startsWith('/') ||
+    !normalized.startsWith(`${user.id}/`)
+  ) {
+    throw new Error('Şəkil yolu etibarsızdır.');
+  }
+
   const base64 = await FileSystem.readAsStringAsync(uri, {
     encoding: FileSystem.EncodingType.Base64,
   });
 
-  const { error } = await supabase.storage.from(bucket).upload(path, decode(base64), {
+  const { error } = await supabase.storage.from(bucket).upload(normalized, decode(base64), {
     contentType,
     upsert: true,
   });
@@ -31,7 +46,7 @@ async function uploadFile(
     throw error;
   }
 
-  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+  const { data } = supabase.storage.from(bucket).getPublicUrl(normalized);
   return data.publicUrl;
 }
 

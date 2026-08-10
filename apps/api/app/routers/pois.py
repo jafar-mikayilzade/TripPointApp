@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import verify_admin, verify_user
 from app.db import supabase
+from app.photo_urls import require_https_photo_url
 from app.services.poi_upsert_google import upsert_google_place
 from app.services.telegram_notify import admin_action_keyboard, notify_all_admins
 
@@ -98,9 +99,13 @@ def api_create_pending_photos(
     payload = [
         {
             "poi_id": body.poi_id,
-            "photo_url": item.photo_url,
-            "thumb_url": item.thumb_url or item.photo_url,
-            "medium_url": item.medium_url or item.photo_url,
+            "photo_url": require_https_photo_url(item.photo_url),
+            "thumb_url": require_https_photo_url(
+                item.thumb_url or item.photo_url, field="thumb_url"
+            ),
+            "medium_url": require_https_photo_url(
+                item.medium_url or item.photo_url, field="medium_url"
+            ),
             "order_index": item.order_index,
             "status": "pending",
             "uploaded_by": user_id,
@@ -196,6 +201,48 @@ class PhotoStatusBody(BaseModel):
     status: Literal["approved", "rejected", "pending"]
 
 
+def _purge_poi_photo_urls(poi_id: str, urls: list[str]) -> None:
+    """Remove rejected photo URLs from pois.photo_urls / thumbnail_url so gallery stays clean."""
+    blocked = {u.strip() for u in urls if isinstance(u, str) and u.strip()}
+    if not poi_id or not blocked:
+        return
+    try:
+        poi = (
+            supabase.table("pois")
+            .select("id, photo_urls, thumbnail_url")
+            .eq("id", poi_id)
+            .limit(1)
+            .execute()
+        )
+        row = (poi.data or [None])[0]
+        if not row:
+            return
+
+        raw_urls = row.get("photo_urls")
+        kept: list[str] = []
+        if isinstance(raw_urls, list):
+            kept = [
+                str(u).strip()
+                for u in raw_urls
+                if isinstance(u, str) and str(u).strip() and str(u).strip() not in blocked
+            ]
+
+        patch: dict[str, Any] = {}
+        if isinstance(raw_urls, list) and kept != [
+            str(u).strip() for u in raw_urls if isinstance(u, str) and str(u).strip()
+        ]:
+            patch["photo_urls"] = kept
+
+        thumb = str(row.get("thumbnail_url") or "").strip()
+        if thumb and thumb in blocked:
+            patch["thumbnail_url"] = kept[0] if kept else None
+
+        if patch:
+            supabase.table("pois").update(patch).eq("id", poi_id).execute()
+    except Exception:
+        logger.exception("purge poi photo urls failed poi_id=%s", poi_id)
+
+
 @router.patch("/photos/{photo_id}/status")
 def api_set_photo_status(
     photo_id: str,
@@ -205,6 +252,15 @@ def api_set_photo_status(
     """Admin-only: approve/reject a pending POI photo."""
     if not verify_admin(authorization):
         raise HTTPException(status_code=403, detail={"error": "forbidden"})
+
+    existing = (
+        supabase.table("poi_photos")
+        .select("id, poi_id, photo_url, thumb_url, medium_url")
+        .eq("id", photo_id)
+        .limit(1)
+        .execute()
+    )
+    photo_row = (existing.data or [None])[0]
 
     try:
         result = (
@@ -219,5 +275,13 @@ def api_set_photo_status(
             status_code=502,
             detail={"error": "update_failed", "message": "Şəkil statusu yenilənmədi."},
         ) from None
+
+    if body.status == "rejected" and photo_row:
+        urls = [
+            str(photo_row.get("photo_url") or ""),
+            str(photo_row.get("thumb_url") or ""),
+            str(photo_row.get("medium_url") or ""),
+        ]
+        _purge_poi_photo_urls(str(photo_row.get("poi_id") or ""), urls)
 
     return {"success": True, "updated": len(result.data or [])}

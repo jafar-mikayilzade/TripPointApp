@@ -32,6 +32,7 @@ import { useTheme, useThemeColors } from '../../theme/ThemeProvider';
 import { deleteOwnAccount } from '../../lib/deleteAccount';
 import { getErrorMessage } from '../../lib/errors';
 import { ensureProfile } from '../../lib/ensureProfile';
+import { LISTING_PUBLIC_COLUMNS } from '../../lib/listingColumns';
 import {
   TEXT_FORMAT_ERROR,
   formatAzPhoneE164,
@@ -365,7 +366,7 @@ export default function ProfilScreen() {
     if (activeTab === 'listings') {
       const { data, error } = await supabase
         .from('listings')
-        .select('*')
+        .select(LISTING_PUBLIC_COLUMNS)
         .eq('created_by', profileUserId)
         .neq('status', 'cancelled')
         .order('created_at', { ascending: false });

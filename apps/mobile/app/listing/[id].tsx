@@ -9,6 +9,7 @@ import {
 } from '../../components/ListingDetailModal';
 import type { ThemeColors } from '../../constants/theme';
 import { getErrorMessage } from '../../lib/errors';
+import { LISTING_PUBLIC_COLUMNS, PROFILE_PUBLIC_COLUMNS } from '../../lib/listingColumns';
 import { supabase } from '../../lib/supabase';
 import { useThemeColors } from '../../theme/ThemeProvider';
 import type { Listing, Profile } from '../../types/database';
@@ -42,7 +43,7 @@ export default function ListingDeepLinkScreen() {
 
       const { data, error: fetchError } = await supabase
         .from('listings')
-        .select('*')
+        .select(LISTING_PUBLIC_COLUMNS)
         .eq('id', id)
         .maybeSingle();
 
@@ -61,7 +62,7 @@ export default function ListingDeepLinkScreen() {
       let creator: Profile | null = null;
       const { data: profile } = await supabase
         .from('profiles')
-        .select('*')
+        .select(PROFILE_PUBLIC_COLUMNS)
         .eq('id', row.created_by)
         .maybeSingle();
       creator = (profile as Profile | null) ?? null;

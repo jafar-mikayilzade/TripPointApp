@@ -112,7 +112,11 @@ class TestTelegramNotifyAuth:
     ):
         res = client.post(
             "/api/telegram/notify",
-            json={"text": "Pending POI", "kind": "poi_pending", "target_id": "p1"},
+            json={
+                "text": "🛡 TripPoint · yeni məkan təsdiqi\nTest POI",
+                "kind": "poi_pending",
+                "target_id": "p1",
+            },
             headers={"Authorization": "Bearer session-token"},
         )
         assert res.status_code == 200

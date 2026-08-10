@@ -34,6 +34,12 @@ import {
   translateAmenities,
 } from '../lib/poiDisplay';
 import { getCategoryColor } from '../lib/poi';
+import {
+  buildPoiTelUrl,
+  buildPoiWebsiteUrl,
+  buildPoiWhatsAppUrl,
+  shouldShowPoiContact,
+} from '../lib/poiContact';
 import { collectPoiPhotoUrls } from '../lib/photoUrls';
 import { supabase } from '../lib/supabase';
 import { uploadImageVariants } from '../lib/uploadImage';
@@ -116,7 +122,6 @@ export function PoiDetailModal({
           .from('poi_photos')
           .select('photo_url, thumb_url, medium_url, order_index, created_at, status')
           .eq('poi_id', poi!.id)
-          .eq('status', 'approved')
           .order('order_index', { ascending: true }),
         supabase.from('ratings').select('score').eq('target_type', 'poi').eq('target_id', poi!.id),
       ]);
@@ -498,10 +503,39 @@ export function PoiDetailModal({
             {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
             <View style={styles.actions}>
-              {poi.phone ? (
+              {shouldShowPoiContact(poi.category, poi.phone) ? (
+                <>
+                  <Pressable
+                    style={styles.secondaryButton}
+                    onPress={() => {
+                      const url = buildPoiTelUrl(poi.phone);
+                      if (url) void openUrl(url);
+                    }}
+                  >
+                    <FontAwesome name="phone" size={14} color={colors.accent} />
+                    <Text style={styles.secondaryButtonText}>Zəng et</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.secondaryButton}
+                    onPress={() => {
+                      const url = buildPoiWhatsAppUrl({
+                        phone: poi.phone,
+                        placeName: poi.name,
+                      });
+                      if (url) void openUrl(url);
+                    }}
+                  >
+                    <FontAwesome name="whatsapp" size={14} color={colors.accent} />
+                    <Text style={styles.secondaryButtonText}>WhatsApp</Text>
+                  </Pressable>
+                </>
+              ) : poi.phone ? (
                 <Pressable
                   style={styles.secondaryButton}
-                  onPress={() => openUrl(`tel:${poi.phone}`)}
+                  onPress={() => {
+                    const url = buildPoiTelUrl(poi.phone);
+                    if (url) void openUrl(url);
+                  }}
                 >
                   <FontAwesome name="phone" size={14} color={colors.accent} />
                   <Text style={styles.secondaryButtonText}>Zəng et</Text>
@@ -509,9 +543,15 @@ export function PoiDetailModal({
               ) : null}
 
               {poi.website ? (
-                <Pressable style={styles.secondaryButton} onPress={() => openUrl(poi.website!)}>
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => {
+                    const url = buildPoiWebsiteUrl(poi.website);
+                    if (url) void openUrl(url);
+                  }}
+                >
                   <FontAwesome name="globe" size={14} color={colors.accent} />
-                  <Text style={styles.secondaryButtonText}>Vebsayta get</Text>
+                  <Text style={styles.secondaryButtonText}>Vebsayt</Text>
                 </Pressable>
               ) : null}
 

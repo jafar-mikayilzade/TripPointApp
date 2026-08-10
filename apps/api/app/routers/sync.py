@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from app.auth import verify_user
+from app.auth import verify_admin, verify_user
 from app.config import CRON_SECRET
 from app.security import secret_matches
 from app.services.places_sync import sync_places
@@ -14,15 +14,15 @@ from app.services.import_serpapi_hotels import import_serpapi_hotels_endpoint_re
 router = APIRouter(prefix="/api", tags=["sync"])
 
 
-def _require_user_or_cron(
+def _require_admin_or_cron(
     authorization: str | None,
     x_cron_secret: str | None,
 ) -> None:
-    """Sync writes to `pois` and hits Overpass — never leave it anonymous."""
+    """Sync writes to `pois` and hits paid upstream APIs — admin or cron only."""
     expected = (CRON_SECRET or "").strip()
     if expected and secret_matches(x_cron_secret, expected):
         return
-    if verify_user(authorization):
+    if verify_admin(authorization):
         return
     raise HTTPException(status_code=401, detail={"error": "unauthorized"})
 
@@ -40,7 +40,7 @@ def sync_places_endpoint(
         ),
     ),
 ) -> JSONResponse:
-    _require_user_or_cron(authorization, x_cron_secret)
+    _require_admin_or_cron(authorization, x_cron_secret)
     return sync_places(region, category)
 
 
@@ -53,7 +53,7 @@ def import_serpapi_hotels_endpoint(
     currency: str = Query("AZN", min_length=3, max_length=8),
 ) -> JSONResponse:
     """One-shot lodging import from SerpAPI Google Hotels → pois (insert-if-missing)."""
-    _require_user_or_cron(authorization, x_cron_secret)
+    _require_admin_or_cron(authorization, x_cron_secret)
     return import_serpapi_hotels_endpoint_response(
         region,
         max_pages=max_pages,

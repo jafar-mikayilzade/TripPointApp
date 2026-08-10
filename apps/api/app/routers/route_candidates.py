@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
+from app.auth import verify_admin
+from app.config import CRON_SECRET
 from app.constants.regions import REGION_COORDINATES
+from app.security import secret_matches
 from app.services.live_route_candidates import (
     buckets_as_public,
     load_live_route_candidates,
@@ -18,6 +21,8 @@ router = APIRouter(tags=["route"])
 
 @router.get("/api/route-candidates")
 def route_candidates_endpoint(
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret"),
     region: str = Query(..., description="Tourism region key, e.g. quba"),
     per_bucket: int = Query(
         40,
@@ -31,7 +36,7 @@ def route_candidates_endpoint(
     ),
     source: Literal["osm", "db", "google"] = Query(
         "db",
-        description="Candidate source: db (default, pois table); osm/google opt-in debug",
+        description="Candidate source: db (default); osm/google admin/cron only",
     ),
 ) -> JSONResponse:
     region_key = region.strip().lower()
@@ -43,6 +48,18 @@ def route_candidates_endpoint(
                 "allowed_regions": list(REGION_COORDINATES.keys()),
             },
         )
+
+    if source != "db":
+        expected = (CRON_SECRET or "").strip()
+        cron_ok = bool(expected) and secret_matches(x_cron_secret, expected)
+        if not cron_ok and not verify_admin(authorization):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "forbidden",
+                    "message": "source=osm|google yalnız admin/cron üçündür.",
+                },
+            )
 
     interest_list = [
         part.strip()

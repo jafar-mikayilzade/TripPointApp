@@ -22,6 +22,7 @@ import type { Poi, Post, PostPhoto, Profile } from '../types/database';
 export type FeedPostDetail = Post & {
   author: Pick<Profile, 'id' | 'full_name' | 'avatar_url'> | null;
   photos: PostPhoto[];
+  pendingPhotoCount?: number;
   poi: Pick<Poi, 'id' | 'name' | 'lat' | 'lng'> | null;
   averageRating: number | null;
   ratingCount: number;
@@ -139,7 +140,11 @@ export function PostDetailModal({
                 </View>
               ) : (
                 <View style={styles.noPhoto}>
-                  <Text style={styles.noPhotoText}>Şəkil yoxdur</Text>
+                  <Text style={styles.noPhotoText}>
+                    {isOwner && (post.pendingPhotoCount ?? 0) > 0
+                      ? 'Şəkillər yoxlamadan dərhal sonra əlavə olunacaq'
+                      : 'Şəkil yoxdur'}
+                  </Text>
                 </View>
               )}
 
@@ -323,8 +328,12 @@ function createStyles(colors: ThemeColors) {
       justifyContent: 'center',
     },
     noPhotoText: {
-      color: colors.textMuted,
+      color: colors.textSecondary,
       fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '600',
+      textAlign: 'center',
+      paddingHorizontal: 16,
     },
     caption: {
       fontSize: 15,

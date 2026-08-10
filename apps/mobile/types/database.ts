@@ -303,6 +303,7 @@ export type PostPhoto = {
   order_index: number | null;
   /** @deprecated use order_index */
   sort_order?: number | null;
+  status?: PhotoModerationStatus | null;
   created_at: string;
 };
 

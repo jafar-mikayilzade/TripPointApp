@@ -55,6 +55,6 @@ def apply_insecure_ssl() -> None:
         pass
 
 
-# Auto-apply when env is set (default on for local Windows sync scripts).
-if os.getenv("TRIPPOINT_SSL_INSECURE", "1").strip() not in {"0", "false", "False"}:
+# Auto-apply only when explicitly enabled (never default-on).
+if os.getenv("TRIPPOINT_SSL_INSECURE", "0").strip() in {"1", "true", "True"}:
     apply_insecure_ssl()

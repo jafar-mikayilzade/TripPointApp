@@ -8,6 +8,7 @@ import { ProfileCornerButton } from '../../components/ProfileCornerButton';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { REGIONS } from '../../constants/regions';
 import { getErrorMessage } from '../../lib/errors';
+import { LISTING_PUBLIC_COLUMNS } from '../../lib/listingColumns';
 import { listMySubscriptionTargetIds } from '../../lib/subscriptions';
 import { useResponsiveLayout } from '../../lib/layout';
 import { supabase } from '../../lib/supabase';
@@ -112,7 +113,7 @@ export default function IcmaScreen() {
 
     let query = supabase
       .from('listings')
-      .select('*')
+      .select(LISTING_PUBLIC_COLUMNS)
       .eq('status', 'active')
       .order('created_at', { ascending: false });
 

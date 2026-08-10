@@ -42,25 +42,34 @@ export async function setPoiPhotoStatus(
     const base = getApiBaseUrl();
     const headers = await getAuthHeaders();
     if (base && headers) {
-      const res = await fetch(`${base}/api/pois/photos/${photoId}/status`, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) {
-        return { error: null };
+      try {
+        const res = await fetch(`${base}/api/pois/photos/${photoId}/status`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ status }),
+        });
+        if (res.ok) {
+          return { error: null };
+        }
+      } catch {
+        // fall through to direct update
       }
-      const json = (await res.json().catch(() => null)) as {
-        detail?: { message?: string } | string;
-      } | null;
-      const detail = json?.detail;
-      const message =
-        typeof detail === 'string'
-          ? detail
-          : detail?.message || `Status yenilənmədi (HTTP ${res.status})`;
-      // Fall through to direct update if API rejects for non-deploy reasons
-      if (res.status !== 404) {
-        return { error: message };
+    }
+
+    // Load URLs before status change so we can purge gallery fallbacks on reject
+    let purgeUrls: string[] = [];
+    let poiId: string | null = null;
+    if (status === 'rejected') {
+      const { data: row } = await supabase
+        .from('poi_photos')
+        .select('poi_id, photo_url, thumb_url, medium_url')
+        .eq('id', photoId)
+        .maybeSingle();
+      if (row) {
+        poiId = row.poi_id;
+        purgeUrls = [row.photo_url, row.thumb_url, row.medium_url]
+          .map((u) => (typeof u === 'string' ? u.trim() : ''))
+          .filter(Boolean);
       }
     }
 
@@ -68,9 +77,76 @@ export async function setPoiPhotoStatus(
     if (error) {
       return { error: getErrorMessage(error) };
     }
+
+    if (status === 'rejected' && poiId && purgeUrls.length > 0) {
+      await purgePoiGalleryUrls(poiId, purgeUrls);
+    }
+
     return { error: null };
   } catch (err) {
     return { error: getErrorMessage(err) };
+  }
+}
+
+export async function setPostPhotoStatus(
+  photoId: string,
+  status: 'pending' | 'approved' | 'rejected'
+): Promise<Result> {
+  try {
+    const base = getApiBaseUrl();
+    const headers = await getAuthHeaders();
+    if (base && headers) {
+      try {
+        const res = await fetch(`${base}/api/posts/photos/${photoId}/status`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ status }),
+        });
+        if (res.ok) {
+          return { error: null };
+        }
+      } catch {
+        // fall through
+      }
+    }
+
+    const { error } = await supabase.from('post_photos').update({ status }).eq('id', photoId);
+    if (error) {
+      return { error: getErrorMessage(error) };
+    }
+    return { error: null };
+  } catch (err) {
+    return { error: getErrorMessage(err) };
+  }
+}
+
+async function purgePoiGalleryUrls(poiId: string, urls: string[]): Promise<void> {
+  const blocked = new Set(urls.map((u) => u.trim()).filter(Boolean));
+  if (blocked.size === 0) {
+    return;
+  }
+  const { data: poi } = await supabase
+    .from('pois')
+    .select('photo_urls, thumbnail_url')
+    .eq('id', poiId)
+    .maybeSingle();
+  if (!poi) {
+    return;
+  }
+  const patch: { photo_urls?: string[] | null; thumbnail_url?: string | null } = {};
+  const raw = Array.isArray(poi.photo_urls) ? poi.photo_urls : [];
+  const kept = raw
+    .map((u) => (typeof u === 'string' ? u.trim() : ''))
+    .filter((u) => u && !blocked.has(u));
+  if (kept.length !== raw.length) {
+    patch.photo_urls = kept;
+  }
+  const thumb = typeof poi.thumbnail_url === 'string' ? poi.thumbnail_url.trim() : '';
+  if (thumb && blocked.has(thumb)) {
+    patch.thumbnail_url = kept[0] ?? null;
+  }
+  if (Object.keys(patch).length > 0) {
+    await supabase.from('pois').update(patch).eq('id', poiId);
   }
 }
 
@@ -278,29 +354,31 @@ export async function fetchAdminQueueCounts(): Promise<AdminQueueCounts> {
   const base = getApiBaseUrl();
   const headers = await getAuthHeaders();
 
+  let photosCount: number | null = null;
+
   if (base && headers) {
     try {
-      const res = await fetch(`${base}/api/pois/photos/pending`, { headers });
-      if (res.ok) {
-        const json = (await res.json()) as { count?: number };
-        const [poisRes, reportsRes] = await Promise.all([
-          supabase
-            .from('pois')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'pending'),
-          supabase
-            .from('listing_reports')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'open'),
-        ]);
-        return {
-          pois: poisRes.count ?? 0,
-          photos: json.count ?? 0,
-          reports: reportsRes.count ?? 0,
-        };
+      const [poiPhotosRes, postPhotosRes] = await Promise.all([
+        fetch(`${base}/api/pois/photos/pending`, { headers }),
+        fetch(`${base}/api/posts/photos/pending`, { headers }),
+      ]);
+      let total = 0;
+      let ok = false;
+      if (poiPhotosRes.ok) {
+        const json = (await poiPhotosRes.json()) as { count?: number };
+        total += json.count ?? 0;
+        ok = true;
+      }
+      if (postPhotosRes.ok) {
+        const json = (await postPhotosRes.json()) as { count?: number };
+        total += json.count ?? 0;
+        ok = true;
+      }
+      if (ok) {
+        photosCount = total;
       }
     } catch {
-      // fall through to supabase-only counts
+      // fall through
     }
   }
 
@@ -309,19 +387,32 @@ export async function fetchAdminQueueCounts(): Promise<AdminQueueCounts> {
       .from('pois')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'pending'),
-    supabase
-      .from('poi_photos')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'pending'),
+    photosCount == null
+      ? supabase
+          .from('poi_photos')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'pending')
+      : Promise.resolve({ count: photosCount, error: null }),
     supabase
       .from('listing_reports')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'open'),
   ]);
 
+  let photos = photosCount ?? photosRes.count ?? 0;
+  if (photosCount == null) {
+    const postCount = await supabase
+      .from('post_photos')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending');
+    if (!postCount.error) {
+      photos += postCount.count ?? 0;
+    }
+  }
+
   return {
     pois: poisRes.count ?? 0,
-    photos: photosRes.count ?? 0,
+    photos,
     reports: reportsRes.count ?? 0,
   };
 }
