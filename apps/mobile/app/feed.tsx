@@ -22,6 +22,7 @@ import MapView, { Marker } from '../components/AppMap';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PoiDetailModal } from '../components/PoiDetailModal';
+import { PostDetailModal } from '../components/PostDetailModal';
 import { getApiBaseUrl } from '../lib/apiBase';
 import { getAuthHeaders } from '../lib/authHeaders';
 import { getErrorMessage } from '../lib/errors';
@@ -87,6 +88,7 @@ export default function FeedScreen() {
 
   const [detailPoi, setDetailPoi] = useState<Poi | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
+  const [selectedPost, setSelectedPost] = useState<FeedPost | null>(null);
   const [mapPost, setMapPost] = useState<FeedPost | null>(null);
   const [ratingBusyId, setRatingBusyId] = useState<string | null>(null);
   const [authUserId, setAuthUserId] = useState<string | null>(null);
@@ -344,7 +346,7 @@ export default function FeedScreen() {
       }
 
       if (imageUris.length > 0) {
-        const photoRows = [];
+        const photoRows: { photo_url: string; order_index: number }[] = [];
         for (let i = 0; i < imageUris.length; i += 1) {
           const extension = imageUris[i].split('.').pop()?.split('?')[0]?.toLowerCase() ?? 'jpg';
           const safeExt =
@@ -354,15 +356,42 @@ export default function FeedScreen() {
           const path = `${user.id}/${post.id}-${i}.${safeExt}`;
           const url = await uploadImage(imageUris[i], STORAGE_BUCKET, path);
           photoRows.push({
-            post_id: post.id,
             photo_url: url,
             order_index: i + 1,
           });
         }
 
-        const { error: photosError } = await supabase.from('post_photos').insert(photoRows);
-        if (photosError) {
-          setShareError(`Post yaradıldı, amma şəkillər yazılmadı: ${getErrorMessage(photosError)}`);
+        const base = getApiBaseUrl();
+        const headers = await getAuthHeaders();
+        let photosErrorMessage: string | null = null;
+
+        if (base && headers) {
+          const res = await fetch(`${base}/api/posts/photos`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ post_id: post.id, photos: photoRows }),
+          });
+          const json = (await res.json().catch(() => null)) as {
+            detail?: { message?: string } | string;
+          } | null;
+          if (!res.ok) {
+            const detail = json?.detail;
+            photosErrorMessage =
+              typeof detail === 'string'
+                ? detail
+                : detail?.message || `Şəkillər yazılmadı (HTTP ${res.status})`;
+          }
+        } else {
+          const { error: photosError } = await supabase.from('post_photos').insert(
+            photoRows.map((row) => ({ ...row, post_id: post.id }))
+          );
+          if (photosError) {
+            photosErrorMessage = getErrorMessage(photosError);
+          }
+        }
+
+        if (photosErrorMessage) {
+          setShareError(`Post yaradıldı, amma şəkillər yazılmadı: ${photosErrorMessage}`);
           setShareVisible(false);
           await fetchPosts(true);
           return;
@@ -525,6 +554,7 @@ export default function FeedScreen() {
       return;
     }
 
+    setSelectedPost((current) => (current?.id === postId ? null : current));
     await fetchPosts(true);
   }
 
@@ -535,7 +565,7 @@ export default function FeedScreen() {
     const isOwner = !!authUserId && item.user_id === authUserId;
 
     return (
-      <View style={styles.card}>
+      <Pressable style={styles.card} onPress={() => setSelectedPost(item)}>
         <View style={styles.authorRow}>
           {item.author?.avatar_url ? (
             <Image source={{ uri: item.author.avatar_url }} style={styles.avatar} />
@@ -586,7 +616,9 @@ export default function FeedScreen() {
           <Text style={styles.caption} numberOfLines={2} ellipsizeMode="tail">
             {item.caption.trim()}
           </Text>
-        ) : null}
+        ) : (
+          <Text style={styles.captionMuted}>Ətraflı baxmaq üçün toxun</Text>
+        )}
 
         {item.poi ? (
           <Pressable onPress={() => openPoiDetail(item.poi!.id)}>
@@ -628,7 +660,7 @@ export default function FeedScreen() {
             })}
           </View>
         </View>
-      </View>
+      </Pressable>
     );
   }
 
@@ -841,6 +873,25 @@ export default function FeedScreen() {
           setDetailPoi(null);
         }}
       />
+
+      <PostDetailModal
+        post={
+          selectedPost
+            ? posts.find((p) => p.id === selectedPost.id) ?? selectedPost
+            : null
+        }
+        visible={!!selectedPost}
+        onClose={() => setSelectedPost(null)}
+        onOpenPoi={(poiId) => {
+          setSelectedPost(null);
+          void openPoiDetail(poiId);
+        }}
+        onRate={(postId, score) => void submitPostRating(postId, score)}
+        ratingBusy={!!selectedPost && ratingBusyId === selectedPost.id}
+        isOwner={!!selectedPost && !!authUserId && selectedPost.user_id === authUserId}
+        onDelete={(postId) => void handleDeletePost(postId)}
+        deleting={!!selectedPost && deletingPostId === selectedPost.id}
+      />
     </View>
     </KeyboardAvoidingView>
   );
@@ -964,6 +1015,11 @@ function createStyles(colors: ThemeColors) {
     fontSize: 14,
     color: colors.text,
     lineHeight: 20,
+    marginBottom: 8,
+  },
+  captionMuted: {
+    fontSize: 13,
+    color: colors.textMuted,
     marginBottom: 8,
   },
   poiLink: {

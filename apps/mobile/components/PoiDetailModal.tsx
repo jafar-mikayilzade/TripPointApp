@@ -247,13 +247,36 @@ export function PoiDetailModal({
           detail?: { message?: string };
         } | null;
         if (!res.ok) {
-          setErrorMessage(
-            json?.detail?.message || `Şəkillər yazılmadı (HTTP ${res.status})`
+          const { data: insertedPhotos, error } = await supabase
+            .from('poi_photos')
+            .insert(
+              rows.map((row) => ({
+                ...row,
+                poi_id: poi.id,
+                status: 'pending' as const,
+                uploaded_by: currentUserId,
+              }))
+            )
+            .select('id');
+          if (error) {
+            setErrorMessage(
+              json?.detail?.message ||
+                getErrorMessage(error) ||
+                `Şəkillər yazılmadı (HTTP ${res.status})`
+            );
+            return;
+          }
+          insertedIds = (insertedPhotos ?? []).map((r) => r.id);
+          const notify = await notifyAdmins(
+            'photo_pending',
+            `"${poi.name}" üçün ${rows.length} şəkil`,
+            insertedIds[0]
           );
-          return;
+          notifySent = notify.sent ? 1 : 0;
+        } else {
+          insertedIds = json?.ids ?? [];
+          notifySent = json?.notify_sent ?? 0;
         }
-        insertedIds = json?.ids ?? [];
-        notifySent = json?.notify_sent ?? 0;
       } else {
         // Fallback: direct Supabase insert (needs INSERT RLS policy)
         const { data: insertedPhotos, error } = await supabase

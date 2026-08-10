@@ -12,6 +12,8 @@ import {
   View,
 } from 'react-native';
 
+import { getApiBaseUrl } from '../lib/apiBase';
+import { getAuthHeaders } from '../lib/authHeaders';
 import { getErrorMessage } from '../lib/errors';
 import {
   setListingReportStatus,
@@ -63,6 +65,27 @@ export function AdminModerationModal({
     setLoading(true);
     setErrorMessage(null);
 
+    const base = getApiBaseUrl();
+    const headers = await getAuthHeaders();
+
+    let photoRows: (PoiPhoto & { poi_name?: string })[] = [];
+    let photosLoadedViaApi = false;
+
+    if (base && headers) {
+      try {
+        const res = await fetch(`${base}/api/pois/photos/pending`, { headers });
+        if (res.ok) {
+          const json = (await res.json()) as {
+            photos?: (PoiPhoto & { poi_name?: string })[];
+          };
+          photoRows = json.photos ?? [];
+          photosLoadedViaApi = true;
+        }
+      } catch {
+        // fall back to supabase
+      }
+    }
+
     const [poisRes, photosRes, reportsRes] = await Promise.all([
       supabase
         .from('pois')
@@ -70,12 +93,16 @@ export function AdminModerationModal({
         .eq('status', 'pending')
         .order('created_at', { ascending: false })
         .limit(50),
-      supabase
-        .from('poi_photos')
-        .select('id, poi_id, photo_url, thumb_url, medium_url, order_index, status, uploaded_by, created_at')
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false })
-        .limit(50),
+      photosLoadedViaApi
+        ? Promise.resolve({ data: [] as PoiPhoto[], error: null })
+        : supabase
+            .from('poi_photos')
+            .select(
+              'id, poi_id, photo_url, thumb_url, medium_url, order_index, status, uploaded_by, created_at'
+            )
+            .eq('status', 'pending')
+            .order('created_at', { ascending: false })
+            .limit(50),
       supabase
         .from('listing_reports')
         .select('id, listing_id, reporter_id, reason, details, status, created_at')
@@ -92,12 +119,17 @@ export function AdminModerationModal({
       return;
     }
 
-    const photoRows = (photosRes.data ?? []) as PoiPhoto[];
-    const poiIds = [...new Set(photoRows.map((p) => p.poi_id))];
-    let poiNameById = new Map<string, string>();
-    if (poiIds.length > 0) {
-      const { data: poiNames } = await supabase.from('pois').select('id, name').in('id', poiIds);
-      poiNameById = new Map((poiNames ?? []).map((p) => [p.id, p.name]));
+    if (!photosLoadedViaApi) {
+      photoRows = (photosRes.data ?? []) as PoiPhoto[];
+      const poiIds = [...new Set(photoRows.map((p) => p.poi_id))];
+      if (poiIds.length > 0) {
+        const { data: poiNames } = await supabase.from('pois').select('id, name').in('id', poiIds);
+        const poiNameById = new Map((poiNames ?? []).map((p) => [p.id, p.name]));
+        photoRows = photoRows.map((photo) => ({
+          ...photo,
+          poi_name: poiNameById.get(photo.poi_id),
+        }));
+      }
     }
 
     const reportRows = (reportsRes.data ?? []) as ListingReport[];
@@ -112,12 +144,7 @@ export function AdminModerationModal({
     }
 
     setPendingPois((poisRes.data ?? []) as Poi[]);
-    setPendingPhotos(
-      photoRows.map((photo) => ({
-        ...photo,
-        poi_name: poiNameById.get(photo.poi_id),
-      }))
-    );
+    setPendingPhotos(photoRows);
     setReports(
       reportRows.map((report) => ({
         ...report,

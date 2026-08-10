@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from app.auth import verify_user
+from app.auth import verify_admin, verify_user
 from app.db import supabase
 from app.services.poi_upsert_google import upsert_google_place
 from app.services.telegram_notify import admin_action_keyboard, notify_all_admins
@@ -137,3 +137,87 @@ def api_create_pending_photos(
         "ids": [str(r.get("id")) for r in inserted if r.get("id")],
         "notify_sent": sent,
     }
+
+
+@router.get("/photos/pending")
+def api_list_pending_photos(
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    """Admin-only: list pending POI photos (service role bypasses SELECT RLS)."""
+    if not verify_admin(authorization):
+        raise HTTPException(status_code=403, detail={"error": "forbidden"})
+
+    try:
+        result = (
+            supabase.table("poi_photos")
+            .select(
+                "id, poi_id, photo_url, thumb_url, medium_url, order_index, "
+                "status, uploaded_by, created_at"
+            )
+            .eq("status", "pending")
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+    except Exception:
+        logger.exception("list pending photos failed")
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "list_failed", "message": "Gözləyən şəkillər oxunmadı."},
+        ) from None
+
+    photos = list(result.data or [])
+    poi_ids = sorted({str(p.get("poi_id")) for p in photos if p.get("poi_id")})
+    name_by_id: dict[str, str] = {}
+    if poi_ids:
+        try:
+            pois = (
+                supabase.table("pois")
+                .select("id, name")
+                .in_("id", poi_ids)
+                .execute()
+            )
+            name_by_id = {
+                str(row["id"]): str(row.get("name") or "")
+                for row in (pois.data or [])
+                if row.get("id")
+            }
+        except Exception:
+            logger.exception("pending photo poi names failed")
+
+    for photo in photos:
+        poi_id = str(photo.get("poi_id") or "")
+        photo["poi_name"] = name_by_id.get(poi_id) or None
+
+    return {"success": True, "photos": photos, "count": len(photos)}
+
+
+class PhotoStatusBody(BaseModel):
+    status: Literal["approved", "rejected", "pending"]
+
+
+@router.patch("/photos/{photo_id}/status")
+def api_set_photo_status(
+    photo_id: str,
+    body: PhotoStatusBody,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    """Admin-only: approve/reject a pending POI photo."""
+    if not verify_admin(authorization):
+        raise HTTPException(status_code=403, detail={"error": "forbidden"})
+
+    try:
+        result = (
+            supabase.table("poi_photos")
+            .update({"status": body.status})
+            .eq("id", photo_id)
+            .execute()
+        )
+    except Exception:
+        logger.exception("set photo status failed")
+        raise HTTPException(
+            status_code=502,
+            detail={"error": "update_failed", "message": "Şəkil statusu yenilənmədi."},
+        ) from None
+
+    return {"success": True, "updated": len(result.data or [])}

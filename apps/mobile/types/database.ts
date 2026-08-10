@@ -508,7 +508,8 @@ export type Database = {
       };
       post_photos: {
         Row: PostPhoto;
-        Insert: Pick<PostPhoto, 'post_id' | 'url'> & Partial<Omit<PostPhoto, 'post_id' | 'url'>>;
+        Insert: Pick<PostPhoto, 'post_id' | 'photo_url'> &
+          Partial<Omit<PostPhoto, 'post_id' | 'photo_url'>>;
         Update: Partial<PostPhoto>;
         Relationships: [];
       };

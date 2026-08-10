@@ -90,3 +90,38 @@ def verify_user(authorization: str | None) -> str | None:
 
     _cache_set(token, user_id)
     return user_id
+
+
+def verify_admin(authorization: str | None) -> str | None:
+    """Return user id when the caller is authenticated and profiles.role = admin."""
+    user_id = verify_user(authorization)
+    if not user_id or not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return None
+
+    try:
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            params={"id": f"eq.{user_id}", "select": "role", "limit": "1"},
+            headers={
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "apikey": SUPABASE_SERVICE_KEY,
+            },
+            timeout=_VERIFY_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        logger.exception("Admin role lookup failed")
+        return None
+
+    if not res.ok:
+        return None
+
+    try:
+        rows = res.json() or []
+    except Exception:
+        return None
+
+    if not rows:
+        return None
+    if str(rows[0].get("role") or "").strip().lower() != "admin":
+        return None
+    return user_id

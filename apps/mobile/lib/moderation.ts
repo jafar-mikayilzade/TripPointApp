@@ -1,4 +1,6 @@
 import type { Listing, PoiStatus } from '../types/database';
+import { getApiBaseUrl } from './apiBase';
+import { getAuthHeaders } from './authHeaders';
 import { getErrorMessage } from './errors';
 import { fetchIsAdmin } from './adminMap';
 import { notifyTourSubscribersCancelled } from './subscriptions';
@@ -37,6 +39,31 @@ export async function setPoiPhotoStatus(
   status: 'pending' | 'approved' | 'rejected'
 ): Promise<Result> {
   try {
+    const base = getApiBaseUrl();
+    const headers = await getAuthHeaders();
+    if (base && headers) {
+      const res = await fetch(`${base}/api/pois/photos/${photoId}/status`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) {
+        return { error: null };
+      }
+      const json = (await res.json().catch(() => null)) as {
+        detail?: { message?: string } | string;
+      } | null;
+      const detail = json?.detail;
+      const message =
+        typeof detail === 'string'
+          ? detail
+          : detail?.message || `Status yenilənmədi (HTTP ${res.status})`;
+      // Fall through to direct update if API rejects for non-deploy reasons
+      if (res.status !== 404) {
+        return { error: message };
+      }
+    }
+
     const { error } = await supabase.from('poi_photos').update({ status }).eq('id', photoId);
     if (error) {
       return { error: getErrorMessage(error) };
@@ -248,6 +275,35 @@ export type AdminQueueCounts = {
 
 /** Admin profil / TG: gözləyən növbə sayları */
 export async function fetchAdminQueueCounts(): Promise<AdminQueueCounts> {
+  const base = getApiBaseUrl();
+  const headers = await getAuthHeaders();
+
+  if (base && headers) {
+    try {
+      const res = await fetch(`${base}/api/pois/photos/pending`, { headers });
+      if (res.ok) {
+        const json = (await res.json()) as { count?: number };
+        const [poisRes, reportsRes] = await Promise.all([
+          supabase
+            .from('pois')
+            .select('id', { count: 'exact', head: true })
+            .eq('status', 'pending'),
+          supabase
+            .from('listing_reports')
+            .select('id', { count: 'exact', head: true })
+            .eq('status', 'open'),
+        ]);
+        return {
+          pois: poisRes.count ?? 0,
+          photos: json.count ?? 0,
+          reports: reportsRes.count ?? 0,
+        };
+      }
+    } catch {
+      // fall through to supabase-only counts
+    }
+  }
+
   const [poisRes, photosRes, reportsRes] = await Promise.all([
     supabase
       .from('pois')
