@@ -71,7 +71,15 @@ def plan_route_endpoint(
     db_region = REGION_DB_ID.get(region_key, region_key)
     region_label = REGION_LABELS.get(region_key) or REGION_LABELS.get(db_region) or db_region
     interests = [str(i) for i in (body.interests or [])]
-    candidate_source = "client"
+    days_n = int(body.days)
+    # Aim for a full sightseeing pool (~5–6 attractions/day), not a thin client slice
+    min_attractions = max(8, days_n * 4)
+    per_bucket = max(48, days_n * 12)
+    candidate_source = "db"
+
+    restaurants: list[dict[str, Any]] = []
+    accommodations: list[dict[str, Any]] = []
+    attractions: list[dict[str, Any]] = []
 
     if body.pois and (
         body.pois.restaurants or body.pois.accommodations or body.pois.attractions
@@ -81,18 +89,40 @@ def plan_route_endpoint(
         restaurants = list(body.pois.restaurants)
         accommodations = list(body.pois.accommodations)
         attractions = classify_attraction_rows(list(body.pois.attractions))
-    else:
+        candidate_source = "client"
+
+    # Client buckets can starve the packer (1–2 attractions → 1-stop plan).
+    # Always top up from DB when the sightseeing pool is thin.
+    if len(attractions) < min_attractions:
         loaded = load_live_route_candidates(
             region_key,
-            per_bucket=16,
+            per_bucket=per_bucket,
             interests=interests or None,
             source="db",
         )
         buckets = loaded["buckets"]
-        restaurants = buckets["restaurants"]
-        accommodations = buckets["accommodations"]
-        attractions = buckets["attractions"]
-        candidate_source = str(loaded.get("source") or "db")
+        db_restaurants = list(buckets.get("restaurants") or [])
+        db_accommodations = list(buckets.get("accommodations") or [])
+        db_attractions = list(buckets.get("attractions") or [])
+
+        def _merge(primary: list[dict[str, Any]], extra: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            seen: set[str] = set()
+            out: list[dict[str, Any]] = []
+            for row in primary + extra:
+                pid = str(row.get("id") or row.get("place_id") or "")
+                if pid and pid in seen:
+                    continue
+                if pid:
+                    seen.add(pid)
+                out.append(row)
+            return out
+
+        attractions = _merge(attractions, db_attractions)
+        restaurants = _merge(restaurants, db_restaurants)
+        accommodations = _merge(accommodations, db_accommodations)
+        candidate_source = (
+            "client+db" if candidate_source == "client" else str(loaded.get("source") or "db")
+        )
 
     if not (restaurants or accommodations or attractions):
         raise HTTPException(
@@ -139,6 +169,7 @@ def plan_route_endpoint(
     lodging = plan.pop("lodging", None) or skeleton.get("lodging")
     plan.pop("meta", None)
 
+    stop_count = sum(len(d.get("stops") or []) for d in (plan.get("days") or []))
     return JSONResponse(
         content={
             "success": True,
@@ -152,5 +183,11 @@ def plan_route_endpoint(
             "lodging": lodging,
             "source": "fastapi_geo",
             "candidatesSource": candidate_source,
+            "candidatesMeta": {
+                "restaurants": len(restaurants),
+                "accommodations": len(accommodations),
+                "attractions": len(attractions),
+                "stopCount": stop_count,
+            },
         }
     )

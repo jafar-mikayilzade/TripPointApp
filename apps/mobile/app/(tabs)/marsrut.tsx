@@ -800,7 +800,7 @@ export default function MarsrutScreen() {
       let accommodations: any[] = [];
       let attractions: any[] = [];
 
-      const ranked = await fetchRouteCandidates(regionId, 48, {
+      const ranked = await fetchRouteCandidates(regionId, Math.max(60, days * 12), {
         interests,
       });
       if (
@@ -820,7 +820,11 @@ export default function MarsrutScreen() {
           ranked.attractions.filter((p) => keep.has(p.id)),
           interests
         );
-      } else {
+      }
+
+      // If API buckets are thin on attractions, top up directly from Supabase DB
+      const minAttractions = Math.max(8, days * 4);
+      if (attractions.length < minAttractions) {
         const { data: poisRaw, error: poisError } = await supabase
           .from('pois')
           .select(
@@ -831,59 +835,77 @@ export default function MarsrutScreen() {
           .order('rating', { ascending: false, nullsFirst: false })
           .limit(400);
 
-        if (poisError) {
+        if (poisError && attractions.length === 0 && restaurants.length === 0) {
           throw poisError;
         }
 
-        if (!poisRaw || poisRaw.length === 0) {
+        if (poisRaw && poisRaw.length > 0) {
+          const pois = applyWeatherPoiFilter(poisRaw, weather);
+          const byRating = (a: any, b: any) => {
+            const ra = typeof a.rating === 'number' ? a.rating : -1;
+            const rb = typeof b.rating === 'number' ? b.rating : -1;
+            if (rb !== ra) {
+              return rb - ra;
+            }
+            const ca = typeof a.rating_count === 'number' ? a.rating_count : 0;
+            const cb = typeof b.rating_count === 'number' ? b.rating_count : 0;
+            return cb - ca;
+          };
+          const poiCats = (p: any): string[] => {
+            if (Array.isArray(p.categories) && p.categories.length > 0) {
+              return p.categories.map(String);
+            }
+            return p.category ? [String(p.category)] : [];
+          };
+          const hasAny = (p: any, allowed: string[]) =>
+            poiCats(p).some((c) => allowed.includes(c));
+
+          const mergeById = (primary: any[], extra: any[]) => {
+            const seen = new Set(primary.map((p) => String(p.id)));
+            const out = [...primary];
+            for (const row of extra) {
+              const id = String(row.id || '');
+              if (!id || seen.has(id)) continue;
+              seen.add(id);
+              out.push(row);
+            }
+            return out;
+          };
+
+          const dbRestaurants = pois
+            .filter((p) => hasAny(p, ['restaurant', 'home_restaurant', 'cafe']))
+            .sort(byRating)
+            .slice(0, 60);
+          const dbAccommodations = pois
+            .filter((p) => hasAny(p, ['hotel', 'hostel', 'guesthouse', 'camping']))
+            .sort(byRating)
+            .slice(0, 60);
+          const dbAttractions = preferAttractionsForInterests(
+            pois
+              .filter((p) =>
+                hasAny(p, [
+                  'nature',
+                  'waterfall',
+                  'mountain',
+                  'lake',
+                  'historical',
+                  'monument',
+                  'other',
+                ])
+              )
+              .sort(byRating),
+            interests
+          ).slice(0, 120);
+
+          restaurants = mergeById(restaurants, dbRestaurants);
+          accommodations = mergeById(accommodations, dbAccommodations);
+          attractions = mergeById(attractions, dbAttractions);
+        } else if (
+          restaurants.length + accommodations.length + attractions.length === 0
+        ) {
           setErrorMessage('Bu bölgədə hələ yer əlavə edilməyib. Başqa rayon seçin.');
           return;
         }
-
-        const pois = applyWeatherPoiFilter(poisRaw, weather);
-        const byRating = (a: any, b: any) => {
-          const ra = typeof a.rating === 'number' ? a.rating : -1;
-          const rb = typeof b.rating === 'number' ? b.rating : -1;
-          if (rb !== ra) {
-            return rb - ra;
-          }
-          const ca = typeof a.rating_count === 'number' ? a.rating_count : 0;
-          const cb = typeof b.rating_count === 'number' ? b.rating_count : 0;
-          return cb - ca;
-        };
-        const poiCats = (p: any): string[] => {
-          if (Array.isArray(p.categories) && p.categories.length > 0) {
-            return p.categories.map(String);
-          }
-          return p.category ? [String(p.category)] : [];
-        };
-        const hasAny = (p: any, allowed: string[]) =>
-          poiCats(p).some((c) => allowed.includes(c));
-
-        restaurants = pois
-          .filter((p) => hasAny(p, ['restaurant', 'home_restaurant', 'cafe']))
-          .sort(byRating)
-          .slice(0, 40);
-        accommodations = pois
-          .filter((p) => hasAny(p, ['hotel', 'hostel', 'guesthouse', 'camping']))
-          .sort(byRating)
-          .slice(0, 40);
-        attractions = preferAttractionsForInterests(
-          pois
-            .filter((p) =>
-              hasAny(p, [
-                'nature',
-                'waterfall',
-                'mountain',
-                'lake',
-                'historical',
-                'monument',
-                'other',
-              ])
-            )
-            .sort(byRating),
-          interests
-        ).slice(0, 60);
       }
 
       if (restaurants.length + accommodations.length + attractions.length === 0) {

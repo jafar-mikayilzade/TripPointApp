@@ -44,9 +44,13 @@
   },
   "scripts": {
     "start": "expo start",
+    "start:dev": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web"
+  },
+  "engines": {
+    "node": ">=20.19.4"
   },
   "private": true
 }

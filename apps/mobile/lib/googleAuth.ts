@@ -78,9 +78,12 @@ function formatGoogleError(err: unknown): string {
     /DEVELOPER_ERROR/i.test(message)
   ) {
     return (
-      'Google DEVELOPER_ERROR (kod 10): Play Console → App signing → ' +
-      '"App signing key certificate" SHA-1-i Google Cloud Android OAuth client-ə əlavə edin ' +
-      '(package: com.jafar.TripPoint). Web Client ID də Web application tipində olmalıdır.'
+      'Google DEVELOPER_ERROR (kod 10): Google Cloud-da Android OAuth client ' +
+      'paket adı və SHA-1 uyğun gəlmir və ya hələ yayılmayıb. ' +
+      'Credentials-də eyni project-də Android client olsun: ' +
+      'package com.jafar.TripPoint + EAS SHA-1 ' +
+      'D6:C6:10:BA:F0:1D:20:4C:66:9E:A4:33:86:3C:76:20:C1:3F:88:A1. ' +
+      'Save-dən sonra 10–60 dəq gözləyin, app data silib yenidən yoxlayın.'
     );
   }
 
@@ -117,12 +120,19 @@ export function configureGoogleSignIn() {
   }
 
   try {
+    // Supabase needs idToken only — offlineAccess/serverAuthCode not required
+    // and can worsen DEVELOPER_ERROR with incomplete Cloud Console setup.
     mod.GoogleSignin.configure({
       webClientId,
       scopes: ['email', 'profile'],
-      offlineAccess: true,
-      forceCodeForRefreshToken: true,
+      offlineAccess: false,
     });
+    if (__DEV__) {
+      console.log(
+        '[googleAuth] configured webClientId=...' +
+          webClientId.slice(Math.max(0, webClientId.length - 32))
+      );
+    }
   } catch (err) {
     console.warn('[googleAuth] configure failed', err);
     googleModule = null;
@@ -181,7 +191,21 @@ export async function signInWithGoogle(): Promise<{
     }
 
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-    await clearGoogleSession();
+
+    // Only clear local Google session — revokeAccess before sign-in can break the flow
+    try {
+      await GoogleSignin.signOut();
+    } catch {
+      // ignore
+    }
+
+    // Ensure configure is applied with current env before presenting UI
+    const webClientIdFresh = getWebClientId();
+    GoogleSignin.configure({
+      webClientId: webClientIdFresh,
+      scopes: ['email', 'profile'],
+      offlineAccess: false,
+    });
 
     const response = await GoogleSignin.signIn();
 

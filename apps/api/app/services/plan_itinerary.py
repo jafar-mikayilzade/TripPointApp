@@ -366,14 +366,16 @@ def pick_day_pieces(
             fallback_lat=origin_lat,
             fallback_lng=origin_lng,
         )
+        # Sparse regions: open the bubble so DB attractions actually get used
+        sparse = len(pool) >= 6 and len(attractions) <= 1
         extra = grow_compact_tour(
             pool,
             origin_lat=seed_lat,
             origin_lng=seed_lng,
             used=fill_used,
             limit=limit - len(attractions),
-            max_diameter_km=max(diameter, 22.0),
-            max_add_from_path_km=max(add_km, 10.0),
+            max_diameter_km=max(diameter, 35.0 if sparse else 22.0),
+            max_add_from_path_km=max(add_km, 18.0 if sparse else 10.0),
             prefer_categories=interest_cats or None,
             rng=rng,
         )
@@ -388,12 +390,34 @@ def pick_day_pieces(
                 origin_lng=seed_lng,
                 used=fill_used,
                 limit=limit - len(attractions),
-                max_diameter_km=28.0,
-                max_add_from_path_km=14.0,
+                max_diameter_km=45.0,
+                max_add_from_path_km=25.0,
                 prefer_categories=None,
                 rng=rng,
             )
             attractions = attractions + extra2
+        # Last resort: take nearest unused pool members by distance (ignore diameter)
+        if len(attractions) < min(3, limit):
+            already = {str(p.get("id") or "") for p in attractions}
+            ranked = sorted(
+                [
+                    p
+                    for p in pool
+                    if str(p.get("id") or "")
+                    and str(p.get("id") or "") not in already
+                    and str(p.get("id") or "") not in used
+                    and poi_coord(p) is not None
+                ],
+                key=lambda p: haversine_km(
+                    seed_lat,
+                    seed_lng,
+                    *(poi_coord(p) or (seed_lat, seed_lng)),
+                ),
+            )
+            for poi in ranked:
+                if len(attractions) >= limit:
+                    break
+                attractions.append(poi)
 
     for poi in attractions:
         pid = str(poi.get("id") or "")
@@ -577,8 +601,8 @@ def assemble_day_stops(
                 continue
 
         stops.append(_stop_payload(poi, time_min=time_min, daypart=daypart))
-        # Short transfer buffer so more stops fit a normal day window
-        t = time_min + dur + 12
+        # Short transfer so a normal day can fit 4–6 sightseeing stops
+        t = time_min + dur + 8
 
     if allow_hotel and hotel is not None:
         hotel_time = max(EVENING_HOTEL_AT, t if stops else start_anchor)
@@ -800,8 +824,8 @@ def build_skeleton(
                     origin_lng=seed_lng,
                     used=used,
                     limit=max(limit, ATTRACTIONS_PER_DAY),
-                    max_diameter_km=diameter,
-                    max_add_from_path_km=add_km,
+                    max_diameter_km=max(diameter, 35.0),
+                    max_add_from_path_km=max(add_km, 18.0),
                     prefer_categories=interest_cats or None,
                     rng=rng,
                 )

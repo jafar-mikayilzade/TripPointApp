@@ -175,36 +175,43 @@ def _load_buckets_from_db(
         "id, name, category, categories, description, lat, lng, region, rating, "
         "rating_count, place_id, address, price_from, price_currency, data_source"
     )
-    # Pull enough rows per family — PostgREST default max is usually 1000
-    fetch_n = max(120, per_bucket * 4)
+    # Pull the full regional pool (not only primary category) so multi-tagged
+    # attractions are not starved when category column is hotel/restaurant/other.
+    fetch_n = max(400, per_bucket * 8)
 
-    def _fetch(categories: list[str]) -> list[dict[str, Any]]:
-        result = (
+    def _fetch(categories: list[str] | None = None) -> list[dict[str, Any]]:
+        query = (
             supabase.table("pois")
             .select(select_cols)
             .eq("status", "approved")
             .ilike("region", db_region)
-            .in_("category", categories)
             .order("rating", desc=True)
             .limit(fetch_n)
-            .execute()
         )
+        if categories:
+            query = query.in_("category", categories)
+        result = query.execute()
         return list(result.data or [])
 
-    food_rows = _fetch(["restaurant", "home_restaurant"])
-    lodging_rows = _fetch(["hotel", "hostel", "guesthouse", "camping"])
-    attraction_rows = _fetch(
-        [
-            "nature",
-            "waterfall",
-            "mountain",
-            "lake",
-            "historical",
-            "monument",
-            "other",
-        ]
-    )
-    rows = classify_attraction_rows(food_rows + lodging_rows + attraction_rows)
+    # Prefer a wide regional read; fall back to category slices if empty
+    rows = _fetch(None)
+    if not rows:
+        food_rows = _fetch(["restaurant", "home_restaurant"])
+        lodging_rows = _fetch(["hotel", "hostel", "guesthouse", "camping"])
+        attraction_rows = _fetch(
+            [
+                "nature",
+                "waterfall",
+                "mountain",
+                "lake",
+                "historical",
+                "monument",
+                "other",
+            ]
+        )
+        rows = food_rows + lodging_rows + attraction_rows
+
+    rows = classify_attraction_rows(rows)
     merged = filter_tourism_rows(rows, hubs=hubs)
     return bucket_route_candidates(
         merged,
