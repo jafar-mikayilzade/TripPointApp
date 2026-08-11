@@ -78,12 +78,11 @@ function formatGoogleError(err: unknown): string {
     /DEVELOPER_ERROR/i.test(message)
   ) {
     return (
-      'Google DEVELOPER_ERROR (kod 10): Google Cloud-da Android OAuth client ' +
-      'paket adı və SHA-1 uyğun gəlmir və ya hələ yayılmayıb. ' +
-      'Credentials-də eyni project-də Android client olsun: ' +
-      'package com.jafar.TripPoint + EAS SHA-1 ' +
-      'D6:C6:10:BA:F0:1D:20:4C:66:9E:A4:33:86:3C:76:20:C1:3F:88:A1. ' +
-      'Save-dən sonra 10–60 dəq gözləyin, app data silib yenidən yoxlayın.'
+      'Google DEVELOPER_ERROR (kod 10): Google Cloud → Credentials → ' +
+      'Android OAuth client (package com.jafar.TripPoint) içində bu SHA-1-lər olmalıdır: ' +
+      '1) EAS/dev-client: D6:C6:10:BA:F0:1D:20:4C:66:9E:A4:33:86:3C:76:20:C1:3F:88:A1 ; ' +
+      '2) Bu PC lokal debug: 7A:0A:32:D3:DA:60:30:66:FC:0F:FD:68:13:8B:0D:7C:F6:B9:37:74. ' +
+      'Web client ID-ni Android client kimi istifadə etməyin. Save → 10–60 dəq → app data sil.'
     );
   }
 
