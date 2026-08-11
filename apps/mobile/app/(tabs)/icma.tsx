@@ -133,6 +133,7 @@ export default function IcmaScreen() {
     const { data, error } = listingsResult;
 
     if (error) {
+      console.warn('[icma] listings fetch failed', error);
       setErrorMessage(getErrorMessage(error));
       setListings([]);
       setLoading(false);
@@ -153,6 +154,7 @@ export default function IcmaScreen() {
       .in('id', creatorIds);
 
     if (profilesError) {
+      console.warn('[icma] profiles fetch failed', profilesError);
       setErrorMessage(getErrorMessage(profilesError));
       setListings([]);
       setLoading(false);

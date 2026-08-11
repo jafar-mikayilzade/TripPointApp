@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import random
 import re
 import time
@@ -14,6 +15,7 @@ import requests
 from app.config import ANTHROPIC_API_KEY
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID
 from app.services.attraction_classify import (
+    attraction_matches_interests,
     classify_attraction_rows,
     interest_attraction_cats,
 )
@@ -34,7 +36,6 @@ from app.services.geo_route import (
     trim_cluster_diameter,
 )
 from app.services.rank_pois import (
-    poi_categories,
     public_poi_fields,
     rating_sort_key,
 )
@@ -73,15 +74,15 @@ ATTRACTIONS_PER_DAY = 5
 # Full (middle) days pack denser; travel days still aim for a full walk day
 ATTRACTIONS_PER_FULL_DAY = 6
 ATTRACTIONS_PER_TRAVEL_DAY = 5
-MAX_DAY_DIAMETER_KM = 18.0
-MAX_ADD_FROM_PATH_KM = 9.0
 # Compact day bubbles — multi-day must not sprawl into another day's zone
-FULL_DAY_DIAMETER_KM = 18.0
-FULL_DAY_ADD_FROM_PATH_KM = 9.0
-TRAVEL_DAY_DIAMETER_KM = 18.0
-TRAVEL_DAY_ADD_FROM_PATH_KM = 9.0
-# Later days stay clear of earlier days' visited area
-DAY_FOOTPRINT_CLEARANCE_KM = 3.0
+FULL_DAY_DIAMETER_KM = 14.0
+FULL_DAY_ADD_FROM_PATH_KM = 7.0
+TRAVEL_DAY_DIAMETER_KM = 14.0
+TRAVEL_DAY_ADD_FROM_PATH_KM = 7.0
+MAX_DAY_DIAMETER_KM = 14.0
+MAX_ADD_FROM_PATH_KM = 7.0
+# Later days stay clear of earlier days' visited area (avoid mixing routes)
+DAY_FOOTPRINT_CLEARANCE_KM = 10.0
 # Food/hotel only if they barely bend the path
 MAX_FOOD_DETOUR_KM = 2.0
 MAX_FOOD_DETOUR_RELAXED_KM = 10.0
@@ -92,6 +93,28 @@ BREAKFAST_AT = 9 * 60  # 09:00
 LUNCH_AT = 13 * 60  # 13:00
 ATTRACTION_START = 10 * 60 + 30  # 10:30 if no breakfast gap
 EVENING_HOTEL_AT = 18 * 60  # 18:00
+
+
+def _format_nightly_price(poi: dict[str, Any]) -> str | None:
+    raw = poi.get("price_from")
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value) or value <= 0:
+        return None
+    currency = str(poi.get("price_currency") or "AZN").strip().upper() or "AZN"
+    rounded = str(int(round(value))) if value >= 1 else f"{value:.2f}"
+    return f"gecə/{rounded} {currency}"
+
+
+def _hotel_tip(hotel: dict[str, Any], *, shared_hotel: bool = False) -> str:
+    """Badge already says Gecələmə — tip only carries real nightly price."""
+    del shared_hotel
+    price = _format_nightly_price(hotel)
+    return f"({price})" if price else ""
 
 
 def apply_weather_filter(
@@ -153,10 +176,10 @@ def _prioritize_attractions_for_interests(
         return pool
 
     preferred = [
-        p for p in pool if poi_categories(p) & interest_cats
+        p for p in pool if attraction_matches_interests(p, interest_cats)
     ]
     rng.shuffle(preferred)
-    # Hard filter: only interest-matching attractions
+    # Hard filter: only interest-matching attractions (mountains gated)
     return preferred
 
 
@@ -169,13 +192,7 @@ def _stop_payload(
 ) -> dict[str, Any]:
     mins = _poi_duration(poi)
     pub = public_poi_fields(poi)
-    default_tip = ""
-    if daypart == "lunch":
-        default_tip = "Nahar etmək üçün dayanacaq"
-    elif daypart == "breakfast":
-        default_tip = "Səhər yeməyi"
-    elif daypart == "hotel":
-        default_tip = "Gecələmə"
+    # UI badge covers meal/lodging role — avoid duplicate fluff tips
     return {
         **pub,
         "poi_id": str(poi.get("id") or ""),
@@ -183,7 +200,7 @@ def _stop_payload(
         "duration": _duration_label(mins),
         "duration_minutes": mins,
         "daypart": daypart,
-        "tip": (tip or default_tip).strip(),
+        "tip": (tip or "").strip(),
     }
 
 
@@ -277,7 +294,7 @@ def _take_along_tour(
         matched = [
             p
             for p in available
-            if poi_categories(p) & set(prefer_categories)
+            if attraction_matches_interests(p, set(prefer_categories))
         ]
         # Hard interest filter — never pad with other categories
         return contiguous_slice(matched, limit)
@@ -390,7 +407,7 @@ def pick_day_pieces(
                     and poi_coord(p) is not None
                     and (
                         not interest_cats
-                        or bool(poi_categories(p) & interest_cats)
+                        or attraction_matches_interests(p, interest_cats)
                     )
                 ],
                 key=lambda p: haversine_km(
@@ -458,11 +475,11 @@ def assemble_day_stops(
     shared_hotel: bool = False,
 ) -> list[dict[str, Any]]:
     """
-    Domain rule: walk order = map order.
+    Domain rule: attractions stay geo-ordered; meals keep fixed clock slots.
 
-    1) Compact attractions geo-ordered
-    2) Midday lunch stop (always try hard)
-    3) Times fit [window_start, window_end] — trim stops that don't fit
+    1) Compact attractions geo-ordered (meals NOT in that TSP)
+    2) Breakfast first / lunch mid inserted by role (never re-TSP with meals)
+    3) Times: breakfast≈09:00, lunch≈13:00, attractions fill around them
     4) Same base hotel last on overnight days (multi-day)
     """
     restaurants = restaurants or []
@@ -471,35 +488,36 @@ def assemble_day_stops(
     end_anchor = window_end_min if window_end_min is not None else 20 * 60 + 30
     lunch_anchor = max(LUNCH_AT, start_anchor + 90)
 
-    path = order_stops_geo(attractions) if attractions else []
-    if not path and not (hotel and allow_hotel):
+    # Geo-order attractions ONLY — never mix meals into TSP (that swaps breakfast/lunch clocks)
+    path_attr = order_stops_geo(attractions) if attractions else []
+    if not path_attr and not (hotel and allow_hotel):
         return []
 
     breakfast: dict[str, Any] | None = None
     lunch: dict[str, Any] | None = None
 
-    if path:
-        mid = max(1, len(path) // 2)
-        path, lunch = _try_add_food(
-            path,
+    if path_attr:
+        mid = max(1, len(path_attr) // 2)
+        # Lunch near path midpoint (detour-aware)
+        _, lunch = _try_add_food(
+            path_attr,
             restaurants,
             used_ids=used_ids,
             index_min=max(0, mid - 1),
-            index_max=min(len(path), mid + 1),
+            index_max=min(len(path_attr), mid + 1),
             max_detour_km=MAX_FOOD_DETOUR_KM,
         )
         if lunch is None:
-            path, lunch = _try_add_food(
-                path,
+            _, lunch = _try_add_food(
+                path_attr,
                 restaurants,
                 used_ids=used_ids,
                 index_min=max(0, mid - 1),
-                index_max=min(len(path), mid + 1),
+                index_max=min(len(path_attr), mid + 1),
                 max_detour_km=MAX_FOOD_DETOUR_RELAXED_KM,
             )
         if lunch is None and restaurants:
-            # Last resort: nearest restaurant to path midpoint (must have a meal)
-            mid_poi = path[min(len(path) - 1, len(path) // 2)]
+            mid_poi = path_attr[min(len(path_attr) - 1, len(path_attr) // 2)]
             mid_c = poi_coord(mid_poi)
             if mid_c:
                 lunch = _nearest_food(
@@ -513,11 +531,8 @@ def assemble_day_stops(
                     lid = _role_id(lunch)
                     if lid:
                         used_ids.add(lid)
-                    insert_at = min(len(path), max(1, len(path) // 2))
-                    path = list(path[:insert_at]) + [lunch] + list(path[insert_at:])
             if lunch is None:
-                # Absolute last resort: nearest restaurant to any path stop
-                for poi in path:
+                for poi in path_attr:
                     c = poi_coord(poi)
                     if not c:
                         continue
@@ -532,11 +547,8 @@ def assemble_day_stops(
                         lid = _role_id(lunch)
                         if lid:
                             used_ids.add(lid)
-                        insert_at = min(len(path), max(1, len(path) // 2))
-                        path = list(path[:insert_at]) + [lunch] + list(path[insert_at:])
                         break
         if lunch is None and restaurants:
-            # Force a lunch stop from the best remaining restaurant in-region
             candidates = [
                 r
                 for r in restaurants
@@ -547,84 +559,147 @@ def assemble_day_stops(
                 lid = _role_id(lunch)
                 if lid:
                     used_ids.add(lid)
-                insert_at = min(len(path), max(1, len(path) // 2))
-                path = list(path[:insert_at]) + [lunch] + list(path[insert_at:])
-        # Breakfast only if day starts early and the visit window is long enough
-        # (short last-day windows prioritize sightseeing + lunch)
+
+        # Breakfast only on long early windows — never after lunch clock
         if start_anchor <= 11 * 60 and (end_anchor - start_anchor) >= 7 * 60 + 30:
-            path, breakfast = _try_add_food(
-                path,
+            _, breakfast = _try_add_food(
+                path_attr,
                 restaurants,
                 used_ids=used_ids,
                 index_min=0,
-                index_max=min(1, len(path)),
+                index_max=min(1, len(path_attr)),
                 max_detour_km=MAX_FOOD_DETOUR_RELAXED_KM,
             )
-        path = order_stops_geo(path)
-        if breakfast is not None and path:
-            bid = _role_id(breakfast)
-            if _role_id(path[-1]) == bid and _role_id(path[0]) != bid:
-                path = list(reversed(path))
 
-    lunch_id = _role_id(lunch) if lunch else ""
-    breakfast_id = _role_id(breakfast) if breakfast else ""
+    # Build role-ordered path: breakfast → morning attrs → lunch → afternoon attrs
+    insert_at = min(len(path_attr), max(1, len(path_attr) // 2)) if path_attr else 0
+    morning = list(path_attr[:insert_at]) if path_attr else []
+    afternoon = list(path_attr[insert_at:]) if path_attr else []
+    path: list[tuple[dict[str, Any], str]] = []
+    if breakfast is not None:
+        path.append((breakfast, "breakfast"))
+    for poi in morning:
+        path.append((poi, "attraction"))
+    if lunch is not None:
+        path.append((lunch, "lunch"))
+    for poi in afternoon:
+        path.append((poi, "attraction"))
 
     stops: list[dict[str, Any]] = []
     t = start_anchor
-    if breakfast is not None and start_anchor <= BREAKFAST_AT + 30:
+    if breakfast is not None:
         t = max(start_anchor, BREAKFAST_AT)
 
-    for i, poi in enumerate(path):
-        pid = _role_id(poi)
+    for poi, daypart in path:
         dur = _poi_duration(poi)
-        tip = ""
-        if breakfast_id and pid == breakfast_id:
-            daypart = "breakfast"
-            time_min = t if i > 0 else max(start_anchor, min(t, BREAKFAST_AT + 60))
-            tip = "Səhər yeməyi"
-        elif lunch_id and pid == lunch_id:
-            daypart = "lunch"
-            time_min = max(lunch_anchor, t)
-            tip = "Nahar etmək üçün dayanacaq"
+        if daypart == "breakfast":
+            time_min = max(start_anchor, BREAKFAST_AT)
+            # Hard cap: breakfast must finish before lunch slot
+            if time_min + dur > lunch_anchor - 10:
+                time_min = max(start_anchor, lunch_anchor - dur - 15)
+            if time_min >= lunch_anchor:
+                continue
+            tip = ""
+        elif daypart == "lunch":
+            time_min = max(lunch_anchor, t if t <= lunch_anchor + 45 else lunch_anchor)
+            tip = ""
         else:
-            daypart = "attraction"
-            cat = str(poi.get("category") or "")
-            if not lunch_id and cat in FOOD_CATS and 0 < i < len(path) - 1:
-                daypart = "lunch"
-                time_min = max(lunch_anchor, t)
-                tip = "Nahar etmək üçün dayanacaq"
-            else:
-                time_min = t
+            tip = ""
+            time_min = max(t, start_anchor)
+            lunch_already = any(s.get("daypart") == "lunch" for s in stops)
+            if lunch is not None and not lunch_already and time_min + dur > lunch_anchor:
+                # Morning slot too short — drop rather than push lunch into morning
+                continue
 
-        # Skip overflow attractions; keep trying later meals (geo-order can put lunch last)
         if time_min + dur > end_anchor:
-            if daypart in {"lunch", "breakfast"}:
-                time_min = max(start_anchor, end_anchor - dur)
+            if daypart == "lunch":
+                time_min = min(max(lunch_anchor, start_anchor), end_anchor - dur)
                 if time_min + dur > end_anchor:
                     continue
+            elif daypart == "breakfast":
+                continue
             else:
                 continue
+
+        # Safety: breakfast never after lunch on the clock
+        if daypart == "breakfast" and time_min >= lunch_anchor:
+            continue
+        if daypart == "lunch" and any(
+            s.get("daypart") == "breakfast"
+            and str(s.get("time") or "") > _minutes_to_hhmm(time_min)
+            for s in stops
+        ):
+            # Shouldn't happen with role order; skip rather than mislabel
+            pass
 
         stops.append(
             _stop_payload(poi, time_min=time_min, daypart=daypart, tip=tip)
         )
-        # Short transfer so a normal day can fit 4–6 sightseeing stops
         t = time_min + dur + 8
+        if daypart == "breakfast":
+            t = max(t, ATTRACTION_START)
+        if daypart == "lunch":
+            t = max(t, time_min + dur + 8)
 
     if allow_hotel and hotel is not None:
         hotel_time = max(EVENING_HOTEL_AT, t if stops else start_anchor)
-        hotel_tip = (
-            "Gecələmə — bütün gecələr eyni məkan"
-            if shared_hotel
-            else "Gecələmə"
-        )
         stops.append(
             _stop_payload(
-                hotel, time_min=hotel_time, daypart="hotel", tip=hotel_tip
+                hotel,
+                time_min=hotel_time,
+                daypart="hotel",
+                tip=_hotel_tip(hotel, shared_hotel=shared_hotel),
             )
         )
 
+    # Final safety: sort by clock, then fix food labels to match timeline
+    stops.sort(key=lambda s: str(s.get("time") or "99:99"))
+    _relabel_meal_dayparts(stops)
     return stops
+
+
+def _parse_stop_minutes(stop: dict[str, Any]) -> int:
+    raw = str(stop.get("time") or "00:00")
+    parts = raw.split(":")
+    try:
+        return int(parts[0]) * 60 + int(parts[1])
+    except (ValueError, IndexError):
+        return 0
+
+
+def _relabel_meal_dayparts(stops: list[dict[str, Any]]) -> None:
+    """Force food badges to match clock order (breakfast morning, lunch midday)."""
+    food_idxs = [
+        i
+        for i, s in enumerate(stops)
+        if str(s.get("daypart") or "") in {"breakfast", "lunch"}
+        or str(s.get("category") or "") in FOOD_CATS
+    ]
+    if not food_idxs:
+        return
+    # Chronological among food stops: first early → breakfast, midday → lunch
+    food_idxs.sort(key=lambda i: _parse_stop_minutes(stops[i]))
+    assigned_breakfast = False
+    assigned_lunch = False
+    for i in food_idxs:
+        stop = stops[i]
+        cat = str(stop.get("category") or "")
+        dp = str(stop.get("daypart") or "")
+        if cat not in FOOD_CATS and dp not in {"breakfast", "lunch"}:
+            continue
+        mins = _parse_stop_minutes(stop)
+        if mins < 11 * 60 and not assigned_breakfast:
+            stop["daypart"] = "breakfast"
+            stop["tip"] = ""
+            assigned_breakfast = True
+        elif mins < 17 * 60 and not assigned_lunch:
+            stop["daypart"] = "lunch"
+            stop["tip"] = ""
+            assigned_lunch = True
+        elif dp in {"breakfast", "lunch"}:
+            # Extra food stop — keep as plain attraction visit (no meal badge)
+            stop["daypart"] = "attraction"
+            stop["tip"] = ""
 
 
 def _travel_leg_stop(
@@ -823,14 +898,9 @@ def build_skeleton(
                 pref = [
                     p
                     for p in leftovers
-                    if str(p.get("category") or "") in interest_cats
+                    if attraction_matches_interests(p, interest_cats)
                 ]
-                rest = [
-                    p
-                    for p in leftovers
-                    if str(p.get("category") or "") not in interest_cats
-                ]
-                leftovers = pref + rest
+                leftovers = pref
             if leftovers:
                 # Grow a local bubble from the farthest leftover vs earlier days
                 seed_lat, seed_lng = _seed_away_from_footprint(
@@ -986,26 +1056,7 @@ def build_skeleton(
             )
             notes = (notes + extra).strip()
 
-        has_lunch = any(str(s.get("daypart") or "") == "lunch" for s in stops)
-        has_hotel = any(str(s.get("daypart") or "") == "hotel" for s in stops)
-        meal_bits: list[str] = []
-        if has_lunch:
-            meal_bits.append("Günortaya nahar dayanacağı əlavə olunub.")
-        if has_hotel and base_hotel:
-            hotel_name = str(base_hotel.get("name") or "məkan")
-            lodging_label = (
-                "otel"
-                if str(lodging_type or "hotel").lower() in {"hotel", "otel"}
-                else "fərdi ev / hostel"
-            )
-            if days_n > 2:
-                meal_bits.append(
-                    f"Gecələmə ({lodging_label}): {hotel_name} (bütün gecələr eyni məkan)."
-                )
-            else:
-                meal_bits.append(f"Gecələmə ({lodging_label}): {hotel_name}.")
-        if meal_bits:
-            notes = (notes + " " + " ".join(meal_bits)).strip()
+        # Meal/lodging are stop badges only — no footer fluff notes
 
         if not stops:
             continue
@@ -1039,6 +1090,9 @@ def build_skeleton(
     if base_hotel is not None:
         # Lodging appears as a stop in the day list — no duplicate banner notes
         lodging = {**public_poi_fields(base_hotel)}
+        price_label = _format_nightly_price(base_hotel)
+        if price_label:
+            lodging["note"] = f"Gecələmə ({price_label})"
 
     return {
         "summary": "",
@@ -1131,42 +1185,43 @@ def template_enrich(plan: dict[str, Any], *, region_label: str, days: int) -> di
     new_days = []
     for day in plan.get("days") or []:
         day = dict(day)
-        # Keep only real travel timing notes from skeleton; drop template fluff
         notes = str(day.get("notes") or "").strip()
-        if (
-            not notes
-            or "Səhər →" in notes
-            or "gəzinti → nahar" in notes.lower()
+        # Keep only real travel timing; drop meal/lodging footer fluff
+        keep = False
+        if notes and (
+            notes.startswith("Çıxış")
+            or "Geri dönüş" in notes
+            or "yola çıx" in notes.lower()
         ):
-            # Preserve outbound/return timing + meal/lodging notices
-            if (
-                "Çıxış" in notes
-                or "Geri dönüş" in notes
-                or "yola çıx" in notes.lower()
-                or "nahar" in notes.lower()
-                or "gecələmə" in notes.lower()
-            ):
-                day["notes"] = notes
-            else:
-                day["notes"] = ""
-        else:
-            day["notes"] = notes
+            # Strip meal/lodging sentences that may have been appended
+            parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", notes) if p.strip()]
+            kept = [
+                p
+                for p in parts
+                if "nahar" not in p.lower()
+                and "gecələmə" not in p.lower()
+                and "geceleme" not in p.lower()
+            ]
+            notes = " ".join(kept).strip()
+            keep = bool(notes)
+        day["notes"] = notes if keep else ""
         stops = []
         for stop in day.get("stops") or []:
             stop = dict(stop)
             if _is_travel_stop(stop):
-                # Keep short travel tip (arrive time); drop fluff
                 tip = str(stop.get("tip") or "").strip()
                 stop["tip"] = tip if tip.startswith("Çatış") or tip.startswith("Evə") else ""
             else:
-                tip = sanitize_tip_text(str(stop.get("tip") or ""))
                 dp = str(stop.get("daypart") or "").lower()
-                if not tip and dp == "lunch":
-                    tip = "Nahar etmək üçün dayanacaq"
-                elif not tip and dp == "breakfast":
-                    tip = "Səhər yeməyi"
-                elif not tip and dp == "hotel":
-                    tip = "Gecələmə"
+                tip = sanitize_tip_text(str(stop.get("tip") or ""))
+                if dp in {"lunch", "breakfast"}:
+                    tip = ""
+                elif dp == "hotel":
+                    # Prefer structured price already on tip; else rebuild from fields
+                    if tip and tip.startswith("(") and "gecə" in tip.lower():
+                        pass
+                    else:
+                        tip = _hotel_tip(stop)
                 stop["tip"] = tip
             stops.append(stop)
         day["stops"] = stops
@@ -1327,24 +1382,23 @@ def _merge_tips(
             tip = tip_map.get(pid) or ""
             dp = str(stop.get("daypart") or "").lower()
             existing = str(stop.get("tip") or "").strip()
-            if tip and not _claude_tip_mismatch(stop, tip) and len(tip.split()) <= 12:
-                stop["tip"] = sanitize_tip_text(tip)
-            elif existing:
-                stop["tip"] = sanitize_tip_text(existing)
-            elif dp == "lunch":
-                stop["tip"] = "Nahar etmək üçün dayanacaq"
-            elif dp == "breakfast":
-                stop["tip"] = "Səhər yeməyi"
+            if dp in {"lunch", "breakfast"}:
+                stop["tip"] = ""
             elif dp == "hotel":
-                stop["tip"] = (
-                    "Gecələmə — bütün gecələr eyni məkan"
-                    if days >= 2
-                    else "Gecələmə"
-                )
+                if existing.startswith("(") and "gecə" in existing.lower():
+                    stop["tip"] = existing
+                else:
+                    stop["tip"] = _hotel_tip(stop)
+            elif tip and not _claude_tip_mismatch(stop, tip) and len(tip.split()) <= 12:
+                stop["tip"] = sanitize_tip_text(tip)
+            elif existing and not any(
+                x in existing.lower()
+                for x in ("nahar", "səhər yemə", "gecələmə", "bütün gecələr")
+            ):
+                stop["tip"] = sanitize_tip_text(existing)
             else:
                 stop["tip"] = ""
             if name_has_forbidden_script(str(stop.get("name") or "")):
-                # Keep meal/lodging labels even if name is odd
                 if dp not in {"lunch", "breakfast", "hotel"}:
                     stop["tip"] = ""
             stops.append(stop)

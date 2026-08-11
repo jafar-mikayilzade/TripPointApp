@@ -175,6 +175,7 @@ export default function SevimlilerScreen() {
         );
       }
     } catch (err) {
+      console.warn('[sevimliler] favorite listings fetch failed', err);
       setListings([]);
       errors.push(getErrorMessage(err));
     }
@@ -199,6 +200,7 @@ export default function SevimlilerScreen() {
         setPois(rows);
       }
     } catch (err) {
+      console.warn('[sevimliler] favorite pois fetch failed', err);
       setPois([]);
       errors.push(getErrorMessage(err));
     }

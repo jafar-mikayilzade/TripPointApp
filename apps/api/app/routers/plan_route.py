@@ -10,6 +10,10 @@ from pydantic import BaseModel, Field
 
 from app.auth import verify_user
 from app.constants.regions import REGION_COORDINATES, REGION_DB_ID, REGION_LABELS
+from app.services.attraction_classify import (
+    attraction_matches_interests,
+    classify_attraction_rows,
+)
 from app.services.live_route_candidates import load_live_route_candidates
 from app.services.plan_itinerary import build_skeleton, enrich_with_claude
 from app.services.rank_pois import filter_accommodations_by_lodging_type
@@ -87,8 +91,6 @@ def plan_route_endpoint(
     if body.pois and (
         body.pois.restaurants or body.pois.accommodations or body.pois.attractions
     ):
-        from app.services.attraction_classify import classify_attraction_rows
-
         restaurants = list(body.pois.restaurants)
         accommodations = list(body.pois.accommodations)
         attractions = classify_attraction_rows(list(body.pois.attractions))
@@ -126,6 +128,15 @@ def plan_route_endpoint(
         candidate_source = (
             "client+db" if candidate_source == "client" else str(loaded.get("source") or "db")
         )
+
+    # Hard interest gate (esp. mountains) before packing — dual-tag peaks stay out
+    from app.services.attraction_classify import interest_attraction_cats
+
+    interest_cats = interest_attraction_cats(interests)
+    if interest_cats:
+        attractions = [
+            p for p in attractions if attraction_matches_interests(p, interest_cats)
+        ]
 
     lodging_type = (body.lodgingType or "hotel").strip() or "hotel"
     accommodations = filter_accommodations_by_lodging_type(

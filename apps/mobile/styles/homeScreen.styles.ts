@@ -378,6 +378,24 @@ export function createStyles(colors: ThemeColors) {
     flex: 1,
     minWidth: 0,
   },
+  listModeToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.chip,
+    borderRadius: 10,
+    padding: 2,
+    gap: 2,
+  },
+  listModeBtn: {
+    width: 30,
+    height: 28,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listModeBtnActive: {
+    backgroundColor: colors.brand,
+  },
   listTitle: {
     fontSize: 13,
     fontWeight: '700',
@@ -395,6 +413,51 @@ export function createStyles(colors: ThemeColors) {
   listContent: {
     paddingHorizontal: 10,
     paddingBottom: 12,
+  },
+  cardsContent: {
+    paddingBottom: 12,
+  },
+  swipeCard: {
+    paddingHorizontal: 10,
+    paddingTop: 4,
+    justifyContent: 'center',
+  },
+  swipeCardInner: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderSoft,
+    overflow: 'hidden',
+    minHeight: 168,
+  },
+  swipeCardImage: {
+    width: '100%',
+    height: 110,
+    backgroundColor: colors.chip,
+  },
+  swipeCardImagePlaceholder: {
+    width: '100%',
+    height: 110,
+    backgroundColor: colors.chip,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swipeCardBody: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  swipeCardName: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  swipeCardMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 2,
   },
   card: {
     minHeight: 48,

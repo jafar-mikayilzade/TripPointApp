@@ -221,7 +221,9 @@ def _load_buckets_from_db(
     db_region = REGION_DB_ID.get(region_key, region_key)
     select_cols = (
         "id, name, category, categories, description, lat, lng, region, rating, "
-        "rating_count, place_id, address, price_from, price_currency, data_source"
+        "rating_count, place_id, address, phone, website, external_url, "
+        "opening_hours, cuisine, amenities, thumbnail_url, photo_urls, "
+        "price_from, price_currency, hotel_class, data_source"
     )
     # Pull the full regional pool (not only primary category) so multi-tagged
     # attractions are not starved when category column is hotel/restaurant/other.

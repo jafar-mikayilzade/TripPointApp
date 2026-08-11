@@ -83,21 +83,11 @@ MIX_LODGING_RATIO = 0.28
 MIX_FOOD_RATIO = 0.22
 
 
-def rating_sort_key(row: dict[str, Any]) -> tuple[float, int]:
-    """Higher rating first; more reviews as tie-breaker; nulls last."""
-    raw = row.get("rating")
-    try:
-        rating = float(raw) if raw is not None else -1.0
-    except (TypeError, ValueError):
-        rating = -1.0
+def rating_sort_key(row: dict[str, Any]) -> tuple[float, float, int]:
+    """Richer listings first (photo/phone/price), then rating, then reviews."""
+    from app.services.poi_richness import richness_sort_key
 
-    raw_count = row.get("rating_count")
-    try:
-        count = int(raw_count) if raw_count is not None else 0
-    except (TypeError, ValueError):
-        count = 0
-
-    return (rating, count)
+    return richness_sort_key(row)
 
 
 def _hub_proximity_weight(
@@ -152,7 +142,10 @@ def tourism_score(
     rating_f = max(0.35, min(rating / 5.0, 1.0))
     review_f = 0.55 + min(reviews, 200) / 400.0  # 0.55–1.05
     seed_boost = 1.45 if row.get("is_seed") else 1.0
-    return type_w * hub_w * rating_f * review_f * seed_boost
+    from app.services.poi_richness import richness_factor
+
+    info_f = richness_factor(row)  # photo/phone/price/contact boost
+    return type_w * hub_w * rating_f * review_f * seed_boost * info_f
 
 
 def sort_by_tourism_score(

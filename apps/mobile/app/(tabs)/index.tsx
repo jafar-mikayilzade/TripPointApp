@@ -42,7 +42,7 @@ import { ResizableSplit } from '../../components/ResizableSplit';
 import { useToast } from '../../components/Toast';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
 import type { ThemeColors } from '../../constants/theme';
-import { createStyles } from './index.styles';
+import { createStyles } from '../../styles/homeScreen.styles';
 import { useThemeColors } from '../../theme/ThemeProvider';
 import {
   insertApprovedPoiFromGoogle,
@@ -59,6 +59,7 @@ import {
 } from '../../lib/poiDisplay';
 import { getErrorMessage } from '../../lib/errors';
 import { isPoiSponsored, summarizeOpeningHours } from '../../lib/openingHours';
+import { comparePoisByRichness } from '../../lib/poiRichness';
 import { collectPoiPhotoUrls } from '../../lib/photoUrls';
 import {
   buildPoiTelUrl,
@@ -162,6 +163,10 @@ export default function HomeScreen() {
   } | null>(null);
   const [regionWeather, setRegionWeather] = useState<WeatherAdvice | null>(null);
   const [splitRatio, setSplitRatio] = useState(0.5);
+  const [listMode, setListMode] = useState<'list' | 'cards'>('list');
+  const [listPaneWidth, setListPaneWidth] = useState(
+    () => Dimensions.get('window').width
+  );
   const splitBeforeFocusRef = useRef(0.5);
   /** Cari kamera — seçim dəyişəndə zoom-u saxlamaq üçün */
   const lastMapRegionRef = useRef<MapRegion | null>(null);
@@ -301,12 +306,8 @@ export default function HomeScreen() {
       if (sb !== sa) {
         return sb - sa;
       }
-      const ra = a.averageRating ?? -1;
-      const rb = b.averageRating ?? -1;
-      if (rb !== ra) {
-        return rb - ra;
-      }
-      return (b.ratingCount ?? 0) - (a.ratingCount ?? 0);
+      // Şəkil / qiymət / əlaqə / reytinq zənginliyi ilə
+      return comparePoisByRichness(a, b);
     });
 
     return mapped;
@@ -551,7 +552,7 @@ export default function HomeScreen() {
         listRef.current?.scrollToIndex({
           index,
           animated: true,
-          viewPosition: 0.2,
+          viewPosition: listMode === 'cards' ? 0.5 : 0.2,
         });
       } catch {
         // FlatList hələ layout olmayıbsa onScrollToIndexFailed işləyir
@@ -1068,6 +1069,38 @@ export default function HomeScreen() {
                         {loading ? 'Yüklənir...' : listTitle}
                       </Text>
                     </View>
+                    <View style={styles.listModeToggle}>
+                      <TouchableOpacity
+                        style={[
+                          styles.listModeBtn,
+                          listMode === 'list' && styles.listModeBtnActive,
+                        ]}
+                        onPress={() => setListMode('list')}
+                        hitSlop={6}
+                        accessibilityLabel="Siyahı görünüşü"
+                      >
+                        <Ionicons
+                          name="list"
+                          size={16}
+                          color={listMode === 'list' ? colors.textOnAccent : colors.textSecondary}
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.listModeBtn,
+                          listMode === 'cards' && styles.listModeBtnActive,
+                        ]}
+                        onPress={() => setListMode('cards')}
+                        hitSlop={6}
+                        accessibilityLabel="Kart görünüşü"
+                      >
+                        <Ionicons
+                          name="albums-outline"
+                          size={16}
+                          color={listMode === 'cards' ? colors.textOnAccent : colors.textSecondary}
+                        />
+                      </TouchableOpacity>
+                    </View>
                     <TouchableOpacity
                       onPress={() => router.push('/feed' as never)}
                       hitSlop={8}
@@ -1083,53 +1116,82 @@ export default function HomeScreen() {
                   ) : errorMessage ? (
                     <Text style={styles.errorText}>{errorMessage}</Text>
                   ) : (
-                    <FlatList<PoiListItem>
-                      ref={listRef}
-                      data={pois}
-                      keyExtractor={(item) => item.id}
+                    <View
                       style={{ flex: 1 }}
-                      showsVerticalScrollIndicator={false}
-                      contentContainerStyle={styles.listContent}
-                      refreshControl={
-                        <RefreshControl
-                          refreshing={loading}
-                          onRefresh={() => void fetchPois()}
-                          tintColor={colors.accent}
-                          colors={[colors.accent]}
-                        />
-                      }
-                      onScrollToIndexFailed={(info) => {
-                        setTimeout(() => {
-                          listRef.current?.scrollToIndex({
-                            index: info.index,
-                            animated: true,
-                            viewPosition: 0.1,
-                          });
-                        }, 100);
+                      onLayout={(e) => {
+                        const w = e.nativeEvent.layout.width;
+                        if (w > 0 && Math.abs(w - listPaneWidth) > 1) {
+                          setListPaneWidth(w);
+                        }
                       }}
-                      renderItem={({ item }) => {
-                        // This branch only renders while no POI panel is open.
-                        const isSelected = highlightedPoiId === item.id;
-                        const hasSelection = highlightedPoiId != null;
-                        return (
-                        <MemoPoiListCard
-                          item={item}
-                          highlighted={isSelected}
-                          dimmed={hasSelection && !isSelected}
-                          userLocation={userLocation}
-                          onPress={() => handleCardPress(item)}
-                        />
-                        );
-                      }}
-                      ListEmptyComponent={
-                        <View style={styles.emptyWrap}>
-                          <Text style={styles.emptyTitle}>Bu filterlə yer tapılmadı 🔍</Text>
-                          <Text style={styles.emptySubtitle}>
-                            Fərqli rayon və ya kateqoriya seçin
-                          </Text>
-                        </View>
-                      }
-                    />
+                    >
+                      <FlatList<PoiListItem>
+                        key={listMode}
+                        ref={listRef}
+                        data={pois}
+                        keyExtractor={(item) => item.id}
+                        style={{ flex: 1 }}
+                        horizontal={listMode === 'cards'}
+                        pagingEnabled={listMode === 'cards'}
+                        showsVerticalScrollIndicator={false}
+                        showsHorizontalScrollIndicator={false}
+                        decelerationRate={listMode === 'cards' ? 'fast' : 'normal'}
+                        contentContainerStyle={
+                          listMode === 'cards'
+                            ? styles.cardsContent
+                            : styles.listContent
+                        }
+                        getItemLayout={
+                          listMode === 'cards'
+                            ? (_data, index) => ({
+                                length: listPaneWidth,
+                                offset: listPaneWidth * index,
+                                index,
+                              })
+                            : undefined
+                        }
+                        refreshControl={
+                          <RefreshControl
+                            refreshing={loading}
+                            onRefresh={() => void fetchPois()}
+                            tintColor={colors.accent}
+                            colors={[colors.accent]}
+                          />
+                        }
+                        onScrollToIndexFailed={(info) => {
+                          setTimeout(() => {
+                            listRef.current?.scrollToIndex({
+                              index: info.index,
+                              animated: true,
+                              viewPosition: listMode === 'cards' ? 0.5 : 0.1,
+                            });
+                          }, 100);
+                        }}
+                        renderItem={({ item }) => {
+                          const isSelected = highlightedPoiId === item.id;
+                          const hasSelection = highlightedPoiId != null;
+                          return (
+                            <MemoPoiListCard
+                              item={item}
+                              variant={listMode}
+                              cardWidth={listMode === 'cards' ? listPaneWidth : undefined}
+                              highlighted={isSelected}
+                              dimmed={hasSelection && !isSelected}
+                              userLocation={userLocation}
+                              onPress={() => handleCardPress(item)}
+                            />
+                          );
+                        }}
+                        ListEmptyComponent={
+                          <View style={styles.emptyWrap}>
+                            <Text style={styles.emptyTitle}>Bu filterlə yer tapılmadı 🔍</Text>
+                            <Text style={styles.emptySubtitle}>
+                              Fərqli rayon və ya kateqoriya seçin
+                            </Text>
+                          </View>
+                        }
+                      />
+                    </View>
                   )}
                 </>
               )}
@@ -1597,12 +1659,16 @@ function PoiListCard({
   dimmed,
   userLocation,
   onPress,
+  variant = 'list',
+  cardWidth,
 }: {
   item: PoiListItem;
   highlighted: boolean;
   dimmed?: boolean;
   userLocation: { latitude: number; longitude: number } | null;
   onPress: () => void;
+  variant?: 'list' | 'cards';
+  cardWidth?: number;
 }) {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -1615,6 +1681,60 @@ function PoiListCard({
         item.lng
       )
     : null;
+
+  const priceLabel = formatPoiPrice(item.price_from, item.price_currency);
+  const hasPhone = Boolean(item.phone && String(item.phone).trim());
+
+  if (variant === 'cards') {
+    const width = cardWidth && cardWidth > 0 ? cardWidth : Dimensions.get('window').width;
+    return (
+      <Pressable
+        onPress={onPress}
+        style={[
+          styles.swipeCard,
+          { width },
+          highlighted && styles.cardHighlighted,
+          dimmed && styles.cardDimmed,
+        ]}
+      >
+        <View style={styles.swipeCardInner}>
+          {item.photoUrl ? (
+            <Image source={{ uri: item.photoUrl }} style={styles.swipeCardImage} />
+          ) : (
+            <View style={styles.swipeCardImagePlaceholder}>
+              <CategoryIcon
+                category={item.category}
+                size={28}
+                color={highlighted ? colors.accentPressed : colors.text}
+              />
+            </View>
+          )}
+          <View style={styles.swipeCardBody}>
+            <Text style={styles.swipeCardName} numberOfLines={2}>
+              {item.name}
+            </Text>
+            <Text style={styles.cardCategory} numberOfLines={1}>
+              {getCategoryLabel(item.category)}
+              {item.photoUrls.length > 0 ? ` · ${item.photoUrls.length} şəkil` : ''}
+              {hasPhone ? ' · telefon' : ''}
+            </Text>
+            <View style={styles.swipeCardMeta}>
+              <View style={styles.ratingRow}>
+                <Text style={styles.ratingStar}>★</Text>
+                <Text style={styles.ratingText}>
+                  {item.averageRating === null ? '—' : item.averageRating.toFixed(1)}
+                </Text>
+              </View>
+              {priceLabel ? <Text style={styles.cardPrice}>{priceLabel}</Text> : null}
+              {distanceLabel ? (
+                <Text style={styles.distanceText}>{distanceLabel}</Text>
+              ) : null}
+            </View>
+          </View>
+        </View>
+      </Pressable>
+    );
+  }
 
   return (
     <Pressable
@@ -1649,11 +1769,7 @@ function PoiListCard({
                 {item.averageRating === null ? '—' : item.averageRating.toFixed(1)}
               </Text>
             </View>
-            {(() => {
-              const priceLabel = formatPoiPrice(item.price_from, item.price_currency);
-              if (!priceLabel) return null;
-              return <Text style={styles.cardPrice}>{priceLabel}</Text>;
-            })()}
+            {priceLabel ? <Text style={styles.cardPrice}>{priceLabel}</Text> : null}
             {distanceLabel ? (
               <Text style={styles.distanceText}>{distanceLabel}</Text>
             ) : null}
@@ -1663,6 +1779,7 @@ function PoiListCard({
         <Text style={styles.cardCategory} numberOfLines={1}>
           {getCategoryLabel(item.category)}
           {item.photoUrls.length > 1 ? ` · ${item.photoUrls.length} şəkil` : ''}
+          {hasPhone ? ' · tel' : ''}
         </Text>
       </View>
     </Pressable>

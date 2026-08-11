@@ -65,7 +65,13 @@ import {
 
 type DayOption = 1 | 2 | 3;
 type BudgetOption = 'budget' | 'mid' | 'premium';
-type InterestId = 'nature' | 'history';
+type InterestId =
+  | 'nature'
+  | 'waterfall'
+  | 'mountain'
+  | 'lake'
+  | 'historical'
+  | 'monument';
 type GroupOption = 'solo' | 'couple' | 'family' | 'group';
 type LodgingOption = 'hotel' | 'private';
 
@@ -82,6 +88,8 @@ type PlanStop = {
   sequence_order?: number | null;
   arrival_time?: string;
   visiting_time?: string;
+  price_from?: number | null;
+  price_currency?: string | null;
 };
 
 type PlanDay = {
@@ -255,12 +263,20 @@ const BUDGET_OPTIONS: { value: BudgetOption; label: string }[] = [
 
 const INTEREST_OPTIONS: { id: InterestId; label: string }[] = [
   { id: 'nature', label: 'Təbiət' },
-  { id: 'history', label: 'Tarixi' },
+  { id: 'waterfall', label: 'Şəlalə' },
+  { id: 'mountain', label: 'Dağ' },
+  { id: 'lake', label: 'Göl' },
+  { id: 'historical', label: 'Tarixi' },
+  { id: 'monument', label: 'Abidə' },
 ];
 
 const INTEREST_ATTRACTION_CATS: Record<InterestId, string[]> = {
-  nature: ['nature', 'waterfall', 'mountain', 'lake'],
-  history: ['historical', 'monument'],
+  nature: ['nature'],
+  waterfall: ['waterfall'],
+  mountain: ['mountain'],
+  lake: ['lake'],
+  historical: ['historical'],
+  monument: ['monument'],
 };
 
 const AI_LOADING_MESSAGES = [
@@ -273,7 +289,7 @@ const AI_LOADING_MESSAGES = [
   'Demək olar hazırdır...',
 ];
 
-function preferAttractionsForInterests<T extends { category: string; categories?: string[] | null }>(
+function preferAttractionsForInterests<T extends { category: string; categories?: string[] | null; name?: string | null }>(
   attractions: T[],
   selected: InterestId[]
 ): T[] {
@@ -283,7 +299,12 @@ function preferAttractionsForInterests<T extends { category: string; categories?
   if (prefer.size === 0) {
     return attractions;
   }
-  // Hard filter: only interest-matching categories
+  const allowMountain = prefer.has('mountain');
+  const peakNameRe =
+    /\b(dağ|dag|mountain|peak|zirv)\b|\d{3,4}(?:[.,]\d+)?\s*m(?:etr)?\b/i;
+  const waterfallRe = /şəlal|selal|waterfall|falls?\b/i;
+  const lakeRe = /\bgöl\b|\bgol\b|\blake\b/i;
+
   return attractions.filter((a) => {
     const cats =
       Array.isArray(a.categories) && a.categories.length > 0
@@ -291,6 +312,13 @@ function preferAttractionsForInterests<T extends { category: string; categories?
         : a.category
           ? [String(a.category)]
           : [];
+    const name = String(a.name || '');
+    const looksMountain =
+      cats.includes('mountain') ||
+      (!waterfallRe.test(name) && !lakeRe.test(name) && peakNameRe.test(name));
+    if (!allowMountain && looksMountain) {
+      return false;
+    }
     return cats.some((c) => prefer.has(c));
   });
 }
@@ -688,9 +716,15 @@ export default function MarsrutScreen() {
   }, [days]);
 
   function toggleInterest(id: InterestId) {
-    setInterests((current) =>
-      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
-    );
+    setInterests((current) => {
+      if (current.includes(id)) {
+        if (current.length <= 1) {
+          return current;
+        }
+        return current.filter((item) => item !== id);
+      }
+      return [...current, id];
+    });
   }
 
   async function enableFromOrigin(next: boolean) {
@@ -1124,7 +1158,7 @@ export default function MarsrutScreen() {
         const { data: poisRaw, error: poisError } = await supabase
           .from('pois')
           .select(
-            'id, name, category, categories, description, lat, lng, region, rating, rating_count'
+            'id, name, category, categories, description, lat, lng, region, rating, rating_count, price_from, price_currency'
           )
           .eq('status', 'approved')
           .eq('region', regionId.toLowerCase())
@@ -1262,7 +1296,9 @@ export default function MarsrutScreen() {
         ? (GROUP_OPTIONS.find((g) => g.value === group)?.label ?? null)
         : null;
 
-      const trustServerOrder = data.source === 'fastapi_geo';
+      const trustServerOrder =
+        data.source === 'fastapi_geo' ||
+        String(data.source || '').startsWith('fastapi');
       const startLat =
         fromOrigin && userLocation ? userLocation.latitude : regionMeta.latitude;
       const startLng =
@@ -1297,6 +1333,12 @@ export default function MarsrutScreen() {
                   sequence_order: travel ? null : visitSeq,
                   arrival_time: String(stop.time ?? ''),
                   visiting_time: String(stop.time ?? ''),
+                  price_from:
+                    typeof (stop as { price_from?: unknown }).price_from === 'number'
+                      ? Number((stop as { price_from?: number }).price_from)
+                      : null,
+                  price_currency:
+                    (stop as { price_currency?: string | null }).price_currency ?? null,
                 };
               })
               .filter(
@@ -1694,39 +1736,6 @@ export default function MarsrutScreen() {
                     })}
                   </View>
 
-                  <Text style={styles.label}>
-                    Gecələmə <Text style={styles.required}>*</Text>
-                  </Text>
-                  <Text style={styles.fromOriginHint}>
-                    {days < 2
-                      ? '2+ günlük marşrutlarda tətbiq olunur'
-                      : lodgingType === 'hotel'
-                        ? 'Yalnız otel kateqoriyası seçiləcək'
-                        : 'Fərdi ev, hostel və kempinq seçiləcək'}
-                  </Text>
-                  <View style={styles.optionRow}>
-                    {LODGING_OPTIONS.map((option) => {
-                      const selected = option.value === lodgingType;
-                      return (
-                        <Pressable
-                          key={option.value}
-                          onPress={() => setLodgingType(option.value)}
-                          style={[styles.optionChip, selected && styles.optionChipSelected]}
-                        >
-                          <Text
-                            style={[
-                              styles.optionChipText,
-                              selected && styles.optionChipTextSelected,
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {option.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-
                   <Text style={styles.label}>Neçə nəfər (istəyə bağlı)</Text>
                   <View style={styles.optionRow}>
                     {GROUP_OPTIONS.map((option) => {
@@ -1784,17 +1793,12 @@ export default function MarsrutScreen() {
                 >
                   <View style={styles.summaryCard}>
                     <View style={styles.summaryTitleRow}>
-                      <Text style={styles.summaryText} numberOfLines={1}>
-                        {plan.regionLabel} · {plan.daysCount} gün
+                      <Text style={styles.summaryText} numberOfLines={2}>
+                        {plan.total_cost
+                          ? `${plan.total_cost} · ${plan.regionLabel} · ${plan.daysCount} gün`
+                          : `${plan.regionLabel} · ${plan.daysCount} gün`}
                       </Text>
                     </View>
-                    {plan.total_cost ? (
-                      <View style={styles.summaryMetaRow}>
-                        <Text style={styles.summaryMeta} numberOfLines={1}>
-                          {plan.total_cost}
-                        </Text>
-                      </View>
-                    ) : null}
                     {plan.travel?.from_origin ? (
                       <Text style={styles.travelNote}>
                         Yola ~{Math.round(plan.travel.outbound_minutes ?? 0)} dəq
@@ -2136,11 +2140,36 @@ export default function MarsrutScreen() {
                                   {stop.duration ? (
                                     <Text style={styles.stopDuration}>{stop.duration}</Text>
                                   ) : null}
-                                  {stop.tip?.trim() ? (
-                                    <Text style={styles.stopTip} numberOfLines={2}>
-                                      {stop.tip.trim()}
-                                    </Text>
-                                  ) : null}
+                                  {String(stop.daypart || '').toLowerCase() === 'hotel'
+                                    ? (() => {
+                                        const fromTip = (stop.tip || '').trim();
+                                        if (/gecə\s*\/\s*\d/i.test(fromTip)) {
+                                          const cleaned = fromTip.replace(/^[(\s]+|[)\s]+$/g, '');
+                                          return (
+                                            <Text style={styles.stopTip} numberOfLines={1}>
+                                              {`(${cleaned})`}
+                                            </Text>
+                                          );
+                                        }
+                                        if (
+                                          stop.price_from != null &&
+                                          Number.isFinite(Number(stop.price_from))
+                                        ) {
+                                          const n = Math.round(Number(stop.price_from));
+                                          const cur = (
+                                            stop.price_currency || 'AZN'
+                                          )
+                                            .trim()
+                                            .toUpperCase() || 'AZN';
+                                          return (
+                                            <Text style={styles.stopTip} numberOfLines={1}>
+                                              {`(gecə/${n} ${cur})`}
+                                            </Text>
+                                          );
+                                        }
+                                        return null;
+                                      })()
+                                    : null}
                                   {leg ? (
                                     <View style={styles.stopLegBox}>
                                       <Text style={styles.stopLegPrimary}>
@@ -2217,7 +2246,10 @@ export default function MarsrutScreen() {
                       })}
 
                       {day.notes?.trim() &&
-                      !day.notes.includes('Səhər →') ? (
+                      (day.notes.includes('Çıxış') ||
+                        day.notes.includes('Geri dönüş') ||
+                        day.notes.toLowerCase().includes('yola çıx')) &&
+                      !/nahar|gecələmə|geceleme/i.test(day.notes) ? (
                         <Text style={styles.dayNotes}>{day.notes.trim()}</Text>
                       ) : null}
                     </View>

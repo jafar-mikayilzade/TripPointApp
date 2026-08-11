@@ -20,6 +20,8 @@ export type PlanRouteStop = {
   duration_minutes?: number;
   tip?: string;
   daypart?: string;
+  price_from?: number | null;
+  price_currency?: string | null;
 };
 
 export type PlanRouteDay = {

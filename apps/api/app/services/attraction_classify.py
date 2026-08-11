@@ -12,10 +12,16 @@ from typing import Any
 NATURE_CATS = frozenset({"nature", "waterfall", "mountain", "lake"})
 HISTORICAL_CATS = frozenset({"historical", "monument"})
 
-# Mobile InterestId → attraction categories (shared by plan + candidates)
+# Mobile InterestId / category chips → attraction categories (shared by plan + candidates)
+# "nature" does NOT include mountain — dağ yalnız ayrıca seçiləndə əlavə olunur.
 INTEREST_ATTRACTION_CATS: dict[str, set[str]] = {
-    "nature": {"nature", "waterfall", "mountain", "lake"},
+    "nature": {"nature"},
+    "waterfall": {"waterfall"},
+    "mountain": {"mountain"},
+    "lake": {"lake"},
     "history": {"historical", "monument"},
+    "historical": {"historical"},
+    "monument": {"monument"},
     "food": set(),
     "family": {"historical", "nature", "lake", "other", "monument"},
     "active": {"mountain", "nature", "waterfall"},
@@ -30,15 +36,18 @@ def interest_attraction_cats(interests: list[str] | None) -> set[str]:
         cats |= INTEREST_ATTRACTION_CATS.get(key, set())
     return cats
 
+
 _WATERFALL_RE = re.compile(
     r"şəlal|selal|waterfall|falls?\b|афурджа|afurc|afurja",
     re.I,
 )
 _LAKE_RE = re.compile(r"\bgöl\b|\bgol\b|\blake\b|nohur|reservoir", re.I)
 _MOUNTAIN_RE = re.compile(
-    r"dağ\b|dag\b|mountain|peak|tufanda[gğ]|şahda[gğ]|shahdag|laza\b",
+    r"dağ\b|dag\b|mountain|peak|zirv|tufanda[gğ]|şahda[gğ]|shahdag",
     re.I,
 )
+# OSM peaks often named like "Yerfi 2076.7 metr"
+_PEAK_ELEV_RE = re.compile(r"\d{3,4}(?:[.,]\d+)?\s*m(?:etr)?\b", re.I)
 _NATURE_RE = re.compile(
     r"təbiət|tebiet|nature|park\b|meşə|mesa|forest|canyon|kanyon|"
     r"təngəaltı|tangaalti|qəçrəş|qachresh|gechresh|viewpoint|"
@@ -148,3 +157,52 @@ def classify_attraction_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
         r["category"] = refine_attraction_category(r)
         out.append(r)
     return out
+
+
+def _row_category_set(row: dict[str, Any]) -> set[str]:
+    out: set[str] = set()
+    raw = row.get("categories")
+    if isinstance(raw, (list, tuple)):
+        for item in raw:
+            c = str(item or "").strip().lower()
+            if c:
+                out.add(c)
+    primary = str(row.get("category") or "").strip().lower()
+    if primary:
+        out.add(primary)
+    return out
+
+
+def looks_like_mountain_peak(row: dict[str, Any]) -> bool:
+    """True for mountain/peak POIs (category, name, or elevation label)."""
+    cats = _row_category_set(row)
+    if "mountain" in cats:
+        return True
+    name = str(row.get("name") or "")
+    if _WATERFALL_RE.search(name) or _LAKE_RE.search(name):
+        return False
+    if _MOUNTAIN_RE.search(name) or _PEAK_ELEV_RE.search(name):
+        return True
+    return refine_attraction_category(row) == "mountain"
+
+
+def attraction_matches_interests(
+    row: dict[str, Any],
+    interest_cats: set[str] | None,
+) -> bool:
+    """
+    Interest match with hard mountain gate.
+
+    POIs often carry categories=['nature','mountain']. Matching only on
+    intersection would let peaks into a «Təbiət» plan — reject mountains
+    unless «mountain» is explicitly in the interest set.
+    """
+    if not interest_cats:
+        return True
+    if "mountain" not in interest_cats and looks_like_mountain_peak(row):
+        return False
+    cats = _row_category_set(row)
+    if not cats:
+        refined = refine_attraction_category(row)
+        cats = {refined} if refined else set()
+    return bool(cats & set(interest_cats))
