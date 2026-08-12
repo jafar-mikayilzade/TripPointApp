@@ -682,6 +682,57 @@ export function createStyles(colors: ThemeColors) {
     fontWeight: '700',
     fontSize: 13,
   },
+  rejectReasonBlock: {
+    marginTop: 10,
+    gap: 8,
+  },
+  rejectReasonLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  templateScroll: {
+    flexGrow: 0,
+  },
+  templateChip: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginRight: 6,
+  },
+  templateChipActive: {
+    backgroundColor: colors.dangerSoft,
+    borderColor: colors.dangerText,
+  },
+  templateChipText: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  templateChipTextActive: {
+    color: colors.dangerText,
+    fontWeight: '600',
+  },
+  rejectInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: colors.text,
+    backgroundColor: colors.surface,
+  },
+  cancelRejectButton: {
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  cancelRejectText: {
+    color: colors.textMuted,
+    fontSize: 13,
+  },
   errorText: {
     marginTop: 12,
     color: colors.dangerText,

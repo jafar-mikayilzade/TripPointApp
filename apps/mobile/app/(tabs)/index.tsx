@@ -37,7 +37,7 @@ import {
 } from '../../components/PoiMapMarker';
 import { FavoriteButton } from '../../components/FavoriteButton';
 import { PoiPhotoGallery } from '../../components/PoiPhotoGallery';
-import { ProfileCornerButton } from '../../components/ProfileCornerButton';
+import { HamburgerMenuButton } from '../../components/HamburgerMenuButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
 import { useToast } from '../../components/Toast';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
@@ -1022,7 +1022,7 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
 
-              <ProfileCornerButton style={styles.profileCorner} />
+              <HamburgerMenuButton style={styles.profileCorner} />
 
               <TouchableOpacity
                 style={styles.locateButton}

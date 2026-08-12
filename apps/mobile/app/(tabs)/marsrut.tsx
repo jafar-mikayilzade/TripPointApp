@@ -26,7 +26,7 @@ import MapView, {
 } from '../../components/AppMap';
 import { CategoryIcon } from '../../components/CategoryIcon';
 import { DropdownButton } from '../../components/DropdownButton';
-import { ProfileCornerButton } from '../../components/ProfileCornerButton';
+import { HamburgerMenuButton } from '../../components/HamburgerMenuButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
 import { TripScheduleFields } from '../../components/TripScheduleFields';
 import { DEFAULT_REGION_ID, REGIONS } from '../../constants/regions';
@@ -1161,18 +1161,18 @@ export default function MarsrutScreen() {
       const minAttractions = Math.max(8, days * 4);
       if (attractions.length < minAttractions) {
         const { data: poisRaw, error: poisError } = await supabase
-          .from('pois')
+        .from('pois')
           .select(
             'id, name, category, categories, description, lat, lng, region, rating, rating_count, price_from, price_currency'
           )
-          .eq('status', 'approved')
-          .eq('region', regionId.toLowerCase())
+        .eq('status', 'approved')
+        .eq('region', regionId.toLowerCase())
           .order('rating', { ascending: false, nullsFirst: false })
           .limit(400);
 
         if (poisError && attractions.length === 0 && restaurants.length === 0) {
-          throw poisError;
-        }
+        throw poisError;
+      }
 
         if (poisRaw && poisRaw.length > 0) {
           const pois = keepInsideSelectedRegion(
@@ -1230,13 +1230,13 @@ export default function MarsrutScreen() {
                 interestCats.length > 0
                   ? hasAny(p, interestCats)
                   : hasAny(p, [
-                      'nature',
-                      'waterfall',
-                      'mountain',
-                      'lake',
-                      'historical',
-                      'monument',
-                      'other',
+          'nature',
+          'waterfall',
+          'mountain',
+          'lake',
+          'historical',
+          'monument',
+          'other',
                     ])
               )
               .sort(byRating),
@@ -1268,11 +1268,11 @@ export default function MarsrutScreen() {
         : [];
 
       const data = await requestPlanRoute({
-        region: regionId,
-        days,
-        budget,
-        interests,
-        groupType: group ?? 'solo',
+          region: regionId,
+          days,
+          budget,
+          interests,
+          groupType: group ?? 'solo',
         lodgingType,
         weather: weather
           ? {
@@ -1437,7 +1437,7 @@ export default function MarsrutScreen() {
     }
   };
 
-  return (
+    return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ResizableSplit
         initialTopRatio={MARSRUT_FORM_SPLIT}
@@ -1490,9 +1490,9 @@ export default function MarsrutScreen() {
                     >
                       <View style={styles.meMarker}>
                         <View style={styles.meMarkerDot} />
-                      </View>
+            </View>
                     </Marker>
-                  ) : null}
+                ) : null}
 
                   {planMapMarkers.map((m) => {
                     if (m.travel) {
@@ -1507,7 +1507,7 @@ export default function MarsrutScreen() {
                         >
                           <View style={styles.travelMarker}>
                             <FontAwesome name="car" size={11} color="#fff" />
-                          </View>
+                    </View>
                         </Marker>
                       );
                     }
@@ -1539,11 +1539,11 @@ export default function MarsrutScreen() {
                                 color="#fff"
                               />
                               <Text style={styles.markerText}>{m.label}</Text>
-                            </View>
+                    </View>
                           ) : (
                             <Text style={styles.markerText}>{m.label}</Text>
                           )}
-                        </View>
+                  </View>
                       </Marker>
                     );
                   })}
@@ -1563,7 +1563,7 @@ export default function MarsrutScreen() {
               ) : (
                 <View style={styles.mapPlaceholder}>
                   <Text style={styles.mapPlaceholderText}>Xəritə yüklənir…</Text>
-                </View>
+              </View>
               )}
 
               {plan ? (
@@ -1573,14 +1573,14 @@ export default function MarsrutScreen() {
                   </Text>
                 </TouchableOpacity>
               ) : null}
-              {plan ? <ProfileCornerButton style={styles.profileCorner} /> : null}
-            </View>
+              {plan ? <HamburgerMenuButton style={styles.profileCorner} /> : null}
+        </View>
           }
           bottom={
             <View style={styles.panel}>
               {!plan ? (
-                <ScrollView
-                  style={styles.flex}
+        <ScrollView
+          style={styles.flex}
                   contentContainerStyle={[
                     styles.formContent,
                     {
@@ -1588,9 +1588,9 @@ export default function MarsrutScreen() {
                       paddingBottom: responsive.formBottomPad,
                     },
                   ]}
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}
-                >
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
                   <View style={styles.formHeader}>
                     <View style={styles.formHeaderText}>
                       <Text
@@ -1598,15 +1598,15 @@ export default function MarsrutScreen() {
                         numberOfLines={2}
                       >
                         AI Marşrut Planlayıcı
-                      </Text>
+          </Text>
                       <Text
                         style={[styles.subtitle, { fontSize: responsive.subtitleSize }]}
                         numberOfLines={2}
                       >
                         Sizin üçün ən optimal marşrutu hazırlayırıq
-                      </Text>
+                  </Text>
                     </View>
-                    <ProfileCornerButton />
+                    <HamburgerMenuButton />
                   </View>
 
                   {errorMessage ? (
@@ -1669,7 +1669,7 @@ export default function MarsrutScreen() {
                       <Text style={styles.fromOriginLabel}>Cari məkandan gedirəm</Text>
                       <Text style={styles.fromOriginHint}>
                         Marşrut olduğun yerdən regiona başlayır (gediş+qayıdış)
-                      </Text>
+          </Text>
                     </View>
                     <Switch
                       value={fromOrigin}
@@ -1691,16 +1691,16 @@ export default function MarsrutScreen() {
                     showWeather={false}
                   />
 
-                  <Text style={styles.label}>
-                    Büdcə <Text style={styles.required}>*</Text>
-                  </Text>
+          <Text style={styles.label}>
+            Büdcə <Text style={styles.required}>*</Text>
+          </Text>
                   <View style={styles.optionRow}>
-                    {BUDGET_OPTIONS.map((option) => {
-                      const selected = option.value === budget;
-                      return (
-                        <Pressable
-                          key={option.value}
-                          onPress={() => setBudget(option.value)}
+            {BUDGET_OPTIONS.map((option) => {
+              const selected = option.value === budget;
+              return (
+                <Pressable
+                  key={option.value}
+                  onPress={() => setBudget(option.value)}
                           style={[styles.optionChip, selected && styles.optionChipSelected]}
                         >
                           <Text
@@ -1710,23 +1710,23 @@ export default function MarsrutScreen() {
                             ]}
                             numberOfLines={1}
                           >
-                            {option.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
                   </View>
 
-                  <Text style={styles.label}>
-                    Maraqlar <Text style={styles.required}>*</Text>
-                  </Text>
+          <Text style={styles.label}>
+            Maraqlar <Text style={styles.required}>*</Text>
+          </Text>
                   <View style={styles.optionRow}>
-                    {INTEREST_OPTIONS.map((option) => {
-                      const selected = interests.includes(option.id);
-                      return (
-                        <Pressable
-                          key={option.id}
-                          onPress={() => toggleInterest(option.id)}
+            {INTEREST_OPTIONS.map((option) => {
+              const selected = interests.includes(option.id);
+              return (
+                <Pressable
+                  key={option.id}
+                  onPress={() => toggleInterest(option.id)}
                           style={[
                             styles.optionChip,
                             selected && styles.optionChipAccent,
@@ -1739,21 +1739,21 @@ export default function MarsrutScreen() {
                             ]}
                             numberOfLines={1}
                           >
-                            {option.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
 
-                  <Text style={styles.label}>Neçə nəfər (istəyə bağlı)</Text>
+          <Text style={styles.label}>Neçə nəfər (istəyə bağlı)</Text>
                   <View style={styles.optionRow}>
-                    {GROUP_OPTIONS.map((option) => {
-                      const selected = option.value === group;
-                      return (
-                        <Pressable
-                          key={option.value}
-                          onPress={() => setGroup(selected ? null : option.value)}
+            {GROUP_OPTIONS.map((option) => {
+              const selected = option.value === group;
+              return (
+                <Pressable
+                  key={option.value}
+                  onPress={() => setGroup(selected ? null : option.value)}
                           style={[styles.optionChip, selected && styles.optionChipSelected]}
                         >
                           <Text
@@ -1763,25 +1763,25 @@ export default function MarsrutScreen() {
                             ]}
                             numberOfLines={1}
                           >
-                            {option.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
                   </View>
 
-                  <Pressable
+          <Pressable
                     style={[
                       styles.primaryButton,
                       (!canSubmit || loading) && styles.primaryButtonDisabled,
                     ]}
-                    onPress={planRoute}
-                    disabled={!canSubmit || loading}
-                  >
-                    {loading ? (
+            onPress={planRoute}
+            disabled={!canSubmit || loading}
+          >
+            {loading ? (
                       <View style={styles.loadingBlock}>
                         <View style={styles.loadingRow}>
-                          <ActivityIndicator color="#fff" />
+              <ActivityIndicator color="#fff" />
                           <Text style={styles.primaryButtonText} numberOfLines={2}>
                             {loadingMessage}
                           </Text>
@@ -1790,11 +1790,11 @@ export default function MarsrutScreen() {
                           Bir neçə saniyə çəkə bilər — rahat gözləyin
                         </Text>
                       </View>
-                    ) : (
-                      <Text style={styles.primaryButtonText}>Marşrut Hazırla</Text>
-                    )}
-                  </Pressable>
-                </ScrollView>
+            ) : (
+              <Text style={styles.primaryButtonText}>Marşrut Hazırla</Text>
+            )}
+          </Pressable>
+        </ScrollView>
               ) : (
                 <ScrollView
                   style={styles.flex}
@@ -1808,7 +1808,7 @@ export default function MarsrutScreen() {
                           ? `${plan.total_cost} · ${plan.regionLabel} · ${plan.daysCount} gün`
                           : `${plan.regionLabel} · ${plan.daysCount} gün`}
                       </Text>
-                    </View>
+      </View>
                     {plan.travel?.from_origin ? (
                       <Text style={styles.travelNote}>
                         Yola ~{Math.round(plan.travel.outbound_minutes ?? 0)} dəq
@@ -2017,7 +2017,7 @@ export default function MarsrutScreen() {
 
                   {plan.days.map((day, dayIdx) => {
                     const visitList = visitStopsOnly(day.stops);
-                    return (
+  return (
                     <View key={day.day} style={styles.dayBlock}>
                       <View style={styles.dayHeader}>
                         <View
@@ -2027,7 +2027,7 @@ export default function MarsrutScreen() {
                           ]}
                         >
                           <Text style={styles.dayBadgeText}>{day.day}</Text>
-                        </View>
+    </View>
                         <View style={styles.dayHeaderMain}>
                           <Text style={styles.dayTitle} numberOfLines={2}>
                             {day.title}

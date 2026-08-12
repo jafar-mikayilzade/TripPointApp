@@ -1,4 +1,3 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useMemo, useState } from 'react';
 import {
@@ -16,12 +15,10 @@ import {
   ListingDetailModal,
   type ListingWithCreator,
 } from '../../components/ListingDetailModal';
-import { ProfileCornerButton } from '../../components/ProfileCornerButton';
-import { SavedRouteDetailModal } from '../../components/SavedRouteDetailModal';
-import { ShareAsTourModal } from '../../components/ShareAsTourModal';
+import { HamburgerMenuButton } from '../../components/HamburgerMenuButton';
 import { SubscribeMenuButton } from '../../components/SubscribeMenuButton';
 import { ScreenHeader } from '../../components/ScreenHeader';
-import { useInfoToast } from '../../components/InfoToastProvider';
+
 import { REGIONS } from '../../constants/regions';
 import type { ThemeColors } from '../../constants/theme';
 import { useThemeColors } from '../../theme/ThemeProvider';
@@ -34,30 +31,14 @@ import {
   listFavoriteListingIdsOrdered,
   listFavoritePoiIdsOrdered,
 } from '../../lib/favorites';
-import {
-  deleteSavedRoute,
-  listSavedRoutes,
-  type SavedRoute,
-} from '../../lib/savedRoutes';
-import {
-  listMyNotifications,
-  listMySubscriptions,
-  markNotificationRead,
-  toggleSubscription,
-  type AppNotification,
-  type MySubscriptionRow,
-} from '../../lib/subscriptions';
 import { supabase } from '../../lib/supabase';
 import type { Listing, ListingType, Poi, Profile } from '../../types/database';
 
-type TabId = 'listings' | 'pois' | 'routes' | 'subscriptions' | 'notifications';
+type TabId = 'listings' | 'pois';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'listings', label: 'Elanlar' },
   { id: 'pois', label: 'Yerlər' },
-  { id: 'routes', label: 'Marşrutlarım' },
-  { id: 'subscriptions', label: 'Abunə' },
-  { id: 'notifications', label: 'Bildiriş' },
 ];
 
 function getListingTypeMeta(colors: ThemeColors): Record<
@@ -98,43 +79,26 @@ export default function SevimlilerScreen() {
 
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { showInfo, showError } = useInfoToast();
+
   const { padH, isCompact } = useResponsiveLayout();
 
   const [tab, setTab] = useState<TabId>('listings');
   const [listings, setListings] = useState<ListingWithCreator[]>([]);
   const [pois, setPois] = useState<Poi[]>([]);
-  const [routes, setRoutes] = useState<SavedRoute[]>([]);
-  const [subscriptions, setSubscriptions] = useState<MySubscriptionRow[]>([]);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [selectedListing, setSelectedListing] = useState<ListingWithCreator | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
-  const [shareTourRoute, setShareTourRoute] = useState<SavedRoute | null>(null);
-  const [viewRoute, setViewRoute] = useState<SavedRoute | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setErrorMessage(null);
     const errors: string[] = [];
 
-    const [listingIds, poiIds, routesRes, subsRes, notifsRes] = await Promise.all([
+    const [listingIds, poiIds] = await Promise.all([
       listFavoriteListingIdsOrdered(),
       listFavoritePoiIdsOrdered(),
-      listSavedRoutes(),
-      listMySubscriptions(),
-      listMyNotifications(),
     ]);
-
-    setRoutes(routesRes.data);
-    if (routesRes.error) errors.push(routesRes.error);
-
-    setSubscriptions(subsRes.data);
-    if (subsRes.error) errors.push(subsRes.error);
-
-    setNotifications(notifsRes.data);
-    if (notifsRes.error) errors.push(notifsRes.error);
 
     try {
       if (listingIds.length === 0) {
@@ -219,106 +183,18 @@ export default function SevimlilerScreen() {
 
   const listingCount = listings.length;
   const poiCount = pois.length;
-  const routeCount = routes.length;
-  const subscriptionCount = subscriptions.length;
-  const unreadCount = notifications.filter((n) => !n.read_at).length;
-
-  const subListingIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const row of subscriptions) {
-      if (row.target_type === 'listing') ids.add(row.target_id);
-    }
-    return ids;
-  }, [subscriptions]);
-
-  const subOrganizerIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const row of subscriptions) {
-      if (row.target_type === 'organizer') ids.add(row.target_id);
-    }
-    return ids;
-  }, [subscriptions]);
-
-  const subsReady = !loading;
 
   function tabCount(id: TabId): number {
-    if (id === 'listings') {
-      return listingCount;
-    }
-    if (id === 'pois') {
-      return poiCount;
-    }
-    if (id === 'routes') {
-      return routeCount;
-    }
-    if (id === 'subscriptions') {
-      return subscriptionCount;
-    }
-    return unreadCount;
-  }
-
-  async function openSubscription(item: MySubscriptionRow) {
-    if (item.target_type === 'organizer') {
-      router.push({
-        pathname: '/(tabs)/profil',
-        params: { userId: item.target_id },
-      } as never);
-      return;
-    }
-    const { data, error } = await supabase
-      .from('listings')
-      .select(LISTING_PUBLIC_COLUMNS)
-      .eq('id', item.target_id)
-      .maybeSingle();
-    if (error || !data) {
-      setErrorMessage('Elan tapılmadı');
-      return;
-    }
-    let creator: ListingWithCreator['creator'] = null;
-    if (data.created_by) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id, full_name, avatar_url, phone, is_verified')
-        .eq('id', data.created_by)
-        .maybeSingle();
-      creator = profile ?? null;
-    }
-    setSelectedListing({ ...data, creator });
-    setDetailVisible(true);
-  }
-
-  async function handleUnsubscribe(item: MySubscriptionRow) {
-    const result = await toggleSubscription(item.target_type, item.target_id);
-    if (result.error) {
-      setErrorMessage(result.error);
-      showError(result.error);
-      return;
-    }
-    if (!result.subscribed) {
-      setSubscriptions((prev) => prev.filter((s) => s.id !== item.id));
-      showInfo('Abunəlikdən çıxdınız');
-    }
-  }
-
-  async function handleDeleteRoute(route: SavedRoute) {
-    const { error } = await deleteSavedRoute(route.id);
-    if (error) {
-      setErrorMessage(error);
-      showError(error);
-      return;
-    }
-    setRoutes((prev) => prev.filter((r) => r.id !== route.id));
-    setViewRoute((prev) => (prev?.id === route.id ? null : prev));
-    showInfo('Marşrut yadda saxlanandan çıxarıldı');
+    return id === 'listings' ? listingCount : poiCount;
   }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <ScreenHeader
-        title="sevimlilər"
-        subtitle="Bookmark · Marşrutlarım · abunə"
+        title="Sevimlilər"
+        subtitle="Saxladığınız elanlar və yerlər"
         style={{ paddingHorizontal: padH }}
-        right={<ProfileCornerButton />}
+        right={<HamburgerMenuButton />}
       />
 
       <View style={[styles.tabRow, { paddingHorizontal: padH }]}>
@@ -326,15 +202,7 @@ export default function SevimlilerScreen() {
           const selected = tab === item.id;
           const count = tabCount(item.id);
           const labelBase = isCompact
-            ? (
-                {
-                  listings: 'Elan',
-                  pois: 'Yer',
-                  routes: 'Marşrutlarım',
-                  subscriptions: 'Abunə',
-                  notifications: 'Bildiriş',
-                } as const
-              )[item.id]
+            ? ({ listings: 'Elan', pois: 'Yer' } as const)[item.id]
             : item.label;
           const label = `${labelBase} (${count})`;
           return (
@@ -386,15 +254,10 @@ export default function SevimlilerScreen() {
                 setSelectedListing(item);
                 setDetailVisible(true);
               }}
-              statusReady={subsReady}
-              listingSubscribed={subListingIds.has(item.id)}
-              organizerSubscribed={subOrganizerIds.has(
-                item.created_by ?? item.creator?.id ?? ''
-              )}
             />
           )}
         />
-      ) : tab === 'pois' ? (
+      ) : (
         <FlatList
           data={pois}
           keyExtractor={(item) => item.id}
@@ -418,102 +281,6 @@ export default function SevimlilerScreen() {
             />
           )}
         />
-      ) : tab === 'routes' ? (
-        <FlatList
-          data={routes}
-          keyExtractor={(item) => item.id}
-          style={styles.flex}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshing={loading}
-          onRefresh={() => void load()}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>Marşrutlarınız boşdur</Text>
-              <Text style={styles.emptySubtitle}>
-                Qur və ya Marşrut ekranında bookmark ilə «Marşrutlarım»a əlavə edin
-              </Text>
-            </View>
-          }
-          renderItem={({ item }) => (
-            <SavedRouteCard
-              route={item}
-              onPress={() => setViewRoute(item)}
-              onUnsave={() => void handleDeleteRoute(item)}
-              onShareAsTour={
-                item.source === 'manual' && !item.listing_id
-                  ? () => setShareTourRoute(item)
-                  : undefined
-              }
-            />
-          )}
-        />
-      ) : tab === 'subscriptions' ? (
-        <FlatList
-          data={subscriptions}
-          keyExtractor={(item) => item.id}
-          style={styles.flex}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshing={loading}
-          onRefresh={() => void load()}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>Abunəlik yoxdur</Text>
-              <Text style={styles.emptySubtitle}>
-                Tur və ya təşkilatçıya abunə olun — burada görünəcək
-              </Text>
-            </View>
-          }
-          ListHeaderComponent={
-            subscriptions.length > 0 ? (
-              <Text style={styles.sectionHint}>
-                Abunə olduğunuz turlar və təşkilatçılar
-              </Text>
-            ) : null
-          }
-          renderItem={({ item }) => (
-            <SubscriptionCard
-              item={item}
-              onPress={() => void openSubscription(item)}
-              onUnsubscribe={() => void handleUnsubscribe(item)}
-            />
-          )}
-        />
-      ) : (
-        <FlatList
-          data={notifications}
-          keyExtractor={(item) => item.id}
-          style={styles.flex}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshing={loading}
-          onRefresh={() => void load()}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>Bildiriş yoxdur</Text>
-              <Text style={styles.emptySubtitle}>
-                Tura və ya təşkilatçıya abunə olun — yeniliklər burada görünəcək
-              </Text>
-            </View>
-          }
-          renderItem={({ item }) => (
-            <NotificationCard
-              item={item}
-              onPress={() => {
-                void markNotificationRead(item.id).then(() => {
-                  setNotifications((prev) =>
-                    prev.map((n) =>
-                      n.id === item.id
-                        ? { ...n, read_at: n.read_at ?? new Date().toISOString() }
-                        : n
-                    )
-                  );
-                });
-              }}
-            />
-          )}
-        />
       )}
 
       <ListingDetailModal
@@ -531,44 +298,6 @@ export default function SevimlilerScreen() {
         }}
       />
 
-      <ShareAsTourModal
-        visible={!!shareTourRoute}
-        onClose={() => setShareTourRoute(null)}
-        savedRouteId={shareTourRoute?.id}
-        regionId={shareTourRoute?.region}
-        defaultTitle={shareTourRoute?.title}
-        defaultDescription={shareTourRoute?.summary ?? undefined}
-        stops={(shareTourRoute?.stops ?? []).map((stop) => ({
-          name: stop.name,
-          lat: stop.lat,
-          lng: stop.lng,
-          poiId: stop.poi_id,
-        }))}
-        onCreated={() => {
-          setShareTourRoute(null);
-          setViewRoute(null);
-          void load();
-        }}
-      />
-
-      <SavedRouteDetailModal
-        route={viewRoute}
-        visible={!!viewRoute}
-        onClose={() => setViewRoute(null)}
-        onUnsave={() => {
-          if (viewRoute) {
-            void handleDeleteRoute(viewRoute);
-          }
-        }}
-        onShareAsTour={
-          viewRoute && viewRoute.source === 'manual' && !viewRoute.listing_id
-            ? () => {
-                setShareTourRoute(viewRoute);
-                setViewRoute(null);
-              }
-            : undefined
-        }
-      />
     </View>
   );
 }
@@ -680,198 +409,6 @@ function FavoritePoiCard({ poi, onPress }: { poi: Poi; onPress: () => void }) {
 
 const MemoFavoritePoiCard = memo(FavoritePoiCard);
 
-function SavedRouteCard({
-  route,
-  onPress,
-  onUnsave,
-  onShareAsTour,
-}: {
-  route: SavedRoute;
-  onPress: () => void;
-  onUnsave: () => void;
-  onShareAsTour?: () => void;
-}) {
-  const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-
-  const region = getRegionLabel(route.region);
-  const sourceLabel = route.source === 'ai' ? 'AI' : 'Əl ilə';
-  const stopCount = route.stops?.length ?? 0;
-  const shared = !!route.listing_id;
-
-  return (
-    <Pressable style={styles.card} onPress={onPress}>
-      <View style={styles.cardInner}>
-        <View style={[styles.poiIconWrap, { backgroundColor: colors.successSoft }]}>
-          <Text style={styles.routeIconText}>{route.source === 'ai' ? 'AI' : 'Q'}</Text>
-        </View>
-        <View style={styles.cardBody}>
-          <View style={styles.cardTop}>
-            <View style={[styles.badge, { backgroundColor: colors.accentSoft }]}>
-              <Text style={[styles.badgeText, { color: colors.accent }]}>{sourceLabel}</Text>
-            </View>
-            <View style={styles.topRightCluster}>
-              <Text style={styles.topRight} numberOfLines={1}>
-                {stopCount} nöqtə
-              </Text>
-              <Pressable
-                style={styles.bookmarkUnsaveBtn}
-                onPress={(e) => {
-                  e.stopPropagation?.();
-                  onUnsave();
-                }}
-                hitSlop={8}
-                accessibilityLabel="Sevimlidən çıxar"
-              >
-                <FontAwesome name="bookmark" size={14} color={colors.favorite} />
-              </Pressable>
-            </View>
-          </View>
-          <Text style={styles.cardTitle} numberOfLines={1}>
-            {route.title}
-          </Text>
-          <View style={styles.pairRow}>
-            <Text style={styles.pairLeft} numberOfLines={1}>
-              {region}
-              {route.days_count > 1 ? ` · ${route.days_count} gün` : ''}
-              {shared ? ' · Tur' : ''}
-            </Text>
-          </View>
-          {onShareAsTour ? (
-            <View style={styles.routeActions}>
-              <Pressable
-                style={styles.routeActionBtn}
-                onPress={(e) => {
-                  e.stopPropagation?.();
-                  onShareAsTour();
-                }}
-              >
-                <Text style={styles.routeActionTour}>Tur kimi paylaş</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </View>
-      </View>
-    </Pressable>
-  );
-}
-
-function SubscriptionCard({
-  item,
-  onPress,
-  onUnsubscribe,
-}: {
-  item: MySubscriptionRow;
-  onPress: () => void;
-  onUnsubscribe: () => void;
-}) {
-  const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-
-  const isTour = item.target_type === 'listing';
-  const initial = item.title.charAt(0).toUpperCase() || '?';
-
-  return (
-    <Pressable style={styles.card} onPress={onPress}>
-      <View style={styles.cardInner}>
-        {item.avatar_url ? (
-          <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
-        ) : (
-          <View
-            style={[
-              styles.avatarPlaceholder,
-              { backgroundColor: isTour ? colors.successSoft : colors.accentSoft },
-            ]}
-          >
-            {isTour ? (
-              <FontAwesome name="bell" size={14} color={colors.success} />
-            ) : (
-              <Text style={styles.avatarInitial}>{initial}</Text>
-            )}
-          </View>
-        )}
-        <View style={styles.cardBody}>
-          <View style={styles.cardTop}>
-            <View
-              style={[
-                styles.badge,
-                {
-                  backgroundColor: isTour ? colors.successSoft : colors.accentSoft,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.badgeText,
-                  { color: isTour ? colors.success : colors.accent },
-                ]}
-              >
-                {isTour ? 'Tur' : 'Təşkilatçı'}
-              </Text>
-            </View>
-          </View>
-          <Text style={styles.cardTitle} numberOfLines={1}>
-            {item.title}
-          </Text>
-          {item.subtitle ? (
-            <Text style={styles.pairLeft} numberOfLines={1}>
-              {item.subtitle}
-            </Text>
-          ) : null}
-        </View>
-        <Pressable
-          style={styles.subUnsubBtn}
-          onPress={(e) => {
-            e.stopPropagation?.();
-            onUnsubscribe();
-          }}
-          hitSlop={8}
-          accessibilityLabel="Abunəlikdən çıx"
-        >
-          <FontAwesome name="bell" size={14} color={colors.accent} />
-        </Pressable>
-      </View>
-    </Pressable>
-  );
-}
-
-function NotificationCard({
-  item,
-  onPress,
-}: {
-  item: AppNotification;
-  onPress: () => void;
-}) {
-  const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-
-  const unread = !item.read_at;
-  return (
-    <Pressable
-      style={[styles.card, unread && styles.notifUnread]}
-      onPress={onPress}
-    >
-      <View style={styles.cardBody}>
-        <Text style={styles.cardTitle} numberOfLines={1}>
-          {item.title}
-        </Text>
-        {item.body ? (
-          <Text style={styles.notifBody} numberOfLines={3}>
-            {item.body}
-          </Text>
-        ) : null}
-        <Text style={styles.notifMeta}>
-          {new Date(item.created_at).toLocaleString('az-AZ', {
-            day: '2-digit',
-            month: 'short',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </Text>
-      </View>
-    </Pressable>
-  );
-}
 
 function SkeletonCard() {
   const colors = useThemeColors();
@@ -1120,70 +657,6 @@ function createStyles(colors: ThemeColors) {
     borderRadius: 4,
     backgroundColor: colors.skeleton,
     marginTop: 4,
-  },
-  routeIconText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: colors.success,
-  },
-  routeActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 10,
-    marginTop: 8,
-  },
-  routeActionBtn: {
-    paddingVertical: 4,
-  },
-  routeActionTour: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.success,
-  },
-  bookmarkUnsaveBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 1.5,
-    borderColor: colors.favorite,
-    backgroundColor: '#FFF3D0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sectionHint: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textMuted,
-    marginBottom: 8,
-    marginTop: 2,
-    paddingHorizontal: 2,
-  },
-  subUnsubBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1.5,
-    borderColor: colors.accent,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notifUnread: {
-    borderColor: colors.accent,
-    backgroundColor: colors.accentSoft,
-  },
-  notifBody: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    lineHeight: 17,
-    marginTop: 2,
-  },
-  notifMeta: {
-    marginTop: 6,
-    fontSize: 11,
-    color: colors.textMuted,
-    fontWeight: '500',
   },
 });
 }

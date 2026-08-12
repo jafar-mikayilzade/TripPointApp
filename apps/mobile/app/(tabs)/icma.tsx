@@ -4,7 +4,7 @@ import {
   type ListingWithCreator,
 } from '../../components/ListingDetailModal';
 import { SubscribeMenuButton } from '../../components/SubscribeMenuButton';
-import { ProfileCornerButton } from '../../components/ProfileCornerButton';
+import { HamburgerMenuButton } from '../../components/HamburgerMenuButton';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { REGIONS } from '../../constants/regions';
 import { getErrorMessage } from '../../lib/errors';
@@ -202,7 +202,7 @@ export default function IcmaScreen() {
             <Pressable style={styles.addButton} onPress={() => setCreateVisible(true)} hitSlop={8}>
               <FontAwesome name="plus" size={14} color={colors.textOnAccent} />
             </Pressable>
-            <ProfileCornerButton />
+            <HamburgerMenuButton />
           </View>
         }
       />

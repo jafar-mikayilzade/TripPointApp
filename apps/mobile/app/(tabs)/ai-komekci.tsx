@@ -25,7 +25,7 @@ import MapView, {
 } from '../../components/AppMap';
 import { CategoryIcon } from '../../components/CategoryIcon';
 import { DropdownButton } from '../../components/DropdownButton';
-import { ProfileCornerButton } from '../../components/ProfileCornerButton';
+import { HamburgerMenuButton } from '../../components/HamburgerMenuButton';
 import { ResizableSplit } from '../../components/ResizableSplit';
 import { TripScheduleFields } from '../../components/TripScheduleFields';
 import { useResponsiveLayout } from '../../lib/layout';
@@ -905,7 +905,7 @@ export default function AiKomekciScreen() {
               </View>
             )}
 
-            <ProfileCornerButton style={styles.profileCorner} />
+            <HamburgerMenuButton style={styles.profileCorner} />
 
             {routeStops.length > 0 ? (
               <TouchableOpacity style={styles.clearBadge} onPress={handleClear} hitSlop={6}>

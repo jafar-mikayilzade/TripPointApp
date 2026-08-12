@@ -37,6 +37,7 @@ import {
 } from '../lib/moderation';
 import {
   listListingSubscribers,
+  notifyJoinRequest,
   notifyParticipantStatus,
   notifyTourSubscribersUpdate,
   type ListingSubscriberRow,
@@ -264,6 +265,16 @@ export function ListingDetailModal({
   const [participants, setParticipants] = useState<ParticipantRow[]>([]);
   const [loadingParticipants, setLoadingParticipants] = useState(false);
   const [updatingParticipantId, setUpdatingParticipantId] = useState<string | null>(null);
+  const [rejectingParticipantId, setRejectingParticipantId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+
+  const REJECT_TEMPLATES = [
+    'Yer doludur',
+    'Müraciət tam aydın deyil',
+    'Bu tur artıq ləğv olunub',
+    'Məlumatlar uyğun deyil',
+    'Başqa bir səbəb',
+  ];
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -562,6 +573,24 @@ export function ListingDetailModal({
 
       void trackEvent('listing_join', { listingId: listing.id, type: listing.type });
       showInfoToast('Sorğunuz göndərildi, təsdiq gözlənilir');
+
+      // Notify organizer immediately
+      if (listing.created_by) {
+        const { data: myProfile } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', currentUserId)
+          .maybeSingle();
+        void notifyJoinRequest({
+          organizerId: listing.created_by,
+          requesterId: currentUserId,
+          requesterName: myProfile?.full_name ?? null,
+          listingId: listing.id,
+          listingTitle: listing.title,
+          message: joinMessage.trim() || null,
+        });
+      }
+
       setShowJoinForm(false);
       setJoinMessage('');
     } catch (err) {
@@ -571,15 +600,24 @@ export function ListingDetailModal({
     }
   }
 
-  async function updateParticipantStatus(participantId: string, status: 'approved' | 'rejected') {
+  async function updateParticipantStatus(
+    participantId: string,
+    status: 'approved' | 'rejected',
+    reason?: string
+  ) {
     setUpdatingParticipantId(participantId);
     setErrorMessage(null);
 
     const participant = participants.find((row) => row.id === participantId);
 
+    const updatePayload: Record<string, unknown> = { status };
+    if (status === 'rejected' && reason?.trim()) {
+      updatePayload.rejection_reason = reason.trim();
+    }
+
     const { error } = await supabase
       .from('listing_participants')
-      .update({ status })
+      .update(updatePayload)
       .eq('id', participantId);
 
     if (error) {
@@ -592,6 +630,8 @@ export function ListingDetailModal({
       current.map((row) => (row.id === participantId ? { ...row, status } : row))
     );
     setUpdatingParticipantId(null);
+    setRejectingParticipantId(null);
+    setRejectReason('');
 
     if (listing && participant?.user_id && currentUserId) {
       void notifyParticipantStatus({
@@ -600,8 +640,19 @@ export function ListingDetailModal({
         listingTitle: listing.title,
         approved: status === 'approved',
         actorId: currentUserId,
+        rejectionReason: status === 'rejected' ? (reason?.trim() || null) : null,
       });
     }
+  }
+
+  function startReject(participantId: string) {
+    setRejectingParticipantId(participantId);
+    setRejectReason('');
+  }
+
+  function cancelReject() {
+    setRejectingParticipantId(null);
+    setRejectReason('');
   }
 
   async function handleDeleteListing() {
@@ -1243,30 +1294,76 @@ export function ListingDetailModal({
                               </View>
 
                               {isOwner && participant.status === 'pending' ? (
-                                <View style={styles.participantActions}>
-                                  <Pressable
-                                    style={styles.approveButton}
-                                    disabled={updatingParticipantId === participant.id}
-                                    onPress={() =>
-                                      updateParticipantStatus(participant.id, 'approved')
-                                    }
-                                  >
-                                    {updatingParticipantId === participant.id ? (
-                                      <ActivityIndicator color={colors.success} size="small" />
-                                    ) : (
-                                      <Text style={styles.approveButtonText}>✓ Təsdiqlə</Text>
-                                    )}
-                                  </Pressable>
-                                  <Pressable
-                                    style={styles.rejectButton}
-                                    disabled={updatingParticipantId === participant.id}
-                                    onPress={() =>
-                                      updateParticipantStatus(participant.id, 'rejected')
-                                    }
-                                  >
-                                    <Text style={styles.rejectButtonText}>✗ Rədd et</Text>
-                                  </Pressable>
-                                </View>
+                                rejectingParticipantId === participant.id ? (
+                                  <View style={styles.rejectReasonBlock}>
+                                    <Text style={styles.rejectReasonLabel}>Rədd etmə səbəbi:</Text>
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.templateScroll}>
+                                      {REJECT_TEMPLATES.map((t) => (
+                                        <Pressable
+                                          key={t}
+                                          style={[
+                                            styles.templateChip,
+                                            rejectReason === t && styles.templateChipActive,
+                                          ]}
+                                          onPress={() => setRejectReason(t)}
+                                        >
+                                          <Text style={[
+                                            styles.templateChipText,
+                                            rejectReason === t && styles.templateChipTextActive,
+                                          ]}>{t}</Text>
+                                        </Pressable>
+                                      ))}
+                                    </ScrollView>
+                                    <TextInput
+                                      style={styles.rejectInput}
+                                      value={rejectReason}
+                                      onChangeText={setRejectReason}
+                                      placeholder="Ətraflı səbəb (opsional)"
+                                      placeholderTextColor={colors.textMuted}
+                                    />
+                                    <View style={styles.participantActions}>
+                                      <Pressable
+                                        style={styles.rejectButton}
+                                        disabled={updatingParticipantId === participant.id}
+                                        onPress={() =>
+                                          void updateParticipantStatus(participant.id, 'rejected', rejectReason)
+                                        }
+                                      >
+                                        {updatingParticipantId === participant.id ? (
+                                          <ActivityIndicator color="#fff" size="small" />
+                                        ) : (
+                                          <Text style={styles.rejectButtonText}>✗ Rədd et</Text>
+                                        )}
+                                      </Pressable>
+                                      <Pressable style={styles.cancelRejectButton} onPress={cancelReject}>
+                                        <Text style={styles.cancelRejectText}>Ləğv et</Text>
+                                      </Pressable>
+                                    </View>
+                                  </View>
+                                ) : (
+                                  <View style={styles.participantActions}>
+                                    <Pressable
+                                      style={styles.approveButton}
+                                      disabled={updatingParticipantId === participant.id}
+                                      onPress={() =>
+                                        void updateParticipantStatus(participant.id, 'approved')
+                                      }
+                                    >
+                                      {updatingParticipantId === participant.id ? (
+                                        <ActivityIndicator color={colors.success} size="small" />
+                                      ) : (
+                                        <Text style={styles.approveButtonText}>✓ Təsdiqlə</Text>
+                                      )}
+                                    </Pressable>
+                                    <Pressable
+                                      style={styles.rejectButton}
+                                      disabled={updatingParticipantId === participant.id}
+                                      onPress={() => startReject(participant.id)}
+                                    >
+                                      <Text style={styles.rejectButtonText}>✗ Rədd et</Text>
+                                    </Pressable>
+                                  </View>
+                                )
                               ) : null}
                             </View>
                           </View>

@@ -10,7 +10,8 @@ export type AppNotificationKind =
   | 'tour_cancelled'
   | 'weather_tip'
   | 'explore_region'
-  | 'system_tip';
+  | 'system_tip'
+  | 'join_request';
 
 export type AppNotification = {
   id: string;
@@ -259,6 +260,32 @@ export async function notifyOrganizerNewTour(input: {
   });
 }
 
+/** Yeni qoşulma sorğusu — təşkilatçıya bildiriş */
+export async function notifyJoinRequest(input: {
+  organizerId: string;
+  requesterId: string;
+  requesterName: string | null;
+  listingId: string;
+  listingTitle: string;
+  message?: string | null;
+}): Promise<void> {
+  if (!input.organizerId || input.organizerId === input.requesterId) {
+    return;
+  }
+  const name = input.requesterName?.trim() || 'Bir istifadəçi';
+  const body = input.message?.trim()
+    ? `${name}: "${input.message.trim().slice(0, 120)}"`
+    : `${name} qoşulmaq istəyir.`;
+  await insertNotificationsForUsers({
+    userIds: [input.organizerId],
+    kind: 'join_request',
+    title: `Qoşulma sorğusu — ${input.listingTitle}`,
+    body,
+    listingId: input.listingId,
+    actorId: input.requesterId,
+  });
+}
+
 /** İştirakçı statusu dəyişəndə — yalnız həmin istifadəçiyə */
 export async function notifyParticipantStatus(input: {
   userId: string;
@@ -266,17 +293,24 @@ export async function notifyParticipantStatus(input: {
   listingTitle: string;
   approved: boolean;
   actorId: string;
+  rejectionReason?: string | null;
 }): Promise<void> {
   if (!input.userId || input.userId === input.actorId) {
     return;
   }
+  let body: string;
+  if (input.approved) {
+    body = `"${input.listingTitle}" elanına qoşulmanız təsdiqləndi. 🎉`;
+  } else if (input.rejectionReason?.trim()) {
+    body = `"${input.listingTitle}" elanına müraciətiniz rədd edildi.\nSəbəb: ${input.rejectionReason.trim()}`;
+  } else {
+    body = `"${input.listingTitle}" elanına müraciətiniz rədd edildi.`;
+  }
   await insertNotificationsForUsers({
     userIds: [input.userId],
     kind: 'tour_update',
-    title: input.approved ? 'Müraciət təsdiqləndi' : 'Müraciət rədd edildi',
-    body: input.approved
-      ? `"${input.listingTitle}" elanına qoşulmanız təsdiqləndi.`
-      : `"${input.listingTitle}" elanına müraciətiniz rədd edildi.`,
+    title: input.approved ? '✅ Müraciət təsdiqləndi' : '❌ Müraciət rədd edildi',
+    body,
     listingId: input.listingId,
     actorId: input.actorId,
   });
