@@ -39,6 +39,8 @@ Service role ilə yazan / pullu API yandıran endpoint-lər sessiya tələb edir
 | `POST /api/pois/upsert-google-place` | Supabase sessiya |
 | `GET /api/sync-places` | Supabase sessiya **və ya** `X-Cron-Secret` |
 | `POST /api/telegram/notify` | Sessiya və ya `X-Notify-Secret`; moderasiya düymələri yalnız DB-də açıq (`pending`/`open`) sətir üçün əlavə olunur |
+| `POST /api/telegram/register-webhook` | `X-Notify-Secret`; Telegram `setWebhook` + `secret_token` (PUBLIC_API_URL / RAILWAY_PUBLIC_DOMAIN) |
+| `POST /api/telegram/webhook` | Telegram → API; `X-Telegram-Bot-Api-Secret-Token` = `TELEGRAM_WEBHOOK_SECRET` (və ya NOTIFY/CRON fallback) |
 | `POST /api/jobs/*` | Yalnız `X-Cron-Secret` |
 
 `SUPABASE_SERVICE_KEY` / Places API key **heç vaxt** mobile `EXPO_PUBLIC_*` içində olmamalıdır.
@@ -212,7 +214,9 @@ Migration: `apps/mobile/supabase/migrations/20260726_backlog_push_events_session
 
 1. Supabase-də migration-ları tətbiq et (`20260726_photo_variants…`, `20260726_backlog_push…`)
 2. Railway: `CRON_SECRET` (**məcburi**, `TELEGRAM_NOTIFY_SECRET`-dən fərqli olmalıdır),
-   `TELEGRAM_NOTIFY_SECRET`, optional `SENTRY_DSN`
+   `TELEGRAM_NOTIFY_SECRET`, `TELEGRAM_WEBHOOK_SECRET` (bot üçün; A-Z a-z 0-9 _ -),
+   optional `PUBLIC_API_URL`, optional `SENTRY_DSN`. Sonra bir dəfə:
+   `POST /api/telegram/register-webhook` + `X-Notify-Secret`
 3. Mobile `.env`: notify sirri **yoxdur** — bildirişlər istifadəçi sessiyası ilə gedir
 4. Mobile: `npx expo prebuild` / EAS rebuild (`expo-notifications`, image manipulator)
 5. Cron: nightly + enrich + weekly-report

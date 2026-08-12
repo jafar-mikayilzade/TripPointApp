@@ -9,6 +9,7 @@ import {
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { presentLocalNotification } from '../lib/pushNotifications';
 import { TransientHint } from './TransientHint';
 
 export type ToastTone = 'info' | 'success' | 'error';
@@ -27,7 +28,17 @@ type InfoToastContextValue = {
 
 const InfoToastContext = createContext<InfoToastContextValue | null>(null);
 
-/** App-wide soft toast (info / success / soft errors). */
+function osTitleForTone(tone: ToastTone): string {
+  if (tone === 'success') {
+    return 'TripPoint';
+  }
+  if (tone === 'error') {
+    return 'TripPoint · Diqqət';
+  }
+  return 'TripPoint';
+}
+
+/** App-wide soft toast (info / success / soft errors) + OS tray notification. */
 export function InfoToastProvider({ children }: { children: ReactNode }) {
   const insets = useSafeAreaInsets();
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -38,6 +49,7 @@ export function InfoToastProvider({ children }: { children: ReactNode }) {
       return;
     }
     setToast({ message: text, tone, key: Date.now() });
+    void presentLocalNotification(osTitleForTone(tone), text, { tone, kind: 'ux_toast' });
   }, []);
 
   const showInfo = useCallback((message: string) => push(message, 'info'), [push]);

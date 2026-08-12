@@ -89,6 +89,36 @@ TELEGRAM_WEBHOOK_SECRET = _raw_tg_webhook.strip('"').strip("'") or None
 _raw_cron = (os.getenv("CRON_SECRET") or "").strip()
 CRON_SECRET = _raw_cron.strip('"').strip("'") or None
 
+
+def resolved_telegram_webhook_secret() -> str | None:
+    """
+    Prefer dedicated webhook secret; fall back to notify/cron so Railway
+    bots keep working when only one server secret is configured.
+    """
+    for candidate in (TELEGRAM_WEBHOOK_SECRET, TELEGRAM_NOTIFY_SECRET, CRON_SECRET):
+        value = (candidate or "").strip()
+        if value:
+            return value
+    return None
+
+
+def resolved_public_api_base_url() -> str | None:
+    """Public HTTPS base for Telegram setWebhook (no trailing slash)."""
+    for raw in (
+        os.getenv("PUBLIC_API_URL"),
+        os.getenv("API_PUBLIC_URL"),
+        (
+            f"https://{os.getenv('RAILWAY_PUBLIC_DOMAIN')}"
+            if (os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip()
+            else None
+        ),
+    ):
+        value = (raw or "").strip().strip('"').strip("'").rstrip("/")
+        if value.startswith("https://") or value.startswith("http://"):
+            return value
+    return None
+
+
 # Optional Sentry (API)
 _raw_sentry = (os.getenv("SENTRY_DSN") or "").strip()
 SENTRY_DSN = _raw_sentry.strip('"').strip("'") or None
@@ -106,10 +136,16 @@ def validate_settings() -> None:
         raise RuntimeError(
             "Missing required environment variables: SUPABASE_URL, SUPABASE_SERVICE_KEY"
         )
-    if TELEGRAM_BOT_TOKEN and not TELEGRAM_WEBHOOK_SECRET:
+    if TELEGRAM_BOT_TOKEN and not resolved_telegram_webhook_secret():
         logging.getLogger(__name__).error(
             "TELEGRAM_WEBHOOK_SECRET is unset while TELEGRAM_BOT_TOKEN is set — "
-            "webhook endpoint will fail closed until the secret is configured."
+            "set TELEGRAM_WEBHOOK_SECRET (or TELEGRAM_NOTIFY_SECRET / CRON_SECRET) "
+            "and POST /api/telegram/register-webhook so Telegram can call the bot."
+        )
+    elif TELEGRAM_BOT_TOKEN and not TELEGRAM_WEBHOOK_SECRET:
+        logging.getLogger(__name__).warning(
+            "TELEGRAM_WEBHOOK_SECRET unset — using TELEGRAM_NOTIFY_SECRET/CRON_SECRET "
+            "fallback. Prefer a dedicated TELEGRAM_WEBHOOK_SECRET."
         )
     if DATA_SOURCE not in ALLOWED_DATA_SOURCES:
         raise RuntimeError(

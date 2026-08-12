@@ -8,13 +8,14 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.auth import verify_user
-from app.config import CRON_SECRET, TELEGRAM_NOTIFY_SECRET, TELEGRAM_WEBHOOK_SECRET
+from app.config import CRON_SECRET, TELEGRAM_NOTIFY_SECRET
 from app.security import secret_matches
 from app.services.telegram_bot import handle_telegram_update
 from app.services.telegram_notify import (
     admin_action_keyboard,
     moderation_target_is_open,
     notify_all_admins,
+    telegram_api,
 )
 
 router = APIRouter(prefix="/api/telegram", tags=["telegram"])
@@ -42,9 +43,9 @@ def _require_notify_secret(x_notify_secret: str | None) -> None:
 
 def _require_webhook_secret(x_telegram_bot_api_secret_token: str | None) -> None:
     """Fail closed when the bot is configured — unsigned webhooks must not moderate."""
-    from app.config import TELEGRAM_BOT_TOKEN
+    from app.config import TELEGRAM_BOT_TOKEN, resolved_telegram_webhook_secret
 
-    expected = (TELEGRAM_WEBHOOK_SECRET or "").strip()
+    expected = (resolved_telegram_webhook_secret() or "").strip()
     if not expected:
         if TELEGRAM_BOT_TOKEN:
             raise HTTPException(
@@ -52,8 +53,8 @@ def _require_webhook_secret(x_telegram_bot_api_secret_token: str | None) -> None
                 detail={
                     "error": "webhook_secret_unset",
                     "message": (
-                        "Set TELEGRAM_WEBHOOK_SECRET and configure "
-                        "setWebhook secret_token."
+                        "Set TELEGRAM_WEBHOOK_SECRET (or TELEGRAM_NOTIFY_SECRET/"
+                        "CRON_SECRET) and POST /api/telegram/register-webhook."
                     ),
                 },
             )
@@ -113,6 +114,79 @@ def telegram_test(
     _require_notify_secret(x_notify_secret)
     result = notify_all_admins("TripPoint Telegram OK")
     return {"ok": result["sent"] > 0, **result}
+
+
+@router.post("/register-webhook")
+def telegram_register_webhook(
+    x_notify_secret: str | None = Header(default=None, alias="X-Notify-Secret"),
+) -> dict[str, Any]:
+    """
+    Call Telegram setWebhook with secret_token so callbacks hit this API.
+    Requires X-Notify-Secret. Uses PUBLIC_API_URL or RAILWAY_PUBLIC_DOMAIN.
+    """
+    _require_notify_secret(x_notify_secret)
+    from app.config import (
+        TELEGRAM_BOT_TOKEN,
+        resolved_public_api_base_url,
+        resolved_telegram_webhook_secret,
+    )
+
+    if not TELEGRAM_BOT_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "bot_token_unset",
+                "message": "Set TELEGRAM_BOT_TOKEN on the server.",
+            },
+        )
+    secret = (resolved_telegram_webhook_secret() or "").strip()
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "webhook_secret_unset",
+                "message": (
+                    "Set TELEGRAM_WEBHOOK_SECRET (or TELEGRAM_NOTIFY_SECRET/"
+                    "CRON_SECRET)."
+                ),
+            },
+        )
+    base = resolved_public_api_base_url()
+    if not base:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "public_api_url_unset",
+                "message": (
+                    "Set PUBLIC_API_URL=https://your-api.up.railway.app "
+                    "(or ensure RAILWAY_PUBLIC_DOMAIN is set)."
+                ),
+            },
+        )
+
+    webhook_url = f"{base}/api/telegram/webhook"
+    result = telegram_api(
+        "setWebhook",
+        {
+            "url": webhook_url,
+            "secret_token": secret,
+            "allowed_updates": ["message", "callback_query"],
+            "drop_pending_updates": False,
+        },
+    )
+    if not result:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "set_webhook_failed",
+                "message": (
+                    "Telegram setWebhook failed — check bot token and that "
+                    "secret_token only uses A-Z a-z 0-9 _ - (1–256 chars)."
+                ),
+                "url": webhook_url,
+            },
+        )
+    return {"ok": True, "url": webhook_url, "telegram": result}
 
 
 @router.post("/notify")

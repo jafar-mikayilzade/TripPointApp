@@ -5,13 +5,18 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
+import { Platform } from 'react-native';
 
 import { REGIONS } from '../constants/regions';
+import {
+  ensureNotificationPermissions,
+  hasPushNativeModule,
+} from './pushNotifications';
 
 const LAST_ENCOURAGE_KEY = 'trippoint.last_encourage_at';
 const SCHEDULED_ID_KEY = 'trippoint.encourage_notif_id';
 const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
+const ANDROID_CHANNEL_ID = 'trippoint-default';
 
 const TIP_POOL = [
   {
@@ -35,20 +40,6 @@ const TIP_POOL = [
     body: 'Sevimlilərdə saxladığınız yerlərdən yeni AI marşrut hazırlaya bilərsiniz.',
   },
 ];
-
-function hasPushNativeModule(): boolean {
-  if (Platform.OS === 'web') {
-    return false;
-  }
-  if (NativeModules.ExpoPushTokenManager || NativeModules.ExpoNotifications) {
-    return true;
-  }
-  try {
-    return TurboModuleRegistry.get('ExpoPushTokenManager') != null;
-  } catch {
-    return false;
-  }
-}
 
 function pickTip(): { title: string; body: string } {
   const weekendish = new Date().getDay() >= 4;
@@ -94,18 +85,11 @@ export async function ensureEncouragementSchedule(): Promise<string | null> {
   }
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Notifications = require('expo-notifications') as typeof import('expo-notifications');
-
-    const { status: existing } = await Notifications.getPermissionsAsync();
-    let status = existing;
-    if (existing !== 'granted') {
-      const asked = await Notifications.requestPermissionsAsync();
-      status = asked.status;
-    }
-    if (status !== 'granted') {
+    if (!(await ensureNotificationPermissions())) {
       return null;
     }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Notifications = require('expo-notifications') as typeof import('expo-notifications');
 
     const now = Date.now();
     const lastRaw = await AsyncStorage.getItem(LAST_ENCOURAGE_KEY);
@@ -134,6 +118,7 @@ export async function ensureEncouragementSchedule(): Promise<string | null> {
         title: tip.title,
         body: tip.body,
         data: { kind: 'encourage', source: 'local_scheduled' },
+        ...(Platform.OS === 'android' ? { channelId: ANDROID_CHANNEL_ID } : {}),
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
