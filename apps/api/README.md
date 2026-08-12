@@ -97,14 +97,14 @@ Root `Dockerfile` və `railway.toml` GitHub-da olmalıdır.
 ### 3) Mobile
 
 ```env
-EXPO_PUBLIC_API_URL=https://YOUR-SERVICE.up.railway.app
+EXPO_PUBLIC_API_URL=https://trippointapp-production.up.railway.app
 ```
 
 ### Yoxla
 
 ```text
-https://YOUR-SERVICE.up.railway.app/
-https://YOUR-SERVICE.up.railway.app/api/sync-places?region=quba&category=restaurant
+https://trippointapp-production.up.railway.app/
+https://trippointapp-production.up.railway.app/api/sync-places?region=quba&category=restaurant
 ```
 
 ### Tipik xəta: `Railpack could not determine...` / `start.sh not found`

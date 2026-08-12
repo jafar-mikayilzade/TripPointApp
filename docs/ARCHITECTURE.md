@@ -108,7 +108,7 @@ Monorepo root-da `Dockerfile` + `railway.toml` API-ni Docker ilə build edir (Ra
 
 ```env
 # Mobile — lokal IP əvəzinə Railway HTTPS
-EXPO_PUBLIC_API_URL=https://YOUR-SERVICE.up.railway.app
+EXPO_PUBLIC_API_URL=https://trippointapp-production.up.railway.app
 ```
 
 Server env: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `DATA_SOURCE=osm` (default; Google Places lazım deyil). Alternativ: `hybrid` / `google` → `GOOGLE_PLACES_API_KEY`.  

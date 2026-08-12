@@ -38,6 +38,12 @@ Mobile `.env` içində lokal API üçün:
 EXPO_PUBLIC_API_URL=http://<PC-LAN-IP>:8000
 ```
 
+Production (Railway):
+
+```env
+EXPO_PUBLIC_API_URL=https://trippointapp-production.up.railway.app
+```
+
 ## Cursor
 
 `TripPoint.code-workspace` faylını aç — mobile + api + docs bir pəncərədə.
