@@ -444,7 +444,7 @@ export default function MarsrutScreen() {
 
   const mapRef = useRef<MapRef | null>(null);
   const fitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { showInfo } = useInfoToast();
+  const { showInfo, showError, showSuccess } = useInfoToast();
   const responsive = useResponsiveLayout();
   const GOOGLE_MAPS_KEY =
     Constants.expoConfig?.extra?.googleMapsKey ||
@@ -1097,22 +1097,27 @@ export default function MarsrutScreen() {
 
       if (!regionId) {
         setErrorMessage('Region seçin.');
+        showError('Region seçin.');
         return;
       }
       if (!days) {
         setErrorMessage('Gün sayını seçin.');
+        showError('Gün sayını seçin.');
         return;
       }
       if (!budget) {
         setErrorMessage('Büdcə seçin.');
+        showError('Büdcə seçin.');
         return;
       }
       if (interests.length === 0) {
         setErrorMessage('Ən azı bir maraq seçin.');
+        showError('Ən azı bir maraq seçin.');
         return;
       }
       if (fromOrigin && !userLocation) {
         setErrorMessage('Cari məkan tapılmadı. Switch-i yenidən yandırın.');
+        showError('Cari məkan tapılmadı.');
         return;
       }
 
@@ -1418,10 +1423,15 @@ export default function MarsrutScreen() {
       setInsertAfterVisit(null);
       setPoiSearch('');
       setSplitRatio(MARSRUT_PLAN_SPLIT);
+      showSuccess(
+        `${regionLabel} · ${days} günlük marşrut hazırdır`
+      );
       // Fit all days after layout; do not animateToRegion (hides day-1 cluster)
       await fetchRouteFromGoogle(planData);
     } catch (err) {
-      setErrorMessage(getErrorMessage(err));
+      const msg = getErrorMessage(err);
+      setErrorMessage(msg);
+      showError(msg);
     } finally {
       setLoading(false);
     }

@@ -6,6 +6,7 @@ type Props = {
   /** true olanda toast kimi gəlib gedir */
   active: boolean;
   durationMs?: number;
+  tone?: 'info' | 'success' | 'error';
   onHidden?: () => void;
 };
 
@@ -14,6 +15,7 @@ export function TransientHint({
   message,
   active,
   durationMs = 2400,
+  tone = 'info',
   onHidden,
 }: Props) {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -81,12 +83,20 @@ export function TransientHint({
     return null;
   }
 
+  const bg =
+    tone === 'error'
+      ? 'rgba(160, 40, 40, 0.92)'
+      : tone === 'success'
+        ? 'rgba(28, 110, 72, 0.92)'
+        : 'rgba(36, 38, 44, 0.88)';
+
   return (
     <Animated.View
       pointerEvents="none"
       accessibilityLiveRegion="polite"
       style={[
         styles.toast,
+        { backgroundColor: bg },
         {
           opacity,
           transform: [{ translateY }],
@@ -105,7 +115,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 999,
-    backgroundColor: 'rgba(36, 38, 44, 0.88)',
   },
   text: {
     fontSize: 13,

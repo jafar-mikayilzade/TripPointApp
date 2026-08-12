@@ -19,13 +19,10 @@ import { useThemeColors } from '../theme/ThemeProvider';
 import { getErrorMessage } from '../lib/errors';
 import {
   FIELD_EMPTY_PLACEHOLDER,
-  formatAzPhoneE164,
   parsePositiveNumber,
-  sanitizeAzPhoneLocalInput,
   sanitizeFreeTextWordPatterns,
   sanitizeLettersOnlyInput,
   sanitizePositiveIntInput,
-  validateAzPhone,
   validateLettersOnlyField,
 } from '../lib/formValidation';
 import { isBeforeSelectableHour, nextSelectableHour } from '../lib/listingSchedule';
@@ -33,7 +30,10 @@ import { notifyOrganizerNewTour } from '../lib/subscriptions';
 import { linkSavedRouteToListing } from '../lib/savedRoutes';
 import { supabase } from '../lib/supabase';
 import { useInfoToast } from './InfoToastProvider';
-import { PhoneField } from './PhoneField';
+import {
+  ListingContactPhoneField,
+  useListingContactPhone,
+} from './ListingContactPhoneField';
 import { SimpleDateTimeField } from './SimpleDateTimeField';
 
 const UUID_RE =
@@ -88,7 +88,7 @@ export function ShareAsTourModal({
   const [minDeparture, setMinDeparture] = useState(() => nextSelectableHour());
   const [capacityText, setCapacityText] = useState('');
   const [price, setPrice] = useState('');
-  const [contactPhone, setContactPhone] = useState('');
+  const contactPhoneCtl = useListingContactPhone(visible);
   const [regionId, setRegionId] = useState(DEFAULT_REGION_ID);
   const [description, setDescription] = useState('');
   const [regionOpen, setRegionOpen] = useState(false);
@@ -120,7 +120,6 @@ export function ShareAsTourModal({
     setTitle(defaultTitle?.trim() || '');
     setCapacityText('');
     setPrice('');
-    setContactPhone('');
     setRegionId(initialRegionId || DEFAULT_REGION_ID);
     // Marşrut yalnız route_stops sütununda; təsvirdə təkrar göstərmə (UI düymə altında)
     setDescription(defaultDescription?.trim() || '');
@@ -183,7 +182,7 @@ export function ShareAsTourModal({
       errors.price = 'Qiymət tələb olunur';
     }
 
-    const phoneErr = validateAzPhone(contactPhone, true);
+    const phoneErr = contactPhoneCtl.validate();
     if (phoneErr) {
       errors.phone = phoneErr;
     }
@@ -219,7 +218,7 @@ export function ShareAsTourModal({
 
       const capacityValue = Number(capacityText);
       const priceValue = parsePositiveNumber(price) ?? 0;
-      const formattedPhone = formatAzPhoneE164(contactPhone);
+      const formattedPhone = contactPhoneCtl.toE164();
       const resolvedTitle = title.trim();
 
       const routeStopsPayload = stops.map((stop, index) => ({
@@ -480,22 +479,23 @@ export function ShareAsTourModal({
               keyboardType="number-pad"
             />
 
-            <PhoneField
-              label="Əlaqə nömrəsi"
-              required
-              value={contactPhone}
-              onChangeLocal={(local) => {
-                clearFieldError('phone');
-                setContactPhone(sanitizeAzPhoneLocalInput(local));
-              }}
-              onValidationError={(err) => {
+            <ListingContactPhoneField
+              phoneMode={contactPhoneCtl.phoneMode}
+              profilePhoneLocal={contactPhoneCtl.profilePhoneLocal}
+              contactPhone={contactPhoneCtl.contactPhone}
+              onChangeContactPhone={contactPhoneCtl.setContactPhone}
+              onUseProfile={contactPhoneCtl.applyProfilePhone}
+              onUseManual={contactPhoneCtl.applyManualPhone}
+              onUseProfileAgain={contactPhoneCtl.useProfileAgain}
+              error={fieldErrors.phone ?? null}
+              onClearError={() => clearFieldError('phone')}
+              onError={(err) => {
                 if (err) {
                   setFieldError('phone', err);
                 } else {
                   clearFieldError('phone');
                 }
               }}
-              error={fieldErrors.phone ?? null}
             />
 
             <Text style={styles.label}>Təsvir</Text>

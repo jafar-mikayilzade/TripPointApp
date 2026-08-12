@@ -8,6 +8,7 @@ from app.config import CRON_SECRET
 from app.security import secret_matches
 from app.services.jobs_cleanup import run_nightly_cleanup
 from app.services.jobs_dup_alert import run_duplicate_poi_alert
+from app.services.jobs_encourage import run_encourage_notifications
 from app.services.jobs_enrich import run_place_details_enrichment
 from app.services.jobs_weekly_report import run_weekly_report
 
@@ -66,3 +67,16 @@ def jobs_dup_alert(
     """Manual duplicate POI scan → Telegram (also runs inside nightly)."""
     _require_cron_secret(x_cron_secret)
     return run_duplicate_poi_alert(send=True)
+
+
+@router.post("/encourage")
+def jobs_encourage(
+    x_cron_secret: str | None = Header(default=None, alias="X-Cron-Secret"),
+    dry_run: bool = Query(default=False),
+) -> dict[str, object]:
+    """
+    Every ~5 days: mild-weather + popular-region encouragement.
+    Expo push + notifications inbox for users with push tokens.
+    """
+    _require_cron_secret(x_cron_secret)
+    return run_encourage_notifications(dry_run=dry_run)

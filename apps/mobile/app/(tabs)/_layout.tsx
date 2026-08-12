@@ -1,10 +1,17 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
 import type { ComponentProps } from 'react';
+import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useInfoToast } from '../../components/InfoToastProvider';
 import { shadows } from '../../constants/theme';
+import { consumePendingWelcomeToast } from '../../lib/appNotify';
+import {
+  configureNotificationHandler,
+  ensureEncouragementSchedule,
+} from '../../lib/encouragementNotifications';
 import { useResponsiveLayout } from '../../lib/layout';
 import { useThemeColors } from '../../theme/ThemeProvider';
 
@@ -36,8 +43,32 @@ export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const { isCompact } = useResponsiveLayout();
   const colors = useThemeColors();
+  const { showSuccess, showInfo } = useInfoToast();
   const bottomPad = Math.max(insets.bottom, 10);
   const tabBarHeight = 56 + bottomPad;
+
+  useEffect(() => {
+    configureNotificationHandler();
+    let cancelled = false;
+    void (async () => {
+      const welcome = await consumePendingWelcomeToast();
+      if (!cancelled && welcome) {
+        showSuccess(welcome);
+      }
+      const tip = await ensureEncouragementSchedule();
+      if (!cancelled && tip) {
+        // Defer so it doesn't collide with welcome toast
+        setTimeout(() => {
+          if (!cancelled) {
+            showInfo(tip);
+          }
+        }, welcome ? 3200 : 600);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showSuccess, showInfo]);
 
   return (
     <Tabs

@@ -876,48 +876,67 @@ export function ListingDetailModal({
             </View>
 
             {(listing.type === 'tour' || listing.type === 'carpool') ? (
-              <View style={styles.metaLinksRow}>
-                <Pressable
-                  style={[
-                    styles.metaActionBtn,
-                    listing.type === 'tour' && !isOwner && currentUserId
-                      ? null
-                      : styles.metaActionBtnSolo,
-                  ]}
-                  onPress={() => setRouteListOpen((open) => !open)}
-                >
-                  <FontAwesome
-                    name={routeListOpen ? 'chevron-down' : 'chevron-right'}
-                    size={12}
-                    color={colors.brand}
-                  />
-                  <Text style={styles.routeToggleText}>
-                    Marşrut
-                    {routeStops.length > 0
-                      ? ` · ${routeStops.length}`
-                      : routePois.length > 0
-                        ? ` · ${routePois.length}`
-                        : ''}
-                  </Text>
-                </Pressable>
+              <View style={styles.metaBlock}>
+                <View style={styles.metaLinksRow}>
+                  <Pressable
+                    style={[
+                      styles.metaActionBtn,
+                      listing.type === 'tour' && (isOwner || currentUserId)
+                        ? null
+                        : styles.metaActionBtnSolo,
+                    ]}
+                    onPress={() => setRouteListOpen((open) => !open)}
+                  >
+                    <FontAwesome
+                      name={routeListOpen ? 'chevron-down' : 'chevron-right'}
+                      size={11}
+                      color={colors.brand}
+                    />
+                    <Text style={styles.routeToggleText} numberOfLines={1}>
+                      Marşrut
+                      {routeStops.length > 0
+                        ? ` · ${routeStops.length}`
+                        : routePois.length > 0
+                          ? ` · ${routePois.length}`
+                          : ''}
+                    </Text>
+                  </Pressable>
 
-                {listing.type === 'tour' && !isOwner && currentUserId ? (
-                  <SubscribeMenuButton
-                    expandable
-                    rowPartner
-                    listingId={listing.id}
-                    organizerId={
-                      listing.created_by && listing.created_by !== currentUserId
-                        ? listing.created_by
-                        : null
-                    }
-                  />
-                ) : null}
-              </View>
-            ) : null}
+                  {listing.type === 'tour' && !isOwner && currentUserId ? (
+                    <SubscribeMenuButton
+                      expandable
+                      rowPartner
+                      listingId={listing.id}
+                      organizerId={
+                        listing.created_by && listing.created_by !== currentUserId
+                          ? listing.created_by
+                          : null
+                      }
+                    />
+                  ) : null}
 
-            {listing.type === 'tour' || listing.type === 'carpool' ? (
-              <>
+                  {listing.type === 'tour' && isOwner ? (
+                    <Pressable
+                      style={styles.subscribersPill}
+                      onPress={() => void toggleSubscribersPanel()}
+                      accessibilityLabel="Abunəçilər"
+                    >
+                      <FontAwesome name="bell" size={12} color={colors.brand} />
+                      <Text style={styles.subscribersPillText} numberOfLines={1}>
+                        Abunəçilər
+                        {subscribersOpen && !loadingSubscribers
+                          ? ` · ${subscribers.length}`
+                          : ''}
+                      </Text>
+                      <FontAwesome
+                        name={subscribersOpen ? 'chevron-up' : 'chevron-down'}
+                        size={10}
+                        color={colors.textMuted}
+                      />
+                    </Pressable>
+                  ) : null}
+                </View>
+
                 {routeListOpen ? (
                   loadingExtras ? (
                     <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
@@ -959,78 +978,58 @@ export function ListingDetailModal({
                     </View>
                   )
                 ) : null}
-              </>
-            ) : null}
 
-            {listing.type === 'tour' && isOwner ? (
-              <View style={styles.subscribersWrap}>
-                <Pressable
-                  style={styles.subscribersPill}
-                  onPress={() => void toggleSubscribersPanel()}
-                  accessibilityLabel="Abunəçilər"
-                >
-                  <FontAwesome name="bell" size={14} color={colors.accentPressed} />
-                  <Text style={styles.subscribersPillText}>
-                    Abunəçilər
-                    {subscribersOpen && !loadingSubscribers
-                      ? ` · ${subscribers.length}`
-                      : ''}
-                  </Text>
-                  <FontAwesome
-                    name={subscribersOpen ? 'chevron-up' : 'chevron-down'}
-                    size={11}
-                    color={colors.textMuted}
-                  />
-                </Pressable>
-                {subscribersOpen ? (
-                  loadingSubscribers ? (
-                    <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
-                  ) : subscribers.length === 0 ? (
-                    <Text style={styles.subscribersEmpty}>Hələ heç kim abunə olmayıb</Text>
-                  ) : (
-                    <View style={styles.subscribersPanel}>
-                      {subscribers.map((sub, index) => {
-                        const name = sub.full_name?.trim() || 'İstifadəçi';
-                        return (
-                          <Pressable
-                            key={sub.id}
-                            style={[
-                              styles.subscriberRow,
-                              index > 0 && styles.subscriberRowBorder,
-                            ]}
-                            onPress={() => {
-                              onClose();
-                              router.push({
-                                pathname: '/(tabs)/profil',
-                                params: { userId: sub.user_id },
-                              });
-                            }}
-                          >
-                            {sub.avatar_url ? (
-                              <Image
-                                source={{ uri: sub.avatar_url }}
-                                style={styles.subscriberAvatar}
+                {listing.type === 'tour' && isOwner && subscribersOpen ? (
+                  <View style={styles.subscribersWrap}>
+                    {loadingSubscribers ? (
+                      <ActivityIndicator color={colors.accent} style={styles.inlineLoader} />
+                    ) : subscribers.length === 0 ? (
+                      <Text style={styles.subscribersEmpty}>Hələ heç kim abunə olmayıb</Text>
+                    ) : (
+                      <View style={styles.subscribersPanel}>
+                        {subscribers.map((sub, index) => {
+                          const name = sub.full_name?.trim() || 'İstifadəçi';
+                          return (
+                            <Pressable
+                              key={sub.id}
+                              style={[
+                                styles.subscriberRow,
+                                index > 0 && styles.subscriberRowBorder,
+                              ]}
+                              onPress={() => {
+                                onClose();
+                                router.push({
+                                  pathname: '/(tabs)/profil',
+                                  params: { userId: sub.user_id },
+                                });
+                              }}
+                            >
+                              {sub.avatar_url ? (
+                                <Image
+                                  source={{ uri: sub.avatar_url }}
+                                  style={styles.subscriberAvatar}
+                                />
+                              ) : (
+                                <View style={styles.subscriberAvatarPlaceholder}>
+                                  <Text style={styles.subscriberAvatarInitial}>
+                                    {name.charAt(0).toUpperCase()}
+                                  </Text>
+                                </View>
+                              )}
+                              <Text style={styles.subscriberName} numberOfLines={1}>
+                                {name}
+                              </Text>
+                              <FontAwesome
+                                name="chevron-right"
+                                size={11}
+                                color={colors.textMuted}
                               />
-                            ) : (
-                              <View style={styles.subscriberAvatarPlaceholder}>
-                                <Text style={styles.subscriberAvatarInitial}>
-                                  {name.charAt(0).toUpperCase()}
-                                </Text>
-                              </View>
-                            )}
-                            <Text style={styles.subscriberName} numberOfLines={1}>
-                              {name}
-                            </Text>
-                            <FontAwesome
-                              name="chevron-right"
-                              size={11}
-                              color={colors.textMuted}
-                            />
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  )
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </View>
                 ) : null}
               </View>
             ) : null}

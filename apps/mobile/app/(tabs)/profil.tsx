@@ -44,8 +44,9 @@ import {
   validateFullName,
   validateTextWordPatterns,
 } from '../../lib/formValidation';
-import { signOutEverywhere } from '../../lib/googleAuth';
 import { clearExpoPushToken } from '../../lib/pushNotifications';
+import { cancelEncouragementSchedule } from '../../lib/encouragementNotifications';
+import { signOutEverywhere } from '../../lib/googleAuth';
 import { startTelegramLink } from '../../lib/telegramLink';
 import { fetchAdminQueueCounts, type AdminQueueCounts } from '../../lib/moderation';
 import { supabase } from '../../lib/supabase';
@@ -615,6 +616,7 @@ export default function ProfilScreen() {
             if (profile?.id) {
               await clearExpoPushToken(profile.id);
             }
+            await cancelEncouragementSchedule();
             const { error } = await signOutEverywhere();
             if (error) {
               setErrorMessage(getErrorMessage(error));

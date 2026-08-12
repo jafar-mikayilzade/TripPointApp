@@ -149,6 +149,7 @@ qurulmayanda bu endpoint-lər 503 qaytarır.
 | `POST /api/jobs/nightly` | hər gün 03:00 UTC | pending cleanup; expired listings; spots; rating_avg; **dublikat POI Telegram alert** (silmir) |
 | `POST /api/jobs/enrich-places?limit=50` | hər gecə | Google Place Details (phone/website/description/opening_hours) — max 50/run |
 | `POST /api/jobs/weekly-report` | bazar ertəsi 08:00 UTC | Admin Telegram həftəlik stats |
+| `POST /api/jobs/encourage` | hər 5 gündən bir | Mülayim hava + populyar rayon təşviqi → Expo push + `notifications` inbox |
 
 Nümunə (curl):
 
@@ -163,6 +164,9 @@ curl -X POST "$API_URL/api/jobs/nightly" -H "X-Cron-Secret: $CRON_SECRET"
 | Expo push token | `profiles.expo_push_token` — mobile `registerExpoPushToken` on session |
 | Push send (app) | FastAPI `POST /api/notify/dispatch` → `notify_dispatch.py` + `push_notify.py` |
 | Push send (server) | FastAPI `POST /api/notify/push` — `X-Notify-Secret`, server/tooling only |
+| UX toast | `InfoToastProvider` — login / plan / abunə / sevimli / soft errors |
+| Local encourage | `encouragementNotifications.ts` — ~5 gün interval local schedule |
+| Inbox kinds | `tour_update`, `organizer_new_tour`, `tour_cancelled`, `weather_tip`, `explore_region`, `system_tip` |
 | Smart abunə | `subscriptions.ts` — organizer + region fans + Telegram/push mirror; listing spam-guard |
 | Notify auth | Supabase session token (`Authorization: Bearer`). Bundle-da server sirri yoxdur |
 | Anti-spam | `/dispatch` yalnız `notification_ids` alır; alıcı və mətn bazadakı sətirlərdən oxunur (`actor_id = caller`, ≤15 dəq). `notifications` INSERT RLS-i onsuz da alıcının abunə olmasını tələb edir |

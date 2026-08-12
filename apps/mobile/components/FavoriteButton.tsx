@@ -1,6 +1,6 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 
 import type { ThemeColors } from '../constants/theme';
 import {
@@ -35,7 +35,7 @@ export function FavoriteButton({
 }: Props) {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { showInfo } = useInfoToast();
+  const { showInfo, showError } = useInfoToast();
   const [favorited, setFavorited] = useState(false);
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
@@ -73,7 +73,7 @@ export function FavoriteButton({
     const result = await toggleFavorite(targetType, activeId, liveSeed);
     setBusy(false);
     if (result.error) {
-      Alert.alert('Sevimlilər', result.error);
+      showError(result.error);
       return;
     }
     if (result.resolvedId && result.resolvedId !== activeId) {
@@ -84,7 +84,7 @@ export function FavoriteButton({
     showInfo(
       result.favorited ? 'Sevimlilərə əlavə olundu' : 'Sevimlilərdən çıxarıldı'
     );
-  }, [busy, targetType, activeId, liveSeed, onResolvedId, showInfo]);
+  }, [busy, targetType, activeId, liveSeed, onResolvedId, showInfo, showError]);
 
   return (
     <Pressable

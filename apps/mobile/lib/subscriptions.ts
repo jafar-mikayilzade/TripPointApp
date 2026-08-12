@@ -7,7 +7,10 @@ export type SubscriptionTargetType = 'listing' | 'organizer';
 export type AppNotificationKind =
   | 'tour_update'
   | 'organizer_new_tour'
-  | 'tour_cancelled';
+  | 'tour_cancelled'
+  | 'weather_tip'
+  | 'explore_region'
+  | 'system_tip';
 
 export type AppNotification = {
   id: string;

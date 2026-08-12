@@ -416,9 +416,10 @@ export function createStyles(colors: ThemeColors) {
   },
   cardsContent: {
     paddingBottom: 12,
+    paddingLeft: 10,
   },
   swipeCard: {
-    paddingHorizontal: 10,
+    paddingRight: 10,
     paddingTop: 4,
     justifyContent: 'center',
   },

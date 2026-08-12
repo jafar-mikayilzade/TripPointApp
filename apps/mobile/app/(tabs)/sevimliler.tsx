@@ -98,7 +98,7 @@ export default function SevimlilerScreen() {
 
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { showInfo } = useInfoToast();
+  const { showInfo, showError } = useInfoToast();
   const { padH, isCompact } = useResponsiveLayout();
 
   const [tab, setTab] = useState<TabId>('listings');
@@ -291,6 +291,7 @@ export default function SevimlilerScreen() {
     const result = await toggleSubscription(item.target_type, item.target_id);
     if (result.error) {
       setErrorMessage(result.error);
+      showError(result.error);
       return;
     }
     if (!result.subscribed) {
@@ -303,6 +304,7 @@ export default function SevimlilerScreen() {
     const { error } = await deleteSavedRoute(route.id);
     if (error) {
       setErrorMessage(error);
+      showError(error);
       return;
     }
     setRoutes((prev) => prev.filter((r) => r.id !== route.id));

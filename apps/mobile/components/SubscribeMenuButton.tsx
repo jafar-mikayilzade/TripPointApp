@@ -23,6 +23,13 @@ type Props = {
   expandable?: boolean;
   /** Sit opposite Marşrut in a flex row (detail sheet). */
   rowPartner?: boolean;
+  /**
+   * When true with rowPartner, panel is not rendered inside the row slot —
+   * parent should render `SubscribeMenuPanel` below the row.
+   */
+  detachPanel?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   disabled?: boolean;
   /**
    * Batch hint from parent (1 query for whole list).
@@ -43,6 +50,9 @@ export function SubscribeMenuButton({
   compact = false,
   expandable = false,
   rowPartner = false,
+  detachPanel = false,
+  open: openProp,
+  onOpenChange,
   disabled = false,
   listingSubscribed,
   organizerSubscribed,
@@ -50,12 +60,14 @@ export function SubscribeMenuButton({
 }: Props) {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { showInfo } = useInfoToast();
+  const { showInfo, showError } = useInfoToast();
   const [tourOn, setTourOn] = useState(false);
   const [orgOn, setOrgOn] = useState(false);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [openInternal, setOpenInternal] = useState(false);
+  const open = openProp ?? openInternal;
+  const setOpen = onOpenChange ?? setOpenInternal;
 
   useEffect(() => {
     if (statusReady) {
@@ -99,7 +111,7 @@ export function SubscribeMenuButton({
       const result = await toggleSubscription(kind, targetId);
       setBusy(false);
       if (result.error) {
-        Alert.alert('Abunəlik', result.error);
+        showError(result.error);
         return;
       }
       if (kind === 'listing') {
@@ -116,13 +128,13 @@ export function SubscribeMenuButton({
         );
       }
     },
-    [busy, disabled, listingId, organizerId, showInfo]
+    [busy, disabled, listingId, organizerId, showInfo, showError]
   );
 
   const openMenu = useCallback(() => {
     if (disabled || busy) return;
     if (expandable) {
-      setOpen((v) => !v);
+      setOpen(!open);
       return;
     }
     const buttons: {
@@ -143,7 +155,7 @@ export function SubscribeMenuButton({
     }
     buttons.push({ text: 'Bağla', style: 'cancel' });
     Alert.alert('Abunəlik', 'Nəyi izləmək istəyirsiniz?', buttons);
-  }, [disabled, busy, expandable, tourOn, orgOn, organizerId, runToggle]);
+  }, [disabled, busy, expandable, open, setOpen, tourOn, orgOn, organizerId, runToggle]);
 
   if (compact) {
     return (
@@ -192,7 +204,7 @@ export function SubscribeMenuButton({
               size={14}
               color={anyOn ? colors.accentPressed : colors.textSecondary}
             />
-            <Text style={[styles.pillText, anyOn && styles.pillTextActive]}>
+            <Text style={[styles.pillText, anyOn && styles.pillTextActive]} numberOfLines={1}>
               {anyOn ? 'Abunəlik' : 'Abunə ol'}
             </Text>
             {expandable ? (
@@ -206,37 +218,66 @@ export function SubscribeMenuButton({
         )}
       </Pressable>
 
-      {expandable && open ? (
-        <View style={styles.panel}>
-          <Pressable
-            style={styles.panelRow}
-            onPress={() => void runToggle('listing')}
-            disabled={busy}
-          >
-            <View style={styles.panelLeft}>
-              <FontAwesome name="map" size={13} color={colors.accent} />
-              <Text style={styles.panelLabel}>Bu tur</Text>
-            </View>
-            <Text style={[styles.panelState, tourOn && styles.panelStateOn]}>
-              {tourOn ? 'Aktiv' : 'Qoşul'}
-            </Text>
-          </Pressable>
-          {organizerId ? (
-            <Pressable
-              style={[styles.panelRow, styles.panelRowBorder]}
-              onPress={() => void runToggle('organizer')}
-              disabled={busy}
-            >
-              <View style={styles.panelLeft}>
-                <FontAwesome name="user" size={13} color={colors.success} />
-                <Text style={styles.panelLabel}>Təşkilatçı</Text>
-              </View>
-              <Text style={[styles.panelState, orgOn && styles.panelStateOn]}>
-                {orgOn ? 'Aktiv' : 'Qoşul'}
-              </Text>
-            </Pressable>
-          ) : null}
+      {expandable && open && !detachPanel ? (
+        <SubscribeExpandPanel
+          tourOn={tourOn}
+          orgOn={orgOn}
+          organizerId={organizerId}
+          busy={busy}
+          onToggle={(kind) => void runToggle(kind)}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+type PanelProps = {
+  tourOn: boolean;
+  orgOn: boolean;
+  organizerId?: string | null;
+  busy?: boolean;
+  onToggle: (kind: 'listing' | 'organizer') => void;
+};
+
+/** Full-width panel under Marşrut | Abunə row. */
+export function SubscribeExpandPanel({
+  tourOn,
+  orgOn,
+  organizerId,
+  busy = false,
+  onToggle,
+}: PanelProps) {
+  const colors = useThemeColors();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <View style={styles.panel}>
+      <Pressable
+        style={styles.panelRow}
+        onPress={() => onToggle('listing')}
+        disabled={busy}
+      >
+        <View style={styles.panelLeft}>
+          <FontAwesome name="map" size={13} color={colors.accent} />
+          <Text style={styles.panelLabel}>Bu tur</Text>
         </View>
+        <Text style={[styles.panelState, tourOn && styles.panelStateOn]}>
+          {tourOn ? 'Aktiv' : 'Qoşul'}
+        </Text>
+      </Pressable>
+      {organizerId ? (
+        <Pressable
+          style={[styles.panelRow, styles.panelRowBorder]}
+          onPress={() => onToggle('organizer')}
+          disabled={busy}
+        >
+          <View style={styles.panelLeft}>
+            <FontAwesome name="user" size={13} color={colors.success} />
+            <Text style={styles.panelLabel}>Təşkilatçı</Text>
+          </View>
+          <Text style={[styles.panelState, orgOn && styles.panelStateOn]}>
+            {orgOn ? 'Aktiv' : 'Qoşul'}
+          </Text>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -251,14 +292,18 @@ function createStyles(colors: ThemeColors) {
     },
     wrapRowPartner: {
       flex: 1,
+      minWidth: 0,
       marginTop: 0,
       marginBottom: 0,
+      gap: 8,
     },
     pillRowPartner: {
       alignSelf: 'stretch',
       justifyContent: 'center',
-      borderRadius: 14,
-      paddingVertical: 12,
+      borderRadius: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 8,
+      minHeight: 40,
     },
     iconBtn: {
       width: 36,
@@ -297,6 +342,7 @@ function createStyles(colors: ThemeColors) {
       fontSize: 13,
       fontWeight: '700',
       color: colors.textSecondary,
+      flexShrink: 1,
     },
     pillTextActive: {
       color: colors.accentPressed,

@@ -18,17 +18,12 @@ import { getErrorMessage } from '../lib/errors';
 import {
   FIELD_EMPTY_PLACEHOLDER,
   TEXT_FORMAT_ERROR,
-  AZ_PHONE_PREFIX,
   buildCarpoolTitle,
-  formatAzPhoneE164,
   hasDisallowedTextSymbols,
   parsePositiveNumber,
-  parseAzPhoneLocal,
-  sanitizeAzPhoneLocalInput,
   sanitizeFreeTextWordPatterns,
   sanitizeLettersOnlyInput,
   sanitizePositiveIntInput,
-  validateAzPhone,
   validateLettersOnlyField,
   validateTextWordPatterns,
 } from '../lib/formValidation';
@@ -42,7 +37,10 @@ import type {
   LocalServiceCategory,
   Poi,
 } from '../types/database';
-import { PhoneField } from './PhoneField';
+import {
+  ListingContactPhoneField,
+  useListingContactPhone,
+} from './ListingContactPhoneField';
 import { SimpleDateTimeField } from './SimpleDateTimeField';
 
 import type { ThemeColors } from '../constants/theme';
@@ -127,10 +125,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
   const [capacityText, setCapacityText] = useState('');
   const [price, setPrice] = useState('');
   const [isFree, setIsFree] = useState(false);
-  const [contactPhone, setContactPhone] = useState('');
-  /** ask = profil nömrəsi varmı seçimi; profile = avtomatik; manual = əl ilə */
-  const [phoneMode, setPhoneMode] = useState<'ask' | 'profile' | 'manual'>('manual');
-  const [profilePhoneLocal, setProfilePhoneLocal] = useState('');
+  const contactPhoneCtl = useListingContactPhone(visible);
   const [regionId, setRegionId] = useState(DEFAULT_REGION_ID);
   const [description, setDescription] = useState('');
   const [selectedPoiIds, setSelectedPoiIds] = useState<string[]>([]);
@@ -164,9 +159,6 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     setCapacityText('');
     setPrice('');
     setIsFree(false);
-    setContactPhone('');
-    setPhoneMode('manual');
-    setProfilePhoneLocal('');
     setRegionId(DEFAULT_REGION_ID);
     setDescription('');
     setSelectedPoiIds([]);
@@ -178,36 +170,6 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     setIsRecurring(false);
     setFieldErrors({});
     setLoading(false);
-
-    let cancelled = false;
-    void (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user || cancelled) {
-        return;
-      }
-      const { data } = await supabase
-        .from('profiles')
-        .select('phone')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (cancelled) {
-        return;
-      }
-      const local = parseAzPhoneLocal(data?.phone);
-      if (local && !validateAzPhone(local, true)) {
-        setProfilePhoneLocal(local);
-        setPhoneMode('ask');
-      } else {
-        setProfilePhoneLocal('');
-        setPhoneMode('manual');
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
   }, [visible]);
 
   useEffect(() => {
@@ -323,81 +285,22 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
   }
 
   function resolveContactPhoneError(): string | null {
-    if (phoneMode === 'ask') {
-      return 'Profil nömrəsi ilə davam etmək istəyirsiniz?';
-    }
-    const source = phoneMode === 'profile' ? profilePhoneLocal : contactPhone;
-    return validateAzPhone(source, true);
-  }
-
-  function applyProfilePhone() {
-    clearFieldError('phone');
-    setContactPhone(profilePhoneLocal);
-    setPhoneMode('profile');
-  }
-
-  function applyManualPhone() {
-    clearFieldError('phone');
-    setContactPhone('');
-    setPhoneMode('manual');
+    return contactPhoneCtl.validate();
   }
 
   function renderContactPhoneField() {
-    const profileDisplay = profilePhoneLocal
-      ? `${AZ_PHONE_PREFIX}${profilePhoneLocal}`
-      : '';
-
-    if (phoneMode === 'ask' && profilePhoneLocal) {
-      return (
-        <View style={styles.phoneChoiceBox}>
-          <Text style={styles.phoneChoiceTitle}>Əlaqə nömrəsi</Text>
-          <Text style={styles.phoneChoiceHint}>
-            Profilinizdə {profileDisplay} var. Bu nömrə ilə davam edilsin?
-          </Text>
-          <View style={styles.phoneChoiceRow}>
-            <Pressable
-              style={[styles.phoneChoiceBtn, styles.phoneChoiceBtnYes]}
-              onPress={applyProfilePhone}
-            >
-              <Text style={styles.phoneChoiceBtnYesText}>Bəli</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.phoneChoiceBtn, styles.phoneChoiceBtnNo]}
-              onPress={applyManualPhone}
-            >
-              <Text style={styles.phoneChoiceBtnNoText}>Xeyr</Text>
-            </Pressable>
-          </View>
-          {fieldErrors.phone ? (
-            <Text style={styles.phoneChoiceError}>{fieldErrors.phone}</Text>
-          ) : null}
-        </View>
-      );
-    }
-
-    if (phoneMode === 'profile' && profilePhoneLocal) {
-      return (
-        <View style={styles.phoneChoiceBox}>
-          <Text style={styles.phoneChoiceTitle}>Əlaqə nömrəsi</Text>
-          <Text style={styles.phoneChoiceValue}>{profileDisplay}</Text>
-          <Pressable onPress={applyManualPhone} hitSlop={8}>
-            <Text style={styles.phoneChangeLink}>Başqa nömrə daxil et</Text>
-          </Pressable>
-        </View>
-      );
-    }
-
     return (
-      <PhoneField
-        label="Əlaqə nömrəsi"
-        required
-        value={contactPhone}
-        onChangeLocal={(local) => {
-          clearFieldError('phone');
-          setContactPhone(sanitizeAzPhoneLocalInput(local));
-        }}
-        onValidationError={(err) => setFieldError('phone', err)}
+      <ListingContactPhoneField
+        phoneMode={contactPhoneCtl.phoneMode}
+        profilePhoneLocal={contactPhoneCtl.profilePhoneLocal}
+        contactPhone={contactPhoneCtl.contactPhone}
+        onChangeContactPhone={contactPhoneCtl.setContactPhone}
+        onUseProfile={contactPhoneCtl.applyProfilePhone}
+        onUseManual={contactPhoneCtl.applyManualPhone}
+        onUseProfileAgain={contactPhoneCtl.useProfileAgain}
         error={fieldErrors.phone ?? null}
+        onClearError={() => clearFieldError('phone')}
+        onError={(err) => setFieldError('phone', err)}
       />
     );
   }
@@ -529,8 +432,12 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
     const errors = collectFieldErrors();
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
-      if (errors.phone && contactPhone.trim() && phoneMode === 'manual') {
-        setContactPhone('');
+      if (
+        errors.phone &&
+        contactPhoneCtl.contactPhone.trim() &&
+        contactPhoneCtl.phoneMode === 'manual'
+      ) {
+        contactPhoneCtl.setContactPhone('');
       }
       return;
     }
@@ -562,9 +469,7 @@ export function CreateListingModal({ visible, onClose, onCreated }: CreateListin
             ? Number(capacityText)
             : capacity;
       const { price: priceValue, price_type: priceTypeValue } = resolvePriceFields();
-      const formattedPhone = formatAzPhoneE164(
-        phoneMode === 'profile' ? profilePhoneLocal : contactPhone
-      );
+      const formattedPhone = contactPhoneCtl.toE164();
 
       let descriptionValue = description.trim() || null;
       if (listingType === 'local_service') {
@@ -1521,69 +1426,6 @@ function createStyles(colors: ThemeColors) {
     fontSize: 13,
     color: colors.chipText,
     fontWeight: '600',
-  },
-  phoneChoiceBox: {
-    marginTop: 10,
-    marginBottom: 4,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: colors.chip,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-    gap: 8,
-  },
-  phoneChoiceTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.chipText,
-  },
-  phoneChoiceHint: {
-    fontSize: 13,
-    lineHeight: 18,
-    color: colors.text,
-  },
-  phoneChoiceValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  phoneChoiceRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  phoneChoiceBtn: {
-    flex: 1,
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  phoneChoiceBtnYes: {
-    backgroundColor: colors.accent,
-  },
-  phoneChoiceBtnNo: {
-    backgroundColor: colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.borderSoft,
-  },
-  phoneChoiceBtnYesText: {
-    color: colors.textOnAccent,
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  phoneChoiceBtnNoText: {
-    color: colors.text,
-    fontWeight: '600',
-    fontSize: 13,
-  },
-  phoneChangeLink: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.accent,
-  },
-  phoneChoiceError: {
-    fontSize: 12,
-    color: colors.danger,
-    fontWeight: '500',
   },
   poiRow: {
     borderWidth: StyleSheet.hairlineWidth,

@@ -11,26 +11,43 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TransientHint } from './TransientHint';
 
+export type ToastTone = 'info' | 'success' | 'error';
+
+type ToastState = {
+  message: string;
+  tone: ToastTone;
+  key: number;
+};
+
 type InfoToastContextValue = {
   showInfo: (message: string) => void;
+  showSuccess: (message: string) => void;
+  showError: (message: string) => void;
 };
 
 const InfoToastContext = createContext<InfoToastContextValue | null>(null);
 
-/** App-wide soft info toast (not errors / confirms). */
+/** App-wide soft toast (info / success / soft errors). */
 export function InfoToastProvider({ children }: { children: ReactNode }) {
   const insets = useSafeAreaInsets();
-  const [toast, setToast] = useState<{ message: string; key: number } | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
 
-  const showInfo = useCallback((message: string) => {
+  const push = useCallback((message: string, tone: ToastTone) => {
     const text = message.trim();
     if (!text) {
       return;
     }
-    setToast({ message: text, key: Date.now() });
+    setToast({ message: text, tone, key: Date.now() });
   }, []);
 
-  const value = useMemo(() => ({ showInfo }), [showInfo]);
+  const showInfo = useCallback((message: string) => push(message, 'info'), [push]);
+  const showSuccess = useCallback((message: string) => push(message, 'success'), [push]);
+  const showError = useCallback((message: string) => push(message, 'error'), [push]);
+
+  const value = useMemo(
+    () => ({ showInfo, showSuccess, showError }),
+    [showInfo, showSuccess, showError]
+  );
 
   return (
     <InfoToastContext.Provider value={value}>
@@ -43,7 +60,8 @@ export function InfoToastProvider({ children }: { children: ReactNode }) {
           key={toast?.key ?? 0}
           message={toast?.message ?? ''}
           active={!!toast}
-          durationMs={2800}
+          tone={toast?.tone ?? 'info'}
+          durationMs={toast?.tone === 'error' ? 3400 : 2800}
           onHidden={() => setToast(null)}
         />
       </View>
@@ -54,12 +72,15 @@ export function InfoToastProvider({ children }: { children: ReactNode }) {
 export function useInfoToast(): InfoToastContextValue {
   const ctx = useContext(InfoToastContext);
   if (!ctx) {
+    const noop = (message: string) => {
+      if (__DEV__) {
+        console.warn('[InfoToast] Provider yoxdur:', message);
+      }
+    };
     return {
-      showInfo: (message: string) => {
-        if (__DEV__) {
-          console.warn('[InfoToast] Provider yoxdur:', message);
-        }
-      },
+      showInfo: noop,
+      showSuccess: noop,
+      showError: noop,
     };
   }
   return ctx;

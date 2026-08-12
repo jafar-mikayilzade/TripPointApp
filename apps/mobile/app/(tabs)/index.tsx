@@ -552,7 +552,7 @@ export default function HomeScreen() {
         listRef.current?.scrollToIndex({
           index,
           animated: true,
-          viewPosition: listMode === 'cards' ? 0.5 : 0.2,
+          viewPosition: listMode === 'cards' ? 0 : 0.2,
         });
       } catch {
         // FlatList hələ layout olmayıbsa onScrollToIndexFailed işləyir
@@ -1132,22 +1132,32 @@ export default function HomeScreen() {
                         keyExtractor={(item) => item.id}
                         style={{ flex: 1 }}
                         horizontal={listMode === 'cards'}
-                        pagingEnabled={listMode === 'cards'}
+                        pagingEnabled={false}
                         showsVerticalScrollIndicator={false}
                         showsHorizontalScrollIndicator={false}
                         decelerationRate={listMode === 'cards' ? 'fast' : 'normal'}
+                        snapToInterval={
+                          listMode === 'cards' && listPaneWidth > 0
+                            ? Math.round(listPaneWidth * 0.72)
+                            : undefined
+                        }
+                        snapToAlignment={listMode === 'cards' ? 'start' : undefined}
+                        disableIntervalMomentum={listMode === 'cards'}
                         contentContainerStyle={
                           listMode === 'cards'
                             ? styles.cardsContent
                             : styles.listContent
                         }
                         getItemLayout={
-                          listMode === 'cards'
-                            ? (_data, index) => ({
-                                length: listPaneWidth,
-                                offset: listPaneWidth * index,
-                                index,
-                              })
+                          listMode === 'cards' && listPaneWidth > 0
+                            ? (_data, index) => {
+                                const stride = Math.round(listPaneWidth * 0.72);
+                                return {
+                                  length: stride,
+                                  offset: stride * index,
+                                  index,
+                                };
+                              }
                             : undefined
                         }
                         refreshControl={
@@ -1163,18 +1173,24 @@ export default function HomeScreen() {
                             listRef.current?.scrollToIndex({
                               index: info.index,
                               animated: true,
-                              viewPosition: listMode === 'cards' ? 0.5 : 0.1,
+                              viewPosition: listMode === 'cards' ? 0 : 0.1,
                             });
                           }, 100);
                         }}
                         renderItem={({ item }) => {
                           const isSelected = highlightedPoiId === item.id;
                           const hasSelection = highlightedPoiId != null;
+                          const cardStride =
+                            listPaneWidth > 0
+                              ? Math.round(listPaneWidth * 0.72)
+                              : undefined;
                           return (
                             <MemoPoiListCard
                               item={item}
                               variant={listMode}
-                              cardWidth={listMode === 'cards' ? listPaneWidth : undefined}
+                              cardWidth={
+                                listMode === 'cards' ? cardStride : undefined
+                              }
                               highlighted={isSelected}
                               dimmed={hasSelection && !isSelected}
                               userLocation={userLocation}

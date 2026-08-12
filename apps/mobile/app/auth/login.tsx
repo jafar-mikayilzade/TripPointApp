@@ -20,6 +20,7 @@ import { sendEmailVerificationLink } from '../../lib/emailVerification';
 import { ensureProfile } from '../../lib/ensureProfile';
 import { getErrorMessage } from '../../lib/errors';
 import { validateEmail } from '../../lib/formValidation';
+import { markPendingWelcomeToast } from '../../lib/appNotify';
 import { signInWithGoogle } from '../../lib/googleAuth';
 import { supabase } from '../../lib/supabase';
 import type { ThemeColors } from '../../constants/theme';
@@ -79,6 +80,9 @@ export default function LoginScreen() {
         return;
       }
 
+      await markPendingWelcomeToast(
+        ensured.profile?.full_name || data.user.user_metadata?.full_name
+      );
       router.replace('/(tabs)');
     } catch (err) {
       setErrorMessage(getErrorMessage(err));
@@ -137,6 +141,7 @@ export default function LoginScreen() {
     if (result.error) {
       setErrorMessage(result.error);
     } else {
+      await markPendingWelcomeToast();
       router.replace('/(tabs)');
     }
 
