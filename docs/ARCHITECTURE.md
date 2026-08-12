@@ -37,7 +37,7 @@ Service role ilə yazan / pullu API yandıran endpoint-lər sessiya tələb edir
 |----------|-------|
 | `POST /api/plan-route` | Supabase sessiya (Claude/weather kvotası) |
 | `POST /api/pois/upsert-google-place` | Supabase sessiya |
-| `GET /api/sync-places` | Supabase sessiya **və ya** `X-Cron-Secret` |
+| `GET /api/sync-places` | **Admin** sessiya **və ya** `X-Cron-Secret` (adi istifadəçi 401) |
 | `POST /api/telegram/notify` | Sessiya və ya `X-Notify-Secret`; moderasiya düymələri yalnız DB-də açıq (`pending`/`open`) sətir üçün əlavə olunur |
 | `POST /api/telegram/register-webhook` | `X-Notify-Secret`; Telegram `setWebhook` + `secret_token` (PUBLIC_API_URL / RAILWAY_PUBLIC_DOMAIN) |
 | `POST /api/telegram/webhook` | Telegram → API; `X-Telegram-Bot-Api-Secret-Token` = `TELEGRAM_WEBHOOK_SECRET` (və ya NOTIFY/CRON fallback) |
@@ -60,7 +60,7 @@ Mobile: `apps/mobile/lib/planRoute.ts` — FastAPI + bir retry; API yoxdursa aç
 
 ### Rate limit + live cache
 
-- In-memory IP limits: `plan-route` 5/min, `live-places` 30/min, `sync-places` 10/min, `pois/upsert-google-place` 20/min, `telegram/notify` 10/min, `telegram/webhook` 120/min, `notify/dispatch` 30/min (`app/rate_limit.py`).
+- In-memory IP limits: `plan-route` 5/min, `live-places` 30/min, `sync-places` 10/min, `pois/upsert-google-place` 20/min, `telegram/notify` 10/min, `telegram/notify-user` 20/min, `telegram/webhook` 120/min, `notify/dispatch` 30/min (`app/rate_limit.py`).
 - `live-places` DB-only (`pois` + seeds); Overpass yoxdur. Viewport/region TTL ~12 dəq. OSM yalnız `sync-places` background.
 
 ### Live places / cafe

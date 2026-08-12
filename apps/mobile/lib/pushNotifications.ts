@@ -98,11 +98,19 @@ export async function registerExpoPushToken(userId: string): Promise<void> {
     return;
   }
 
-  try {
+    try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Notifications = require('expo-notifications') as typeof import('expo-notifications');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Constants = require('expo-constants') as typeof import('expo-constants');
 
-    const tokenResult = await Notifications.getExpoPushTokenAsync();
+    const projectId =
+      Constants.easConfig?.projectId ??
+      Constants.expoConfig?.extra?.eas?.projectId;
+
+    const tokenResult = projectId
+      ? await Notifications.getExpoPushTokenAsync({ projectId })
+      : await Notifications.getExpoPushTokenAsync();
     const token = tokenResult.data?.trim();
     if (!token) {
       return;

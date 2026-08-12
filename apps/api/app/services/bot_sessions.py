@@ -35,6 +35,7 @@ def load_session(chat_id: str | int) -> dict[str, Any]:
                 "step": payload.get("step"),
                 "data": payload.get("data") if isinstance(payload.get("data"), dict) else {},
                 "last_plan": payload.get("last_plan"),
+                "last_plan_data": payload.get("last_plan_data"),
             }
         return {
             "mode": rows[0].get("state") or "idle",
@@ -53,6 +54,7 @@ def save_session(chat_id: str | int, session: dict[str, Any]) -> None:
         "step": session.get("step"),
         "data": session.get("data") if isinstance(session.get("data"), dict) else {},
         "last_plan": session.get("last_plan"),
+        "last_plan_data": session.get("last_plan_data"),
     }
     try:
         supabase.table("bot_sessions").upsert(
@@ -71,13 +73,20 @@ def save_session(chat_id: str | int, session: dict[str, Any]) -> None:
 def clear_session(chat_id: str | int) -> None:
     key = str(chat_id)
     try:
-        # Keep last_plan if present
+        # Keep last_plan (+ structured data) if present
         current = load_session(key)
         last = current.get("last_plan")
-        if last:
+        last_data = current.get("last_plan_data")
+        if last or last_data:
             save_session(
                 key,
-                {"mode": "idle", "step": None, "data": {}, "last_plan": last},
+                {
+                    "mode": "idle",
+                    "step": None,
+                    "data": {},
+                    "last_plan": last,
+                    "last_plan_data": last_data,
+                },
             )
         else:
             supabase.table("bot_sessions").delete().eq("chat_id", key).execute()
@@ -85,9 +94,15 @@ def clear_session(chat_id: str | int) -> None:
         logger.exception("bot_sessions clear failed chat=%s", key)
 
 
-def save_last_plan(chat_id: str | int, text: str) -> None:
+def save_last_plan(
+    chat_id: str | int,
+    text: str,
+    plan_data: dict[str, Any] | None = None,
+) -> None:
     session = load_session(chat_id)
     session["last_plan"] = text
+    if plan_data is not None:
+        session["last_plan_data"] = plan_data
     save_session(chat_id, session)
 
 
@@ -95,3 +110,9 @@ def get_last_plan(chat_id: str | int) -> str | None:
     session = load_session(chat_id)
     last = session.get("last_plan")
     return str(last) if last else None
+
+
+def get_last_plan_data(chat_id: str | int) -> dict[str, Any] | None:
+    session = load_session(chat_id)
+    data = session.get("last_plan_data")
+    return data if isinstance(data, dict) else None

@@ -30,6 +30,9 @@ _DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
     "/api/weather": (60, 60),
     # Fan-out to admin chats / push — cap so one client cannot spam them
     "/api/telegram/notify": (10, 60),
+    "/api/telegram/notify-user": (20, 60),
+    "/api/telegram/notify-users": (10, 60),
+    "/api/telegram/register-webhook": (5, 60),
     "/api/telegram/webhook": (120, 60),
     "/api/notify/dispatch": (30, 60),
 }
@@ -102,6 +105,27 @@ def _limits() -> dict[str, tuple[int, int]]:
             _env_int(
                 "RATE_LIMIT_TELEGRAM_NOTIFY",
                 _DEFAULT_LIMITS["/api/telegram/notify"][0],
+            ),
+            60,
+        ),
+        "/api/telegram/notify-user": (
+            _env_int(
+                "RATE_LIMIT_TELEGRAM_NOTIFY_USER",
+                _DEFAULT_LIMITS["/api/telegram/notify-user"][0],
+            ),
+            60,
+        ),
+        "/api/telegram/notify-users": (
+            _env_int(
+                "RATE_LIMIT_TELEGRAM_NOTIFY_USERS",
+                _DEFAULT_LIMITS["/api/telegram/notify-users"][0],
+            ),
+            60,
+        ),
+        "/api/telegram/register-webhook": (
+            _env_int(
+                "RATE_LIMIT_TELEGRAM_REGISTER_WEBHOOK",
+                _DEFAULT_LIMITS["/api/telegram/register-webhook"][0],
             ),
             60,
         ),

@@ -16,9 +16,8 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
 
 def _require_cron_secret(x_cron_secret: str | None) -> None:
-    # CRON_SECRET only — never TELEGRAM_NOTIFY_SECRET. The mobile app ships the
-    # notify secret in its bundle (EXPO_PUBLIC_NOTIFY_SECRET), so accepting it
-    # here would let any user trigger destructive maintenance jobs.
+    # CRON_SECRET only — never TELEGRAM_NOTIFY_SECRET. Jobs must stay behind a
+    # server-only secret that is never shipped in the mobile client bundle.
     expected = (CRON_SECRET or "").strip()
     if not expected:
         raise HTTPException(

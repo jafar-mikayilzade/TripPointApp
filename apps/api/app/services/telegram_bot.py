@@ -1,12 +1,12 @@
 """Telegram user bot — guest + optional app link + AI/manual (inline UX).
 
 Sessions persist in Supabase `bot_sessions` (survives Railway restart).
-# TODO: optional email OTP (not required).
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -15,6 +15,7 @@ from app.db import supabase
 from app.services.bot_sessions import (
     clear_session as _db_clear_session,
     get_last_plan,
+    get_last_plan_data,
     load_session,
     save_last_plan,
     save_session,
@@ -39,6 +40,11 @@ logger = logging.getLogger(__name__)
 _SESSION_CACHE: dict[str, dict[str, Any]] = {}
 _SESSION_CACHE_MAX = 200
 
+# Soft throttle for AI plans (per chat) — protects Claude / OpenWeather quota.
+_AI_PLAN_LAST_AT: dict[str, float] = {}
+_AI_PLAN_COOLDOWN_SECONDS = 45
+_AI_PLAN_LAST_AT_MAX = 500
+
 
 def _remember_session(key: str, session: dict[str, Any]) -> None:
     if key in _SESSION_CACHE:
@@ -46,6 +52,7 @@ def _remember_session(key: str, session: dict[str, Any]) -> None:
     elif len(_SESSION_CACHE) >= _SESSION_CACHE_MAX:
         _SESSION_CACHE.pop(next(iter(_SESSION_CACHE)), None)
     _SESSION_CACHE[key] = session
+
 
 MAX_MANUAL_STOPS = 8
 POI_PAGE_SIZE = 8
@@ -55,8 +62,10 @@ FAVORITES_LIMIT = 15
 BTN_AI = "🤖 AI marşrut"
 BTN_MANUAL = "🗺️ Manual marşrut"
 BTN_LAST = "📄 Son marşrut"
+BTN_WEATHER = "🌤 Hava"
 BTN_HELP = "ℹ️ Kömək"
 BTN_LINK_APP = "🔗 App hesabı bağla"
+BTN_UNLINK = "🔓 Bağlantını kəs"
 BTN_ICMA = "👥 İcma"
 BTN_FAVS = "⭐ Sevimlilər"
 BTN_ADMIN = "🛡 Admin"
@@ -68,6 +77,7 @@ BTN_SHARE_LOC = "📍 Lokasiyamı göndər"
 INTERESTS: list[tuple[str, str]] = [
     ("nature", "Təbiət"),
     ("history", "Tarixi"),
+    ("family", "Ailə"),
 ]
 
 LISTING_TYPE_EMOJI: dict[str, str] = {
@@ -151,11 +161,235 @@ def _flush_session(chat_id: str | int) -> None:
         save_session(key, _SESSION_CACHE[key])
 
 
-def _save_last(chat_id: str | int, text: str) -> None:
-    save_last_plan(chat_id, text)
-    # Keep cache in sync
+def _save_last(
+    chat_id: str | int,
+    text: str,
+    plan_data: dict[str, Any] | None = None,
+) -> None:
+    save_last_plan(chat_id, text, plan_data)
     session = _get_session(chat_id)
     session["last_plan"] = text
+    if plan_data is not None:
+        session["last_plan_data"] = plan_data
+
+
+def _ai_plan_allowed(chat_id: str | int) -> tuple[bool, int]:
+    """Return (allowed, seconds_to_wait)."""
+    key = _chat_key(chat_id)
+    now = time.time()
+    last = _AI_PLAN_LAST_AT.get(key) or 0.0
+    wait = int(_AI_PLAN_COOLDOWN_SECONDS - (now - last))
+    if wait > 0:
+        return False, wait
+    if key not in _AI_PLAN_LAST_AT and len(_AI_PLAN_LAST_AT) >= _AI_PLAN_LAST_AT_MAX:
+        _AI_PLAN_LAST_AT.pop(next(iter(_AI_PLAN_LAST_AT)), None)
+    _AI_PLAN_LAST_AT[key] = now
+    return True, 0
+
+
+def _plan_to_saved_stops(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    stops_out: list[dict[str, Any]] = []
+    for day in plan.get("days") or []:
+        if not isinstance(day, dict):
+            continue
+        day_n = int(day.get("day") or 1)
+        for index, stop in enumerate(day.get("stops") or []):
+            if not isinstance(stop, dict):
+                continue
+            name = str(stop.get("name") or "").strip()
+            if not name:
+                continue
+            try:
+                lat = float(stop.get("lat"))
+                lng = float(stop.get("lng"))
+            except (TypeError, ValueError):
+                continue
+            stops_out.append(
+                {
+                    "day": day_n,
+                    "sort_order": index + 1,
+                    "poi_id": stop.get("poi_id") or None,
+                    "name": name[:200],
+                    "lat": lat,
+                    "lng": lng,
+                    "category": stop.get("category"),
+                    "time": stop.get("time"),
+                    "duration": stop.get("duration"),
+                    "tip": stop.get("tip"),
+                }
+            )
+    return stops_out
+
+
+def _manual_to_saved_stops(
+    stop_names: list[str], region: str
+) -> list[dict[str, Any]]:
+    """Resolve manual stop names to coords via pois when possible."""
+    out: list[dict[str, Any]] = []
+    db_region = REGION_DB_ID.get(region, region) if region else ""
+    for index, name in enumerate(stop_names):
+        clean = str(name or "").strip()
+        if not clean:
+            continue
+        row: dict[str, Any] = {
+            "sort_order": index + 1,
+            "name": clean[:200],
+            "lat": 0.0,
+            "lng": 0.0,
+            "poi_id": None,
+            "source": "manual",
+        }
+        try:
+            q = (
+                supabase.table("pois")
+                .select("id, lat, lng, category")
+                .eq("status", "approved")
+                .eq("name", clean)
+                .limit(1)
+            )
+            if db_region:
+                q = q.eq("region", db_region)
+            res = q.execute()
+            hits = res.data or []
+            if hits:
+                hit = hits[0]
+                row["poi_id"] = hit.get("id")
+                row["lat"] = float(hit.get("lat") or 0)
+                row["lng"] = float(hit.get("lng") or 0)
+                row["category"] = hit.get("category")
+                row["source"] = "poi"
+        except Exception:
+            logger.warning("manual stop resolve failed for %s", clean, exc_info=True)
+        out.append(row)
+    return out
+
+
+def _save_route_for_user(user_id: str, plan_data: dict[str, Any]) -> tuple[bool, str]:
+    source = str(plan_data.get("source") or "ai")
+    if source not in {"ai", "manual"}:
+        source = "ai"
+    stops = plan_data.get("stops")
+    if not isinstance(stops, list) or not stops:
+        return False, "Saxlamaq üçün marşrut nöqtəsi yoxdur."
+    # Manual stops without coords still save (app can open by name).
+    title = str(plan_data.get("title") or "Marşrut").strip()[:120] or "Marşrut"
+    payload = {
+        "user_id": user_id,
+        "source": source,
+        "title": title,
+        "summary": (str(plan_data.get("summary") or "").strip() or None),
+        "region": plan_data.get("region"),
+        "days_count": int(plan_data.get("days_count") or 1),
+        "budget": plan_data.get("budget"),
+        "interests": plan_data.get("interests"),
+        "group_type": plan_data.get("group_type"),
+        "from_origin": bool(plan_data.get("from_origin")),
+        "origin_lat": plan_data.get("origin_lat"),
+        "origin_lng": plan_data.get("origin_lng"),
+        "total_cost": plan_data.get("total_cost"),
+        "best_time": plan_data.get("best_time"),
+        "travel": plan_data.get("travel"),
+        "stops": stops,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        supabase.table("saved_routes").insert(payload).execute()
+        return True, "Marşrut app-də saxlanıldı ✅ (Sevimlilər → Marşrutlar)"
+    except Exception:
+        logger.exception("tg save_route failed")
+        return False, "Saxlama alınmadı. Bir az sonra yenidən yoxlayın."
+
+
+def _unlink_account(chat_id: str | int) -> tuple[bool, str]:
+    chat_s = str(chat_id)
+    user_id = _lookup_user_id(chat_id)
+    if not user_id:
+        return False, "Bağlı app hesabı yoxdur."
+    try:
+        supabase.table("profiles").update(
+            {"telegram_chat_id": None, "telegram_linked_at": None}
+        ).eq("id", user_id).execute()
+        supabase.table("telegram_users").update({"linked_user_id": None}).eq(
+            "telegram_chat_id", chat_s
+        ).execute()
+        return True, "Telegram bağlantısı kəsildi. İstəsəniz app-dən yenidən bağlaya bilərsiniz."
+    except Exception:
+        logger.exception("unlink_account failed")
+        return False, "Bağlantını kəsmək alınmadı."
+
+
+def _mark_notifications_read(user_id: str) -> tuple[bool, str]:
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        supabase.table("notifications").update({"read_at": now}).eq(
+            "user_id", user_id
+        ).is_("read_at", "null").execute()
+        return True, "Bildirişlər oxundu kimi işarələndi."
+    except Exception:
+        logger.exception("mark notifications read failed")
+        return False, "Yeniləmə alınmadı."
+
+
+def _show_weather_picker(chat_id: str | int, *, message_id: int | None = None) -> None:
+    _edit_or_reply(
+        chat_id,
+        "🌤 Hansı regionun havasına baxmaq istəyirsiniz?",
+        message_id=message_id,
+        reply_markup=_region_inline("wx:r"),
+    )
+
+
+def _send_weather(chat_id: str | int, region: str, *, message_id: int | None) -> None:
+    from app.services.weather import fetch_region_weather
+
+    label = REGION_LABELS.get(region, region)
+    try:
+        raw = fetch_region_weather(region, 3, start_offset=0)
+    except Exception:
+        logger.exception("tg weather failed")
+        _edit_or_reply(
+            chat_id,
+            f"{label}: hava indi alınmadı.",
+            message_id=message_id,
+            reply_markup=_ik([[_btn("🏠 Menyu", "menu")]]),
+        )
+        return
+    if not raw.get("ok"):
+        _edit_or_reply(
+            chat_id,
+            f"{label}: hava məlumatı yoxdur.",
+            message_id=message_id,
+            reply_markup=_ik([[_btn("🏠 Menyu", "menu")]]),
+        )
+        return
+    lines = [f"🌤 {label}", ""]
+    display = raw.get("display_az") or raw.get("summary_az")
+    if display:
+        lines.append(str(display))
+    summary = raw.get("summary_az")
+    if summary and summary != display:
+        lines.append(str(summary))
+    daily = raw.get("daily_forecast") or []
+    if isinstance(daily, list) and daily:
+        lines.append("")
+        for day in daily[:3]:
+            if not isinstance(day, dict):
+                continue
+            bit = day.get("display_az") or day.get("condition_az") or ""
+            date_s = day.get("date") or ""
+            if bit:
+                lines.append(f"• {date_s} {bit}".strip())
+    lines.append("\nApp-də də eyni məlumat Marşrut/Home-da görünür.")
+    _edit_or_reply(
+        chat_id,
+        "\n".join(lines),
+        message_id=message_id,
+        reply_markup=_ik(
+            [
+                [_btn("Başqa region", "wx:menu"), _btn("🏠 Menyu", "menu")],
+            ]
+        ),
+    )
 
 
 def _is_admin_user(user_id: str | None) -> bool:
@@ -261,10 +495,12 @@ def _main_keyboard(chat_id: str | int) -> dict[str, Any]:
     linked = bool(user_id)
     rows: list[list[dict[str, str]]] = [
         [{"text": BTN_AI}, {"text": BTN_MANUAL}],
-        [{"text": BTN_LAST}, {"text": BTN_HELP}],
+        [{"text": BTN_LAST}, {"text": BTN_WEATHER}],
+        [{"text": BTN_HELP}],
     ]
     if linked:
         rows.append([{"text": BTN_ICMA}, {"text": BTN_FAVS}])
+        rows.append([{"text": BTN_UNLINK}])
         if _is_admin_user(user_id):
             rows.append([{"text": BTN_ADMIN}])
     else:
@@ -272,16 +508,25 @@ def _main_keyboard(chat_id: str | int) -> dict[str, Any]:
     return {"keyboard": rows, "resize_keyboard": True}
 
 
-def _ai_result_keyboard() -> dict[str, Any]:
-    return _ik(
+def _ai_result_keyboard(*, linked: bool = False) -> dict[str, Any]:
+    rows: list[list[dict[str, str]]] = [
         [
-            [
-                _btn("🔄 Yenidən", "ai:again"),
-                _btn("✏️ Dəyiş", "ai:edit"),
-                _btn("🏠 Menyu", "menu"),
-            ]
+            _btn("🔄 Yenidən", "ai:again"),
+            _btn("✏️ Dəyiş", "ai:edit"),
         ]
-    )
+    ]
+    if linked:
+        rows.append([_btn("💾 App-ə saxla", "ai:save")])
+    rows.append([_btn("🏠 Menyu", "menu")])
+    return _ik(rows)
+
+
+def _manual_result_keyboard(*, linked: bool = False) -> dict[str, Any]:
+    rows: list[list[dict[str, str]]] = []
+    if linked:
+        rows.append([_btn("💾 App-ə saxla", "man:save")])
+    rows.append([_btn("🏠 Menyu", "menu")])
+    return _ik(rows)
 
 
 def _region_inline(prefix: str) -> dict[str, Any]:
@@ -569,11 +814,15 @@ def _help_text(chat_id: str | int) -> str:
         "   cari məkandan → çıxış və qayıdış saati",
         f"{BTN_MANUAL} — rayondan məkan seçib marşrut",
         f"{BTN_LAST} — son marşrut",
+        f"{BTN_WEATHER} — region havası (3 gün)",
         "Cari məkandan: AI-də «Bəli» → lokasiya paylaş",
+        "/cancel — ləğv",
     ]
     if linked:
-        lines.append(f"{BTN_ICMA} — Tur / Carpool / Yerli xidmət")
+        lines.append(f"{BTN_ICMA} — Tur / Carpool / Yerli xidmət (+ elan detalı)")
         lines.append(f"{BTN_FAVS} — Elanlar / Yerlər / Marşrutlar / Abunə / Bildiriş")
+        lines.append("💾 App-ə saxla — AI/manual nəticəni Sevimlilərə yazır")
+        lines.append(f"{BTN_UNLINK} və ya /unlink — Telegram bağlantısını kəs")
         if _is_admin_user(user_id):
             lines.append(f"{BTN_ADMIN} — Məkan / Şəkil / Şikayət növbələri")
             lines.append("/verify email|uuid — profil badge")
@@ -986,6 +1235,14 @@ def _show_ai_home(
 
 
 def _run_and_send_plan(chat_id: str | int, data: dict[str, Any]) -> None:
+    allowed, wait = _ai_plan_allowed(chat_id)
+    if not allowed:
+        _reply(
+            chat_id,
+            f"Bir az gözləyin — yeni AI marşrut {wait} san sonra mümkündür.",
+            reply_markup=_main_keyboard(chat_id),
+        )
+        return
     _reply(chat_id, "⏳ Marşrut hazırlanır…", reply_markup=_main_keyboard(chat_id))
     try:
         plan = run_plan_route(
@@ -1002,9 +1259,29 @@ def _run_and_send_plan(chat_id: str | int, data: dict[str, Any]) -> None:
             start_day_offset=int(data.get("start_day_offset") or 0),
         )
         text = format_plan_for_telegram(plan)
-        _save_last(chat_id, text)
+        region_key = str(data.get("region") or "")
+        label = REGION_LABELS.get(region_key, region_key)
+        plan_data = {
+            "source": "ai",
+            "title": f"AI · {label} · {int(data.get('days') or 1)} gün",
+            "summary": str(plan.get("summary") or "")[:500] or None,
+            "region": REGION_DB_ID.get(region_key, region_key) or region_key,
+            "days_count": int(data.get("days") or 1),
+            "budget": data.get("budget"),
+            "interests": list(data.get("interests") or []),
+            "group_type": data.get("group_type") or "solo",
+            "from_origin": bool(data.get("from_origin")),
+            "origin_lat": data.get("origin_lat"),
+            "origin_lng": data.get("origin_lng"),
+            "total_cost": plan.get("total_cost"),
+            "best_time": plan.get("best_time"),
+            "travel": plan.get("travel"),
+            "stops": _plan_to_saved_stops(plan),
+        }
+        _save_last(chat_id, text, plan_data)
         _clear_session(chat_id)
-        _reply(chat_id, text, reply_markup=_ai_result_keyboard())
+        linked = bool(_lookup_user_id(chat_id))
+        _reply(chat_id, text, reply_markup=_ai_result_keyboard(linked=linked))
     except ValueError as exc:
         _clear_session(chat_id)
         _reply(chat_id, f"Xəta: {exc}", reply_markup=_main_keyboard(chat_id))
@@ -1185,16 +1462,34 @@ def _finish_manual(chat_id: str | int) -> None:
             reply_markup=MANUAL_KEYBOARD,
         )
         return
-    region = data.get("region") or ""
-    label = REGION_LABELS.get(str(region), region)
+    region = str(data.get("region") or "")
+    label = REGION_LABELS.get(region, region)
     lines = [f"🗺️ Manual marşrut — {label}", ""]
     for i, name in enumerate(stops, start=1):
         lines.append(f"{i}. {name}")
     lines.append("\nXəritə: trippoint://ai-komekci")
     text_out = "\n".join(lines)
-    _save_last(chat_id, text_out)
+    plan_data = {
+        "source": "manual",
+        "title": f"Manual · {label}",
+        "summary": None,
+        "region": REGION_DB_ID.get(region, region) or region,
+        "days_count": 1,
+        "budget": None,
+        "interests": None,
+        "group_type": "solo",
+        "from_origin": False,
+        "origin_lat": None,
+        "origin_lng": None,
+        "total_cost": None,
+        "best_time": None,
+        "travel": None,
+        "stops": _manual_to_saved_stops(stops, region),
+    }
+    _save_last(chat_id, text_out, plan_data)
     _clear_session(chat_id)
-    _reply(chat_id, text_out, reply_markup=_main_keyboard(chat_id))
+    linked = bool(_lookup_user_id(chat_id))
+    _reply(chat_id, text_out, reply_markup=_manual_result_keyboard(linked=linked))
 
 
 def _icma_menu_keyboard() -> dict[str, Any]:
@@ -1275,15 +1570,90 @@ def _show_icma_by_type(
         )
         return
 
-    lines = [heading, ""]
+    lines = [heading, "", "Elanı seçin (detal):", ""]
+    buttons: list[list[dict[str, str]]] = []
     for row in rows:
         lines.append(_format_listing_row(row))
-    lines.append("\nƏtraflı: app → İcma")
+        lid = str(row.get("id") or "")
+        if not lid:
+            continue
+        title = str(row.get("title") or "Elan").strip()[:40]
+        emoji = LISTING_TYPE_EMOJI.get(str(row.get("type") or ""), "📌")
+        buttons.append([_btn(f"{emoji} {title}", f"icma:v:{lid}")])
+    buttons.append([_btn("« Növ", "icma:menu"), _btn("🏠 Menyu", "menu")])
     _edit_or_reply(
         chat_id,
         "\n".join(lines),
         message_id=message_id,
-        reply_markup=_icma_menu_keyboard(),
+        reply_markup=_ik(buttons),
+    )
+
+
+def _show_icma_listing_detail(
+    chat_id: str | int, listing_id: str, *, message_id: int | None
+) -> None:
+    try:
+        res = (
+            supabase.table("listings")
+            .select(
+                "id, title, type, region, departure_at, price, description, status"
+            )
+            .eq("id", listing_id)
+            .limit(1)
+            .execute()
+        )
+        rows = list(res.data or [])
+    except Exception:
+        logger.exception("icma listing detail failed")
+        _edit_or_reply(
+            chat_id,
+            "Elan yüklənmədi.",
+            message_id=message_id,
+            reply_markup=_icma_menu_keyboard(),
+        )
+        return
+    if not rows:
+        _edit_or_reply(
+            chat_id,
+            "Elan tapılmadı.",
+            message_id=message_id,
+            reply_markup=_icma_menu_keyboard(),
+        )
+        return
+    row = rows[0]
+    if str(row.get("status") or "") != "active":
+        _edit_or_reply(
+            chat_id,
+            "Bu elan aktiv deyil.",
+            message_id=message_id,
+            reply_markup=_icma_menu_keyboard(),
+        )
+        return
+    emoji = LISTING_TYPE_EMOJI.get(str(row.get("type") or ""), "📌")
+    lines = [f"{emoji} {row.get('title') or 'Elan'}", ""]
+    if row.get("region"):
+        lines.append(f"Region: {row['region']}")
+    if row.get("departure_at"):
+        lines.append(f"Vaxt: {row['departure_at']}")
+    if row.get("price") is not None:
+        lines.append(f"Qiymət: {row['price']}₼")
+    desc = str(row.get("description") or "").strip()
+    if desc:
+        lines.append("")
+        lines.append(desc[:800])
+    lines.append("\nQoşulmaq / əlaqə: TripPoint app → İcma")
+    listing_type = str(row.get("type") or "tour")
+    back = listing_type if listing_type in {"tour", "carpool", "local_service"} else "menu"
+    _edit_or_reply(
+        chat_id,
+        "\n".join(lines),
+        message_id=message_id,
+        reply_markup=_ik(
+            [
+                [_btn("« Siyahı", f"icma:{back}" if back != "menu" else "icma:menu")],
+                [_btn("🏠 Menyu", "menu")],
+            ]
+        ),
     )
 
 
@@ -1295,6 +1665,11 @@ def _handle_icma_callback(
     section = data.split(":", 1)[1]
     if section == "menu":
         _show_icma(chat_id, message_id=message_id)
+        return True
+    if section.startswith("v:"):
+        listing_id = section[2:].strip()
+        if listing_id:
+            _show_icma_listing_detail(chat_id, listing_id, message_id=message_id)
         return True
     if section in {"tour", "carpool", "local_service"}:
         _show_icma_by_type(chat_id, section, message_id=message_id)
@@ -1628,7 +2003,12 @@ def _show_fav_notifications(
         chat_id,
         "\n".join(lines),
         message_id=message_id,
-        reply_markup=_favorites_menu_keyboard(),
+        reply_markup=_ik(
+            [
+                [_btn("📬 Hamısını oxu", "fav:notifs_read")],
+                [_btn("« Sevimlilər", "fav:menu"), _btn("🏠 Menyu", "menu")],
+            ]
+        ),
     )
 
 
@@ -1666,6 +2046,15 @@ def _handle_fav_callback(
     if section == "notifs":
         _show_fav_notifications(chat_id, user_id, message_id=message_id)
         return True
+    if section == "notifs_read":
+        ok, msg = _mark_notifications_read(user_id)
+        _edit_or_reply(
+            chat_id,
+            msg if ok else msg,
+            message_id=message_id,
+            reply_markup=_favorites_menu_keyboard(),
+        )
+        return True
     return False
 
 
@@ -1696,6 +2085,43 @@ def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
     if data == "menu":
         _clear_session(chat_id)
         _show_main_menu(chat_id)
+        return {"ok": True}
+
+    if data == "wx:menu" or data.startswith("wx:r:"):
+        if data == "wx:menu":
+            _show_weather_picker(chat_id, message_id=message_id)
+            return {"ok": True}
+        region = data.split(":")[-1]
+        if region in BOT_REGION_KEYS:
+            _send_weather(chat_id, region, message_id=message_id)
+        return {"ok": True}
+
+    if data in {"ai:save", "man:save"}:
+        user_id = _lookup_user_id(chat_id)
+        if not user_id:
+            _edit_or_reply(
+                chat_id,
+                "Saxlamaq üçün app hesabını bağlayın (Profil → Telegram bağla).",
+                message_id=message_id,
+                reply_markup=_main_keyboard(chat_id),
+            )
+            return {"ok": True}
+        plan_data = get_last_plan_data(chat_id)
+        if not plan_data:
+            _edit_or_reply(
+                chat_id,
+                "Saxlanacaq marşrut yoxdur. Əvvəl AI və ya Manual hazırlayın.",
+                message_id=message_id,
+                reply_markup=_main_keyboard(chat_id),
+            )
+            return {"ok": True}
+        ok, msg = _save_route_for_user(user_id, plan_data)
+        _edit_or_reply(
+            chat_id,
+            msg,
+            message_id=message_id,
+            reply_markup=_main_keyboard(chat_id),
+        )
         return {"ok": True}
 
     if _handle_admin_callback(
@@ -1784,6 +2210,8 @@ def _handle_callback(update: dict[str, Any]) -> dict[str, Any]:
         session["data"]["interests"] = selected
         if "family" in selected:
             session["data"]["group_type"] = "family"
+        else:
+            session["data"]["group_type"] = "solo"
         _edit_or_reply(
             chat_id,
             "Maraqlar (bir neçə seçin), sonra ✅ Hazır:",
@@ -2028,6 +2456,18 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
             _reply(chat_id, _help_text(chat_id), reply_markup=_main_keyboard(chat_id))
             return {"ok": True}
 
+        if text == BTN_WEATHER or text.lower() in {"/weather", "hava", "weather"}:
+            _show_weather_picker(chat_id)
+            return {"ok": True}
+
+        if (
+            text == BTN_UNLINK
+            or text.lower() in {"/unlink", "unlink", "bağlantını kəs", "baglantini kes"}
+        ):
+            ok, msg = _unlink_account(chat_id)
+            _show_main_menu(chat_id, msg)
+            return {"ok": True, "unlinked": ok}
+
         if text == BTN_LINK_APP or text.lower() in {"bağla", "bagla", "link"}:
             if _lookup_user_id(chat_id):
                 _show_main_menu(
@@ -2112,7 +2552,15 @@ def handle_telegram_update(update: dict[str, Any]) -> dict[str, Any]:
         if text == BTN_LAST or text.lower() in {"/last", "son"}:
             last = get_last_plan(chat_id)
             if last:
-                _reply(chat_id, last, reply_markup=_ai_result_keyboard())
+                linked = bool(_lookup_user_id(chat_id))
+                plan_data = get_last_plan_data(chat_id)
+                source = str((plan_data or {}).get("source") or "ai")
+                kb = (
+                    _manual_result_keyboard(linked=linked)
+                    if source == "manual"
+                    else _ai_result_keyboard(linked=linked)
+                )
+                _reply(chat_id, last, reply_markup=kb)
             else:
                 _reply(
                     chat_id,

@@ -8,6 +8,7 @@ const SYNC_COOLDOWN_MS = 10 * 60 * 1000;
 
 /**
  * Non-blocking: fills `pois` for a region from OSM attractions.
+ * Server requires admin session or cron secret — normal users get 401 (silent).
  * Existing place_ids are skipped server-side. Failures are silent.
  */
 export function triggerRegionPlacesSync(region: string | null | undefined): void {
