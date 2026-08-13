@@ -1,6 +1,9 @@
 import Constants from 'expo-constants';
+import * as WebBrowser from 'expo-web-browser';
 import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
 
+import { AUTH_CALLBACK_URL } from './authConstants';
+import { createSessionFromUrl } from './authDeepLink';
 import {
   getEmailVerifiedAt,
   sendEmailVerificationLink,
@@ -9,7 +12,14 @@ import {
 import { ensureProfile } from './ensureProfile';
 import { supabase } from './supabase';
 
+WebBrowser.maybeCompleteAuthSession();
+
 type GoogleSignInModule = typeof import('@react-native-google-signin/google-signin');
+type GoogleResult = {
+  error: string | null;
+  needsEmailConfirm?: boolean;
+  email?: string;
+};
 
 let googleModule: GoogleSignInModule | null | undefined;
 
@@ -63,38 +73,19 @@ function getWebClientId(): string {
   );
 }
 
-function formatGoogleError(err: unknown): string {
+function isDeveloperConfigError(err: unknown): boolean {
   if (!err || typeof err !== 'object') {
-    return 'Google girişi uğursuz oldu';
+    return false;
   }
-
   const e = err as { code?: unknown; message?: unknown };
   const code = e.code != null ? String(e.code) : '';
   const message = e.message != null ? String(e.message) : '';
-
-  if (
+  return (
     code === '10' ||
+    code === '12500' ||
     code === 'DEVELOPER_ERROR' ||
-    /DEVELOPER_ERROR/i.test(message)
-  ) {
-    return (
-      'Google DEVELOPER_ERROR (kod 10): Google Cloud → Credentials → ' +
-      'Android OAuth client (package com.jafar.TripPoint) içində bu SHA-1-lər olmalıdır: ' +
-      '1) EAS/dev-client: D6:C6:10:BA:F0:1D:20:4C:66:9E:A4:33:86:3C:76:20:C1:3F:88:A1 ; ' +
-      '2) Bu PC lokal debug: 7A:0A:32:D3:DA:60:30:66:FC:0F:FD:68:13:8B:0D:7C:F6:B9:37:74. ' +
-      'Web client ID-ni Android client kimi istifadə etməyin. Save → 10–60 dəq → app data sil.'
-    );
-  }
-
-  if (code === '12500' || /SIGN_IN_FAILED/i.test(message)) {
-    return 'Google Sign-In uğursuz oldu (12500). Google Cloud-da OAuth client və SHA-1-i yoxlayın.';
-  }
-
-  if (message) {
-    return code ? `${message} (${code})` : message;
-  }
-
-  return code ? `Google girişi uğursuz oldu (${code})` : 'Google girişi uğursuz oldu';
+    /DEVELOPER_ERROR|SIGN_IN_FAILED/i.test(message)
+  );
 }
 
 const NATIVE_MISSING_MSG =
@@ -119,19 +110,11 @@ export function configureGoogleSignIn() {
   }
 
   try {
-    // Supabase needs idToken only — offlineAccess/serverAuthCode not required
-    // and can worsen DEVELOPER_ERROR with incomplete Cloud Console setup.
     mod.GoogleSignin.configure({
       webClientId,
       scopes: ['email', 'profile'],
       offlineAccess: false,
     });
-    if (__DEV__) {
-      console.log(
-        '[googleAuth] configured webClientId=...' +
-          webClientId.slice(Math.max(0, webClientId.length - 32))
-      );
-    }
   } catch (err) {
     console.warn('[googleAuth] configure failed', err);
     googleModule = null;
@@ -168,139 +151,193 @@ export async function signOutEverywhere(): Promise<{ error: string | null }> {
   return { error: null };
 }
 
-export async function signInWithGoogle(): Promise<{
-  error: string | null;
-  needsEmailConfirm?: boolean;
-  email?: string;
-}> {
+async function finalizeGoogleUser(): Promise<GoogleResult> {
+  setVerificationGateEnabled(false);
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user?.email) {
+      await signOutEverywhere();
+      return { error: 'Google hesabında email tapılmadı' };
+    }
+
+    const ensured = await ensureProfile(user);
+    if (ensured.error) {
+      console.warn('[googleAuth] ensureProfile', ensured.error);
+      await signOutEverywhere();
+      return { error: `Giriş oldu, amma profil yaradılmadı: ${ensured.error}` };
+    }
+
+    const verifiedAt =
+      ensured.profile?.email_verified_at ?? (await getEmailVerifiedAt(user.id));
+
+    if (verifiedAt) {
+      return { error: null };
+    }
+
+    const email = user.email;
+    await signOutEverywhere();
+
+    const sent = await sendEmailVerificationLink(email);
+    if (sent.error) {
+      console.warn('[googleAuth] verification email', sent.error);
+      return {
+        error: `Email təsdiq linki göndərilmədi: ${sent.error}`,
+        needsEmailConfirm: true,
+        email,
+      };
+    }
+
+    return { error: null, needsEmailConfirm: true, email };
+  } finally {
+    setVerificationGateEnabled(true);
+  }
+}
+
+/** Play / SHA-1 uyğunsuzluğunda native Sign-In işləməyəndə brauzer OAuth. */
+async function signInWithGoogleOAuth(): Promise<GoogleResult> {
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: AUTH_CALLBACK_URL,
+      skipBrowserRedirect: true,
+      queryParams: { prompt: 'select_account' },
+    },
+  });
+
+  if (error || !data.url) {
+    return {
+      error:
+        error?.message ??
+        'Google OAuth açılmadı. Supabase → Authentication → URL Configuration-da trippoint://auth/callback əlavə edin.',
+    };
+  }
+
+  const result = await WebBrowser.openAuthSessionAsync(data.url, AUTH_CALLBACK_URL);
+  if (result.type === 'cancel' || result.type === 'dismiss') {
+    return { error: 'Giriş ləğv edildi' };
+  }
+  if (result.type !== 'success' || !('url' in result) || !result.url) {
+    return { error: 'Google girişi tamamlanmadı' };
+  }
+
+  const sessionResult = await createSessionFromUrl(result.url);
+  if (sessionResult.error) {
+    return { error: sessionResult.error };
+  }
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) {
+    return {
+      error:
+        'Google sessiyası alınmadı. Supabase Redirect URLs siyahısına trippoint://auth/callback əlavə edin.',
+    };
+  }
+
+  return finalizeGoogleUser();
+}
+
+async function signInWithGoogleNative(): Promise<GoogleResult> {
   const mod = loadGoogleSignIn();
   if (!mod) {
     return { error: NATIVE_MISSING_MSG };
   }
 
   const { GoogleSignin, statusCodes } = mod;
+  const webClientId = getWebClientId();
+  if (!webClientId) {
+    return {
+      error:
+        'Google Web Client ID təyin olunmayıb. .env-ə EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID əlavə edin.',
+    };
+  }
+
+  await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
 
   try {
-    const webClientId = getWebClientId();
-    if (!webClientId) {
-      return {
-        error:
-          'Google Web Client ID təyin olunmayıb. .env-ə EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID əlavə edin.',
-      };
-    }
+    await GoogleSignin.signOut();
+  } catch {
+    // ignore
+  }
 
-    await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+  GoogleSignin.configure({
+    webClientId,
+    scopes: ['email', 'profile'],
+    offlineAccess: false,
+  });
 
-    // Only clear local Google session — revokeAccess before sign-in can break the flow
+  const response = await GoogleSignin.signIn();
+
+  if (response.type === 'cancelled') {
+    return { error: 'Giriş ləğv edildi' };
+  }
+
+  let idToken = response.data?.idToken ?? null;
+
+  if (!idToken) {
     try {
-      await GoogleSignin.signOut();
-    } catch {
-      // ignore
+      const tokens = await GoogleSignin.getTokens();
+      idToken = tokens.idToken;
+    } catch (tokenErr) {
+      console.warn('[googleAuth] getTokens failed', tokenErr);
     }
+  }
 
-    // Ensure configure is applied with current env before presenting UI
-    const webClientIdFresh = getWebClientId();
-    GoogleSignin.configure({
-      webClientId: webClientIdFresh,
-      scopes: ['email', 'profile'],
-      offlineAccess: false,
-    });
+  if (!idToken) {
+    return signInWithGoogleOAuth();
+  }
 
-    const response = await GoogleSignin.signIn();
+  const { error } = await supabase.auth.signInWithIdToken({
+    provider: 'google',
+    token: idToken,
+  });
 
-    if (response.type === 'cancelled') {
-      return { error: 'Giriş ləğv edildi' };
+  if (error) {
+    console.warn('[googleAuth] supabase signInWithIdToken', error);
+    return signInWithGoogleOAuth();
+  }
+
+  return finalizeGoogleUser();
+}
+
+export async function signInWithGoogle(): Promise<GoogleResult> {
+  try {
+    if (Platform.OS === 'web' || !loadGoogleSignIn()) {
+      return await signInWithGoogleOAuth();
     }
-
-    let idToken = response.data?.idToken ?? null;
-
-    if (!idToken) {
-      try {
-        const tokens = await GoogleSignin.getTokens();
-        idToken = tokens.idToken;
-      } catch (tokenErr) {
-        console.warn('[googleAuth] getTokens failed', tokenErr);
-      }
-    }
-
-    if (!idToken) {
-      return {
-        error:
-          'Google idToken alınmadı. configure()-də Web Client ID (tip: Web application) istifadə olunduğundan və Google Cloud-da Android client + SHA-1 olduğundan əmin olun.',
-      };
-    }
-
-    const { data, error } = await supabase.auth.signInWithIdToken({
-      provider: 'google',
-      token: idToken,
-    });
-
-    if (error) {
-      console.warn('[googleAuth] supabase signInWithIdToken', error);
-      return {
-        error: `${error.message}. Supabase Dashboard → Authentication → Providers → Google: eyni Web Client ID və Client Secret aktiv olmalıdır.`,
-      };
-    }
-
-    setVerificationGateEnabled(false);
 
     try {
-      if (!data.user?.email) {
-        await signOutEverywhere();
-        return { error: 'Google hesabında email tapılmadı' };
+      return await signInWithGoogleNative();
+    } catch (err: unknown) {
+      const mod = loadGoogleSignIn();
+      const statusCodes = mod?.statusCodes;
+      const code =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code: unknown }).code)
+          : '';
+
+      if (statusCodes && code === String(statusCodes.SIGN_IN_CANCELLED)) {
+        return { error: 'Giriş ləğv edildi' };
+      }
+      if (statusCodes && code === String(statusCodes.IN_PROGRESS)) {
+        return { error: 'Giriş prosesi davam edir' };
       }
 
-      const ensured = await ensureProfile(data.user);
-      if (ensured.error) {
-        console.warn('[googleAuth] ensureProfile', ensured.error);
-        await signOutEverywhere();
-        return {
-          error: `Giriş oldu, amma profil yaradılmadı: ${ensured.error}`,
-        };
+      if (isDeveloperConfigError(err) || (statusCodes && code === String(statusCodes.PLAY_SERVICES_NOT_AVAILABLE))) {
+        console.warn('[googleAuth] native failed, falling back to OAuth', err);
+        return await signInWithGoogleOAuth();
       }
 
-      const verifiedAt =
-        ensured.profile?.email_verified_at ?? (await getEmailVerifiedAt(data.user.id));
-
-      if (verifiedAt) {
-        return { error: null };
-      }
-
-      const email = data.user.email;
-      await signOutEverywhere();
-
-      const sent = await sendEmailVerificationLink(email);
-      if (sent.error) {
-        console.warn('[googleAuth] verification email', sent.error);
-        return {
-          error: `Email təsdiq linki göndərilmədi: ${sent.error}`,
-          needsEmailConfirm: true,
-          email,
-        };
-      }
-
-      return { error: null, needsEmailConfirm: true, email };
-    } finally {
-      setVerificationGateEnabled(true);
+      console.warn('[googleAuth] signIn error, trying OAuth', err);
+      return await signInWithGoogleOAuth();
     }
   } catch (err: unknown) {
-    console.warn('[googleAuth] signIn error', err);
-
-    const code =
-      err && typeof err === 'object' && 'code' in err
-        ? String((err as { code: unknown }).code)
-        : '';
-
-    if (code === statusCodes.SIGN_IN_CANCELLED) {
-      return { error: 'Giriş ləğv edildi' };
-    }
-    if (code === statusCodes.IN_PROGRESS) {
-      return { error: 'Giriş prosesi davam edir' };
-    }
-    if (code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
-      return { error: 'Google Play xidmətləri mövcud deyil' };
-    }
-
-    return { error: formatGoogleError(err) };
+    console.warn('[googleAuth] OAuth/native failed', err);
+    const message = err instanceof Error ? err.message : 'Google girişi uğursuz oldu';
+    return { error: message };
   }
 }
