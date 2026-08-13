@@ -63,6 +63,8 @@ function createStyles(colors: ThemeColors) {
     right: {
       flexShrink: 0,
       paddingTop: 2,
+      flexDirection: 'row',
+      alignItems: 'center',
     },
   });
 }

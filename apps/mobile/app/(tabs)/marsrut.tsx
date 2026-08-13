@@ -1443,7 +1443,9 @@ export default function MarsrutScreen() {
         initialTopRatio={MARSRUT_FORM_SPLIT}
         topRatio={splitRatio}
         onTopRatioChange={setSplitRatio}
-        minTopRatio={0}
+        // Form mode: map fully collapsed (ratio 0). Plan mode: never let the
+        // handle disappear at the top edge (was stuck until app restart).
+        minTopRatio={plan ? 0.18 : 0}
         maxTopRatio={0.85}
         top={
           <View

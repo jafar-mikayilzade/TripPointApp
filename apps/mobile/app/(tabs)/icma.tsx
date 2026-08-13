@@ -200,7 +200,7 @@ export default function IcmaScreen() {
         right={
           <View style={styles.headerActions}>
             <Pressable style={styles.addButton} onPress={() => setCreateVisible(true)} hitSlop={8}>
-              <FontAwesome name="plus" size={14} color={colors.textOnAccent} />
+              <FontAwesome name="plus" size={16} color={colors.textOnAccent} />
             </Pressable>
             <HamburgerMenuButton />
           </View>
@@ -448,6 +448,7 @@ function createStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
   },
   title: {
     fontSize: 22,
@@ -469,6 +470,7 @@ function createStyles(colors: ThemeColors) {
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   filterScroll: {
     flexGrow: 0,

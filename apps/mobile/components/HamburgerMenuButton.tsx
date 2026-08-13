@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Image, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { ThemeColors } from '../constants/theme';
 import { supabase } from '../lib/supabase';
@@ -12,11 +12,10 @@ type Props = {
   style?: object;
 };
 
-/** Top-right corner button — opens slide-in menu with profile, notifications, routes, subs. */
+/** Top-right corner — hamburger icon opens slide-in menu (badge if unread). */
 export function HamburgerMenuButton({ style }: Props) {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -28,20 +27,11 @@ export function HamburgerMenuButton({ style }: Props) {
           data: { user },
         } = await supabase.auth.getUser();
         if (!user || !active) {
-          if (active) {
-            setAvatarUrl(null);
-            setUnread(0);
-          }
+          if (active) setUnread(0);
           return;
         }
-        const [{ data }, count] = await Promise.all([
-          supabase.from('profiles').select('avatar_url').eq('id', user.id).maybeSingle(),
-          getUnreadNotificationCount(),
-        ]);
-        if (active) {
-          setAvatarUrl(data?.avatar_url?.trim() || null);
-          setUnread(count);
-        }
+        const count = await getUnreadNotificationCount();
+        if (active) setUnread(count);
       })();
       return () => {
         active = false;
@@ -57,11 +47,7 @@ export function HamburgerMenuButton({ style }: Props) {
         hitSlop={8}
         accessibilityLabel="Menyu"
       >
-        {avatarUrl ? (
-          <Image source={{ uri: avatarUrl }} style={styles.avatar} />
-        ) : (
-          <Ionicons name="menu" size={20} color={colors.text} />
-        )}
+        <Ionicons name="menu" size={22} color={colors.text} />
         {unread > 0 ? (
           <View style={styles.badge}>
             <View style={styles.badgeDot} />
@@ -86,11 +72,7 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center',
       justifyContent: 'center',
       overflow: 'visible',
-    },
-    avatar: {
-      width: 34,
-      height: 34,
-      borderRadius: 10,
+      flexShrink: 0,
     },
     badge: {
       position: 'absolute',

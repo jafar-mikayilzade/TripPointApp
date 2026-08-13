@@ -179,13 +179,22 @@ export function ResizableSplit({
 
   const topHeight = containerHeight > 0 ? containerHeight * topRatio : undefined;
   const bottomHeight = containerHeight > 0 ? containerHeight * (1 - topRatio) : undefined;
-  const handleTop =
-    topHeight != null ? Math.max(0, topHeight - HANDLE_HIT / 2) : undefined;
-  // Collapsed map (ratio≈0) — hide blue pill so it doesn't sit on the form title
+
+  /**
+   * Always keep the drag handle reachable.
+   * Previously we hid it when ratio≈0 / ≈1 — after a drag to the edge the
+   * handle vanished and the split stayed stuck until app restart.
+   * Only hide when the parent intentionally collapses the top pane
+   * (minTopRatio≈0 and current ratio still at that floor).
+   */
+  const intentionallyCollapsed =
+    minTopRatio <= 0.001 && topRatio <= 0.001 && dragRatio == null;
   const showHandle =
-    topRatio > 0.04 &&
-    topRatio < 0.96 &&
-    (topHeight == null || topHeight >= HANDLE_HIT);
+    containerHeight > 0 && maxTopRatio > minTopRatio && !intentionallyCollapsed;
+  const handleTop =
+    topHeight != null
+      ? clamp(topHeight - HANDLE_HIT / 2, 0, Math.max(0, containerHeight - HANDLE_HIT))
+      : undefined;
 
   return (
     <View style={[styles.root, style]} onLayout={handleLayout}>
