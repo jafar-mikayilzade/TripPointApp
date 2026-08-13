@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "com.jafar.TripPoint",
-      "versionCode": 15,
+      "versionCode": 16,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#0E5837",
