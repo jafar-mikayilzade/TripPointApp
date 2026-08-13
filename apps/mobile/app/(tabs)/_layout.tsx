@@ -14,6 +14,9 @@ import {
   ensureEncouragementSchedule,
 } from '../../lib/encouragementNotifications';
 import { useResponsiveLayout } from '../../lib/layout';
+import { subscribeNotificationInbox } from '../../lib/notificationInbox';
+import { ensureNotificationPermissions } from '../../lib/pushNotifications';
+import { supabase } from '../../lib/supabase';
 import { useThemeColors } from '../../theme/ThemeProvider';
 
 const ACTIVE_BG = '#0D2C24';
@@ -50,6 +53,7 @@ export default function TabLayout() {
 
   useEffect(() => {
     configureNotificationHandler();
+    void ensureNotificationPermissions();
     let cancelled = false;
     void (async () => {
       const welcome = await consumePendingWelcomeToast();
@@ -71,10 +75,37 @@ export default function TabLayout() {
     };
   }, [showSuccess, showInfo]);
 
+  useEffect(() => {
+    let unsub: (() => void) | undefined;
+    let cancelled = false;
+    void supabase.auth.getUser().then(({ data }) => {
+      const user = data.user;
+      if (!user || cancelled) {
+        return;
+      }
+      unsub = subscribeNotificationInbox({
+        userId: user.id,
+        onInsert: (row) => {
+          const title = (row.title || '').trim();
+          const body = (row.body || '').trim();
+          const message = body ? `${title}: ${body}` : title;
+          if (message) {
+            showInfo(message);
+          }
+        },
+      });
+    });
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
+  }, [showInfo]);
+
   return (
     <>
     <Tabs
       screenOptions={{
+        headerShown: false,
         tabBarActiveTintColor: colors.brand,
         tabBarInactiveTintColor: colors.tabInactive,
         tabBarStyle: {

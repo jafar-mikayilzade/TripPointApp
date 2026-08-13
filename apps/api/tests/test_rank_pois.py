@@ -88,18 +88,20 @@ class TestBucketRouteCandidates:
         assert "attractions" in buckets
         assert len(buckets["restaurants"]) == 1
 
-    def test_interest_filter_prefers_matching(self):
+    def test_pads_when_interest_matches_are_thin(self):
         rows = [
             _poi("h1", category="historical"),
             _poi("n1", category="nature"),
+            _poi("n2", category="nature"),
         ]
         buckets = bucket_route_candidates(
             rows,
-            per_bucket=2,
+            per_bucket=5,
             prefer_attraction_cats={"historical"},
         )
         ids = [r["id"] for r in buckets["attractions"]]
         assert "h1" in ids
+        assert "n1" in ids or "n2" in ids
 
 
 class TestPublicPoiFields:

@@ -124,7 +124,53 @@ export async function toggleSubscription(
   if (error) {
     return { subscribed: false, error: error.message };
   }
+
+  void notifyAfterSubscribe(targetType, targetId, user.id);
   return { subscribed: true };
+}
+
+async function notifyAfterSubscribe(
+  targetType: SubscriptionTargetType,
+  targetId: string,
+  actorId: string
+): Promise<void> {
+  const { data: me } = await supabase
+    .from('profiles')
+    .select('full_name')
+    .eq('id', actorId)
+    .maybeSingle();
+  const name = me?.full_name?.trim() || 'Bir istifadəçi';
+
+  if (targetType === 'listing') {
+    const { data: listing } = await supabase
+      .from('listings')
+      .select('id, title, created_by')
+      .eq('id', targetId)
+      .maybeSingle();
+    if (!listing?.created_by || listing.created_by === actorId) {
+      return;
+    }
+    await insertNotificationsForUsers({
+      userIds: [listing.created_by],
+      kind: 'tour_update',
+      title: 'Yeni abunə',
+      body: `${name} turunuza abunə oldu: ${listing.title}`,
+      listingId: listing.id,
+      actorId,
+    });
+    return;
+  }
+
+  if (targetId === actorId) {
+    return;
+  }
+  await insertNotificationsForUsers({
+    userIds: [targetId],
+    kind: 'tour_update',
+    title: 'Yeni izləyici',
+    body: `${name} sizi izləməyə başladı.`,
+    actorId,
+  });
 }
 
 /**
@@ -166,6 +212,35 @@ async function insertNotificationsForUsers(input: {
     return;
   }
 
+  const base = getApiBaseUrl();
+  const headers = await getAuthHeaders();
+  if (base && headers) {
+    try {
+      const res = await fetch(`${base}/api/notify/create`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          user_ids: unique,
+          kind: input.kind,
+          title: input.title,
+          body: input.body ?? null,
+          listing_id: input.listingId ?? null,
+        }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { inserted?: number };
+        if ((json.inserted ?? 0) > 0) {
+          return;
+        }
+        console.warn('[notify] create inserted 0, trying client insert');
+      } else {
+        console.warn('[notify] create endpoint', res.status);
+      }
+    } catch (err) {
+      console.warn('[notify] create endpoint failed', err);
+    }
+  }
+
   const rows = unique.map((userId) => ({
     user_id: userId,
     kind: input.kind,
@@ -175,10 +250,15 @@ async function insertNotificationsForUsers(input: {
     actor_id: input.actorId ?? null,
   }));
 
-  const { data: inserted } = await supabase
+  const { data: inserted, error } = await supabase
     .from('notifications')
     .insert(rows)
     .select('id');
+
+  if (error) {
+    console.warn('[notify] client insert blocked', error.message);
+    return;
+  }
 
   const ids = (inserted ?? []).map((row) => row.id).filter(Boolean);
   void mirrorNotifications(ids);

@@ -51,6 +51,8 @@ def send_expo_push(
             "title": title[:100],
             "body": body[:500],
             "data": data or {},
+            "priority": "high",
+            "channelId": "trippoint-default",
         }
         for token in clean
     ]
@@ -58,10 +60,11 @@ def send_expo_push(
     try:
         res = requests.post(
             EXPO_PUSH_URL,
-            json=messages if len(messages) > 1 else messages[0],
+            json=messages,
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/json",
+                "Accept-encoding": "gzip, deflate",
             },
             timeout=12,
         )

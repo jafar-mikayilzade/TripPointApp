@@ -246,10 +246,13 @@ def grow_compact_tour(
         if not prefer_categories
         or bool(_poi_category_set(p) & set(prefer_categories))
     ]
-    # Hard interest filter: never seed from outside preferred set
-    if prefer_categories and not preferred:
+    if prefer_categories and len(preferred) < max(3, limit):
+        # Sparse regions (Quba + one interest): still build a full day
+        seed_pool = preferred + [p for p in candidates if p not in preferred]
+    else:
+        seed_pool = preferred if prefer_categories else candidates
+    if not seed_pool:
         return []
-    seed_pool = preferred if prefer_categories else (preferred if preferred else candidates)
 
     def seed_key(p: dict[str, Any]) -> tuple[float, float]:
         c = _coord(p)
@@ -272,8 +275,7 @@ def grow_compact_tour(
         base_len = tour_length_km(order_stops_geo(chosen)) if len(chosen) > 1 else 0.0
         chosen_coords = [_coord(p) for p in chosen if _coord(p)]
 
-        # Only search interest matches when filter is active
-        search = preferred if prefer_categories else candidates
+        search = seed_pool if prefer_categories else candidates
         for poi in search:
             pid = str(poi.get("id") or "")
             if not pid or pid in chosen_ids:

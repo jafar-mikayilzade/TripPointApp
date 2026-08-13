@@ -15,7 +15,8 @@ HISTORICAL_CATS = frozenset({"historical", "monument"})
 # Mobile InterestId / category chips → attraction categories (shared by plan + candidates)
 # "nature" does NOT include mountain — dağ yalnız ayrıca seçiləndə əlavə olunur.
 INTEREST_ATTRACTION_CATS: dict[str, set[str]] = {
-    "nature": {"nature"},
+    # «Təbiət» = parks + waterfalls + lakes. Mountains stay gated unless «Dağ».
+    "nature": {"nature", "waterfall", "lake"},
     "waterfall": {"waterfall"},
     "mountain": {"mountain"},
     "lake": {"lake"},

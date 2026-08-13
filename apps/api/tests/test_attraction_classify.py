@@ -14,7 +14,7 @@ from app.services.attraction_classify import (
 class TestInterestAttractionCats:
     def test_nature_interest(self):
         cats = interest_attraction_cats(["nature"])
-        assert cats == {"nature"}
+        assert cats == {"nature", "waterfall", "lake"}
         assert "mountain" not in cats
 
     def test_mountain_only_when_selected(self):

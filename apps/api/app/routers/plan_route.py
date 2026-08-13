@@ -13,6 +13,7 @@ from app.constants.regions import REGION_COORDINATES, REGION_DB_ID, REGION_LABEL
 from app.services.attraction_classify import (
     attraction_matches_interests,
     classify_attraction_rows,
+    looks_like_mountain_peak,
 )
 from app.services.live_route_candidates import load_live_route_candidates
 from app.services.plan_itinerary import build_skeleton, enrich_with_claude
@@ -129,14 +130,24 @@ def plan_route_endpoint(
             "client+db" if candidate_source == "client" else str(loaded.get("source") or "db")
         )
 
-    # Hard interest gate (esp. mountains) before packing — dual-tag peaks stay out
+    # Prefer interest matches, but never starve a multi-day plan down to 1 POI.
+    # Mountains stay gated unless the user explicitly picked «Dağ».
     from app.services.attraction_classify import interest_attraction_cats
 
     interest_cats = interest_attraction_cats(interests)
     if interest_cats:
-        attractions = [
+        matched = [
             p for p in attractions if attraction_matches_interests(p, interest_cats)
         ]
+        if len(matched) >= min_attractions:
+            attractions = matched
+        else:
+            extra = [
+                p
+                for p in attractions
+                if p not in matched and not looks_like_mountain_peak(p)
+            ]
+            attractions = matched + extra
 
     lodging_type = (body.lodgingType or "hotel").strip() or "hotel"
     accommodations = filter_accommodations_by_lodging_type(

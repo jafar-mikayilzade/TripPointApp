@@ -259,8 +259,12 @@ def bucket_route_candidates(
         preferred = [
             r for r in attractions if poi_categories(r) & prefer_attraction_cats
         ]
-        # Hard interest filter: never fill with other attraction categories
-        attractions_out = prefer_high_rated(preferred, limit=per_bucket, hubs=hubs)
+        if len(preferred) >= min(8, per_bucket):
+            attractions_out = prefer_high_rated(preferred, limit=per_bucket, hubs=hubs)
+        else:
+            # Keep matches first, then pad so 2-day plans are not a single POI
+            mixed = preferred + [r for r in attractions if r not in preferred]
+            attractions_out = prefer_high_rated(mixed, limit=per_bucket, hubs=hubs)
     else:
         attractions_out = prefer_high_rated(attractions, limit=per_bucket, hubs=hubs)
 

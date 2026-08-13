@@ -65,7 +65,7 @@ function buildSteps(width: number, height: number, tabBarHeight: number, topInse
     {
       id: 'menu',
       title: 'Menyu',
-      body: 'Bildirişlər, marşrutlar, elanlar və xatirələr buradadır.',
+      body: 'Profil, bildirişlər, marşrutlar və abunələr hamburger düyməsindədir (sağ yuxarı).',
       spot: {
         x: width - 52,
         y: topInset + 8,

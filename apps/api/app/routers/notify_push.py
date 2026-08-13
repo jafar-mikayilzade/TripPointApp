@@ -19,6 +19,7 @@ from app.config import CRON_SECRET, TELEGRAM_NOTIFY_SECRET
 from app.security import secret_matches
 from app.services.notify_dispatch import (
     MAX_ROWS_PER_DISPATCH,
+    create_and_dispatch,
     dispatch_notifications,
 )
 from app.services.push_notify import notify_users_push
@@ -52,6 +53,34 @@ class DispatchBody(BaseModel):
     notification_ids: list[str] = Field(
         default_factory=list, max_length=MAX_ROWS_PER_DISPATCH
     )
+
+
+class CreateBody(BaseModel):
+    user_ids: list[str] = Field(default_factory=list, max_length=80)
+    kind: str = "tour_update"
+    title: str = Field(..., min_length=1, max_length=120)
+    body: str | None = Field(default=None, max_length=500)
+    listing_id: str | None = None
+
+
+@router.post("/create")
+def api_notify_create(
+    body: CreateBody,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    """Insert in-app rows + Expo/Telegram push for a verified session."""
+    actor_id = verify_user(authorization)
+    if not actor_id:
+        raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+    result = create_and_dispatch(
+        actor_id=actor_id,
+        user_ids=body.user_ids,
+        kind=body.kind,
+        title=body.title,
+        body=body.body,
+        listing_id=body.listing_id,
+    )
+    return {"ok": True, **result}
 
 
 @router.post("/dispatch")

@@ -51,6 +51,17 @@ class TestNotifyDispatchAuth:
         assert res.status_code == 200
         assert res.json()["ok"] is True
 
+    def test_create_requires_auth(self, client: TestClient):
+        res = client.post(
+            "/api/notify/create",
+            json={
+                "user_ids": ["other-user"],
+                "kind": "join_request",
+                "title": "Qoşulma sorğusu",
+            },
+        )
+        assert res.status_code == 401
+
 
 class TestServiceRoleWriteAuth:
     """Endpoints that write with the service role must reject anonymous calls."""

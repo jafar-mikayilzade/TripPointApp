@@ -1,11 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { ThemeColors } from '../constants/theme';
 import { supabase } from '../lib/supabase';
 import { useThemeColors } from '../theme/ThemeProvider';
+import { onNotificationInboxChange } from '../lib/notificationInbox';
 import { MenuDrawer, getUnreadNotificationCount } from './MenuDrawer';
 
 type Props = {
@@ -38,6 +39,12 @@ export function HamburgerMenuButton({ style }: Props) {
       };
     }, [])
   );
+
+  useEffect(() => {
+    return onNotificationInboxChange(() => {
+      void getUnreadNotificationCount().then(setUnread);
+    });
+  }, []);
 
   return (
     <>

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const KEY = '@trippoint/first-run-coach-v1';
+const KEY = '@trippoint/first-run-coach-v2';
 
 export async function hasSeenFirstRunCoach(): Promise<boolean> {
   try {

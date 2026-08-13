@@ -82,7 +82,7 @@ TRAVEL_DAY_ADD_FROM_PATH_KM = 7.0
 MAX_DAY_DIAMETER_KM = 14.0
 MAX_ADD_FROM_PATH_KM = 7.0
 # Later days stay clear of earlier days' visited area (avoid mixing routes)
-DAY_FOOTPRINT_CLEARANCE_KM = 10.0
+DAY_FOOTPRINT_CLEARANCE_KM = 4.0
 # Food/hotel only if they barely bend the path
 MAX_FOOD_DETOUR_KM = 2.0
 MAX_FOOD_DETOUR_RELAXED_KM = 10.0
@@ -179,8 +179,13 @@ def _prioritize_attractions_for_interests(
         p for p in pool if attraction_matches_interests(p, interest_cats)
     ]
     rng.shuffle(preferred)
-    # Hard filter: only interest-matching attractions (mountains gated)
-    return preferred
+    # Keep interest-first order, but pad when a region has too few matches
+    # (otherwise a 2-day Quba «Təbiət» plan collapses to a single stop).
+    if len(preferred) >= 8:
+        return preferred
+    rest = [p for p in pool if p not in preferred]
+    rng.shuffle(rest)
+    return preferred + rest
 
 
 def _stop_payload(
@@ -296,8 +301,11 @@ def _take_along_tour(
             for p in available
             if attraction_matches_interests(p, set(prefer_categories))
         ]
-        # Hard interest filter — never pad with other categories
-        return contiguous_slice(matched, limit)
+        if len(matched) >= max(3, limit):
+            return contiguous_slice(matched, limit)
+        # Sparse region: keep matches first, then nearby non-matches
+        rest = [p for p in available if p not in matched]
+        return contiguous_slice(matched + rest, limit)
 
     return contiguous_slice(available, limit)
 
@@ -394,8 +402,8 @@ def pick_day_pieces(
                 rng=rng,
             )
             attractions = attractions + extra2
-        # Last resort: nearest unused pool members (interest-matched only)
-        if len(attractions) < min(3, limit):
+        # Last resort: nearest unused pool members (drop interest filter if still thin)
+        if len(attractions) < min(4, limit):
             already = {str(p.get("id") or "") for p in attractions}
             ranked = sorted(
                 [
@@ -405,10 +413,6 @@ def pick_day_pieces(
                     and str(p.get("id") or "") not in already
                     and str(p.get("id") or "") not in used
                     and poi_coord(p) is not None
-                    and (
-                        not interest_cats
-                        or attraction_matches_interests(p, interest_cats)
-                    )
                 ],
                 key=lambda p: haversine_km(
                     seed_lat,
@@ -418,7 +422,7 @@ def pick_day_pieces(
                 ),
             )
             for p in ranked:
-                if len(attractions) >= min(3, limit):
+                if len(attractions) >= min(4, limit):
                     break
                 attractions.append(p)
 
