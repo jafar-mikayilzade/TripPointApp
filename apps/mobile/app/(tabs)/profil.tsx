@@ -1,7 +1,7 @@
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import * as ImagePicker from 'expo-image-picker';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -165,7 +165,7 @@ export default function ProfilScreen() {
   const [travelCount, setTravelCount] = useState(0);
   const [listingCount, setListingCount] = useState(0);
 
-  const [activeTab, setActiveTab] = useState<ProfileTab>('travels');
+  const [activeTab, setActiveTab] = useState<ProfileTab>('listings');
   const [travels, setTravels] = useState<TravelRow[]>([]);
   const [listings, setListings] = useState<ListingWithCreator[]>([]);
   const [reviews, setReviews] = useState<ReviewRow[]>([]);
@@ -199,6 +199,10 @@ export default function ProfilScreen() {
   const profileUserId = paramUserId ?? authUserId;
   const isOwnProfile = !!authUserId && !!profileUserId && authUserId === profileUserId;
   const showAdminSection = isOwnProfile && (isAdmin || profile?.role === 'admin');
+
+  useEffect(() => {
+    setActiveTab(isOwnProfile ? 'listings' : 'travels');
+  }, [isOwnProfile, profileUserId]);
 
   const openAdminQueue = useCallback((tab: 'pois' | 'photos' | 'reports') => {
     setModerationTab(tab);
@@ -851,12 +855,14 @@ export default function ProfilScreen() {
           {profile.bio?.trim() ? <Text style={styles.bio}>{profile.bio.trim()}</Text> : null}
 
           <View style={styles.statsRow}>
-            <StatBox
-              label="Səyahət"
-              value={travelCount}
-              selected={activeTab === 'travels'}
-              onPress={() => setActiveTab('travels')}
-            />
+            {isOwnProfile ? null : (
+              <StatBox
+                label="Səyahət"
+                value={travelCount}
+                selected={activeTab === 'travels'}
+                onPress={() => setActiveTab('travels')}
+              />
+            )}
             <StatBox
               label="Elan"
               value={listingCount}
@@ -1028,17 +1034,8 @@ export default function ProfilScreen() {
           <ActivityIndicator color={colors.accent} style={{ marginTop: 24 }} />
         ) : (
           <View style={styles.tabContent}>
-            {activeTab === 'travels' ? (
+            {activeTab === 'travels' && !isOwnProfile ? (
               <>
-                {isOwnProfile ? (
-                  <Pressable
-                    style={styles.addTravelButton}
-                    onPress={() => setAddTravelVisible(true)}
-                  >
-                    <FontAwesome name="plus" size={14} color="#fff" />
-                    <Text style={styles.addTravelButtonText}>Səyahət əlavə et</Text>
-                  </Pressable>
-                ) : null}
                 {travels.length === 0 ? (
                   <Text style={styles.emptyText}>Səyahət qeydi yoxdur</Text>
                 ) : (
@@ -1054,18 +1051,6 @@ export default function ProfilScreen() {
                       <Text style={styles.metaLine}>📅 {formatDate(item.visited_at)}</Text>
                       {item.poi_name ? (
                         <Text style={styles.metaLine}>📍 {item.poi_name}</Text>
-                      ) : null}
-                      {isOwnProfile ? (
-                        <Pressable
-                          style={styles.deleteTextButton}
-                          onPress={(event) => {
-                            event.stopPropagation?.();
-                            handleDeleteTravel(item.id);
-                          }}
-                          hitSlop={8}
-                        >
-                          <Text style={styles.deleteText}>Sil</Text>
-                        </Pressable>
                       ) : null}
                     </Pressable>
                   ))

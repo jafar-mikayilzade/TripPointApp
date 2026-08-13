@@ -1101,14 +1101,6 @@ export default function HomeScreen() {
                         />
                       </TouchableOpacity>
                     </View>
-                    <TouchableOpacity
-                      onPress={() => router.push('/feed' as never)}
-                      hitSlop={8}
-                      accessibilityLabel="Paylaş"
-                      style={styles.shareHeaderHit}
-                    >
-                      <Text style={styles.shareHeaderButton}>Paylaş</Text>
-                    </TouchableOpacity>
                   </View>
 
                   {loading ? (

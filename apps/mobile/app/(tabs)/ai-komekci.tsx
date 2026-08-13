@@ -552,7 +552,7 @@ export default function AiKomekciScreen() {
         style={[styles.title, { fontSize: responsive.titleSize }]}
         numberOfLines={2}
       >
-        Marşrut qur
+        Planla
       </Text>
       <Text
         style={[styles.subtitle, { fontSize: responsive.subtitleSize }]}

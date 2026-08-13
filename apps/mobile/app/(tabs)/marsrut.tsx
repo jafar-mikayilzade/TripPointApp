@@ -1599,7 +1599,7 @@ export default function MarsrutScreen() {
                         style={[styles.title, { fontSize: responsive.titleSize }]}
                         numberOfLines={2}
                       >
-                        AI Marşrut Planlayıcı
+                        AI Plan
           </Text>
                       <Text
                         style={[styles.subtitle, { fontSize: responsive.subtitleSize }]}

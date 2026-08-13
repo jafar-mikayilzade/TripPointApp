@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { FirstRunCoach } from '../../components/FirstRunCoach';
 import { useInfoToast } from '../../components/InfoToastProvider';
 import { shadows } from '../../constants/theme';
 import { consumePendingWelcomeToast } from '../../lib/appNotify';
@@ -71,6 +72,7 @@ export default function TabLayout() {
   }, [showSuccess, showInfo]);
 
   return (
+    <>
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: colors.brand,
@@ -109,8 +111,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="ai-komekci"
         options={{
-          title: 'Qur',
-          tabBarLabel: 'Qur',
+          title: 'Planla',
+          tabBarLabel: 'Planla',
           tabBarIcon: ({ color, size, focused }) => (
             <TabIcon
               name="compass-outline"
@@ -125,8 +127,8 @@ export default function TabLayout() {
       <Tabs.Screen
         name="marsrut"
         options={{
-          title: 'Marşrut',
-          tabBarLabel: isCompact ? 'AI' : 'Marşrut',
+          title: 'AI Plan',
+          tabBarLabel: 'AI Plan',
           tabBarIcon: ({ color, size, focused }) => (
             <TabIcon
               name="sparkles-outline"
@@ -177,6 +179,8 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+    <FirstRunCoach tabBarHeight={tabBarHeight} />
+    </>
   );
 }
 

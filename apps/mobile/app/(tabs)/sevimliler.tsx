@@ -2,7 +2,6 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { memo, useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
-  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -11,12 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CategoryIcon } from '../../components/CategoryIcon';
-import {
-  ListingDetailModal,
-  type ListingWithCreator,
-} from '../../components/ListingDetailModal';
 import { HamburgerMenuButton } from '../../components/HamburgerMenuButton';
-import { SubscribeMenuButton } from '../../components/SubscribeMenuButton';
 import { ScreenHeader } from '../../components/ScreenHeader';
 
 import { REGIONS } from '../../constants/regions';
@@ -26,45 +20,9 @@ import { useResponsiveLayout } from '../../lib/layout';
 
 import { getCategoryLabel } from '../../lib/categoryUtils';
 import { getErrorMessage } from '../../lib/errors';
-import { LISTING_PUBLIC_COLUMNS } from '../../lib/listingColumns';
-import {
-  listFavoriteListingIdsOrdered,
-  listFavoritePoiIdsOrdered,
-} from '../../lib/favorites';
+import { listFavoritePoiIdsOrdered } from '../../lib/favorites';
 import { supabase } from '../../lib/supabase';
-import type { Listing, ListingType, Poi, Profile } from '../../types/database';
-
-type TabId = 'listings' | 'pois';
-
-const TABS: { id: TabId; label: string }[] = [
-  { id: 'listings', label: 'Elanlar' },
-  { id: 'pois', label: 'Yerlər' },
-];
-
-function getListingTypeMeta(colors: ThemeColors): Record<
-  ListingType,
-  { label: string; tint: string; soft: string }
-> {
-  return {
-    carpool: { label: 'Carpool', tint: colors.accent, soft: colors.accentSoft },
-    tour: { label: 'Tur', tint: colors.success, soft: colors.successSoft },
-    local_service: { label: 'Yerli xidmət', tint: colors.warning, soft: colors.warningSoft },
-  };
-}
-
-function formatPrice(listing: Listing): string {
-  if (listing.price_type === 'free' || listing.price === 0) {
-    return 'Pulsuz';
-  }
-  if (listing.price == null) {
-    return listing.price_type === 'negotiable' ? 'Razılaşma ilə' : 'Qiymət yoxdur';
-  }
-  const amount = `${listing.price} AZN`;
-  if (listing.price_type === 'per_person') {
-    return `${amount}/nəfər`;
-  }
-  return amount;
-}
+import type { Poi } from '../../types/database';
 
 function getRegionLabel(region: string | null): string {
   if (!region) {
@@ -80,69 +38,17 @@ export default function SevimlilerScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const { padH, isCompact } = useResponsiveLayout();
+  const { padH } = useResponsiveLayout();
 
-  const [tab, setTab] = useState<TabId>('listings');
-  const [listings, setListings] = useState<ListingWithCreator[]>([]);
   const [pois, setPois] = useState<Poi[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [selectedListing, setSelectedListing] = useState<ListingWithCreator | null>(null);
-  const [detailVisible, setDetailVisible] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setErrorMessage(null);
-    const errors: string[] = [];
 
-    const [listingIds, poiIds] = await Promise.all([
-      listFavoriteListingIdsOrdered(),
-      listFavoritePoiIdsOrdered(),
-    ]);
-
-    try {
-      if (listingIds.length === 0) {
-        setListings([]);
-      } else {
-        const { data, error } = await supabase
-          .from('listings')
-          .select(LISTING_PUBLIC_COLUMNS)
-          .in('id', listingIds)
-          .eq('status', 'active');
-
-        if (error) {
-          throw error;
-        }
-
-        const rows = data ?? [];
-        const order = new Map(listingIds.map((id, i) => [id, i]));
-        rows.sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
-
-        const creatorIds = [...new Set(rows.map((r) => r.created_by))];
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name, avatar_url, phone, is_verified')
-          .in('id', creatorIds);
-
-        const profileMap = new Map(
-          (profiles ?? []).map((p) => [
-            p.id,
-            p as Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'phone' | 'is_verified'>,
-          ])
-        );
-
-        setListings(
-          rows.map((row) => ({
-            ...row,
-            creator: profileMap.get(row.created_by) ?? null,
-          }))
-        );
-      }
-    } catch (err) {
-      console.warn('[sevimliler] favorite listings fetch failed', err);
-      setListings([]);
-      errors.push(getErrorMessage(err));
-    }
+    const poiIds = await listFavoritePoiIdsOrdered();
 
     try {
       if (poiIds.length === 0) {
@@ -166,12 +72,9 @@ export default function SevimlilerScreen() {
     } catch (err) {
       console.warn('[sevimliler] favorite pois fetch failed', err);
       setPois([]);
-      errors.push(getErrorMessage(err));
+      setErrorMessage(getErrorMessage(err));
     }
 
-    if (errors.length > 0) {
-      setErrorMessage(errors[0]);
-    }
     setLoading(false);
   }, []);
 
@@ -181,46 +84,14 @@ export default function SevimlilerScreen() {
     }, [load])
   );
 
-  const listingCount = listings.length;
-  const poiCount = pois.length;
-
-  function tabCount(id: TabId): number {
-    return id === 'listings' ? listingCount : poiCount;
-  }
-
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <ScreenHeader
         title="Sevimlilər"
-        subtitle="Saxladığınız elanlar və yerlər"
+        subtitle="Saxladığınız yerlər"
         style={{ paddingHorizontal: padH }}
         right={<HamburgerMenuButton />}
       />
-
-      <View style={[styles.tabRow, { paddingHorizontal: padH }]}>
-        {TABS.map((item) => {
-          const selected = tab === item.id;
-          const count = tabCount(item.id);
-          const labelBase = isCompact
-            ? ({ listings: 'Elan', pois: 'Yer' } as const)[item.id]
-            : item.label;
-          const label = `${labelBase} (${count})`;
-          return (
-            <Pressable
-              key={item.id}
-              style={[styles.tabChip, selected && styles.tabChipSelected]}
-              onPress={() => setTab(item.id)}
-            >
-              <Text
-                style={[styles.tabText, selected && styles.tabTextSelected]}
-                numberOfLines={1}
-              >
-                {label}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
 
       {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
 
@@ -230,33 +101,6 @@ export default function SevimlilerScreen() {
           <SkeletonCard />
           <SkeletonCard />
         </View>
-      ) : tab === 'listings' ? (
-        <FlatList
-          data={listings}
-          keyExtractor={(item) => item.id}
-          style={styles.flex}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshing={loading}
-          onRefresh={() => void load()}
-          ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>Sevimli elan yoxdur</Text>
-              <Text style={styles.emptySubtitle}>
-                İcma elanında bookmark ilə əlavə edin
-              </Text>
-            </View>
-          }
-          renderItem={({ item }) => (
-            <MemoFavoriteListingCard
-              listing={item}
-              onPress={() => {
-                setSelectedListing(item);
-                setDetailVisible(true);
-              }}
-            />
-          )}
-        />
       ) : (
         <FlatList
           data={pois}
@@ -282,98 +126,9 @@ export default function SevimlilerScreen() {
           )}
         />
       )}
-
-      <ListingDetailModal
-        listing={selectedListing}
-        visible={detailVisible}
-        onClose={() => {
-          setDetailVisible(false);
-          setSelectedListing(null);
-          void load();
-        }}
-        onDeleted={() => {
-          setDetailVisible(false);
-          setSelectedListing(null);
-          void load();
-        }}
-      />
-
     </View>
   );
 }
-
-function FavoriteListingCard({
-  listing,
-  onPress,
-  statusReady = false,
-  listingSubscribed = false,
-  organizerSubscribed = false,
-}: {
-  listing: ListingWithCreator;
-  onPress: () => void;
-  statusReady?: boolean;
-  listingSubscribed?: boolean;
-  organizerSubscribed?: boolean;
-}) {
-  const colors = useThemeColors();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-
-  const meta = getListingTypeMeta(colors)[listing.type];
-  const creatorName = listing.creator?.full_name?.trim() || 'İstifadəçi';
-  const region = getRegionLabel(listing.region);
-  const organizerId = listing.created_by ?? listing.creator?.id;
-
-  return (
-    <Pressable style={styles.card} onPress={onPress}>
-      <View style={styles.cardInner}>
-        {listing.creator?.avatar_url ? (
-          <Image source={{ uri: listing.creator.avatar_url }} style={styles.avatar} />
-        ) : (
-          <View style={styles.avatarPlaceholder}>
-            <Text style={styles.avatarInitial}>{creatorName.charAt(0).toUpperCase()}</Text>
-          </View>
-        )}
-
-        <View style={styles.cardBody}>
-          <View style={styles.cardTop}>
-            <View style={[styles.badge, { backgroundColor: meta.soft }]}>
-              <Text style={[styles.badgeText, { color: meta.tint }]}>{meta.label}</Text>
-            </View>
-            <Text style={styles.topRight} numberOfLines={1}>
-              {formatPrice(listing)}
-            </Text>
-          </View>
-
-          <Text style={styles.cardTitle} numberOfLines={1}>
-            {listing.title}
-          </Text>
-
-          <View style={styles.pairRow}>
-            <Text style={styles.pairLeft} numberOfLines={1}>
-              {creatorName}
-            </Text>
-            <Text style={styles.pairRight} numberOfLines={1}>
-              {region}
-            </Text>
-          </View>
-        </View>
-
-        {listing.type === 'tour' ? (
-          <SubscribeMenuButton
-            compact
-            listingId={listing.id}
-            organizerId={organizerId}
-            statusReady={statusReady}
-            listingSubscribed={listingSubscribed}
-            organizerSubscribed={organizerSubscribed}
-          />
-        ) : null}
-      </View>
-    </Pressable>
-  );
-}
-
-const MemoFavoriteListingCard = memo(FavoriteListingCard);
 
 function FavoritePoiCard({ poi, onPress }: { poi: Poi; onPress: () => void }) {
   const colors = useThemeColors();
@@ -408,7 +163,6 @@ function FavoritePoiCard({ poi, onPress }: { poi: Poi; onPress: () => void }) {
 }
 
 const MemoFavoritePoiCard = memo(FavoritePoiCard);
-
 
 function SkeletonCard() {
   const colors = useThemeColors();

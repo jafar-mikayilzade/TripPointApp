@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Dimensions,
   Image,
   Modal,
   Pressable,
@@ -15,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { REGIONS } from '../constants/regions';
 import type { ThemeColors } from '../constants/theme';
+import { listFavoriteListingIdsOrdered } from '../lib/favorites';
 import { LISTING_PUBLIC_COLUMNS } from '../lib/listingColumns';
 import {
   deleteSavedRoute,
@@ -30,17 +32,20 @@ import {
   type MySubscriptionRow,
 } from '../lib/subscriptions';
 import { supabase } from '../lib/supabase';
-import type { Profile } from '../types/database';
+import { confirmDelete, deleteTravelHistory } from '../lib/userContentDelete';
+import type { Profile, TravelHistory } from '../types/database';
 import { useThemeColors } from '../theme/ThemeProvider';
 import { useInfoToast } from './InfoToastProvider';
+import { AddTravelHistoryModal } from './AddTravelHistoryModal';
 import {
   ListingDetailModal,
   type ListingWithCreator,
 } from './ListingDetailModal';
 import { SavedRouteDetailModal } from './SavedRouteDetailModal';
 import { ShareAsTourModal } from './ShareAsTourModal';
+import { SubscribeMenuButton } from './SubscribeMenuButton';
 
-type MenuSection = 'routes' | 'subscriptions' | 'notifications';
+type MenuSection = 'routes' | 'subscriptions' | 'notifications' | 'listings' | 'travels';
 
 type ProfileBrief = {
   full_name: string | null;
@@ -71,6 +76,17 @@ function regionLabel(region: string | null | undefined): string {
   return REGIONS.find((r) => r.id === region)?.label ?? region;
 }
 
+function listingTypeLabel(type: string): string {
+  if (type === 'tour') return 'Tur';
+  if (type === 'carpool') return 'Carpool';
+  if (type === 'local_service') return 'Yerli xidmət';
+  return type;
+}
+
+type TravelRow = TravelHistory & { poi_name: string | null };
+
+const DRAWER_WIDTH = Dimensions.get('window').width * 0.65;
+
 type DrawerProps = {
   visible: boolean;
   onClose: () => void;
@@ -88,14 +104,18 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
   const [routes, setRoutes] = useState<SavedRoute[]>([]);
   const [subscriptions, setSubscriptions] = useState<MySubscriptionRow[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [favListings, setFavListings] = useState<ListingWithCreator[]>([]);
+  const [travels, setTravels] = useState<TravelRow[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [viewRoute, setViewRoute] = useState<SavedRoute | null>(null);
   const [shareTourRoute, setShareTourRoute] = useState<SavedRoute | null>(null);
   const [selectedListing, setSelectedListing] = useState<ListingWithCreator | null>(null);
   const [listingVisible, setListingVisible] = useState(false);
+  const [addTravelVisible, setAddTravelVisible] = useState(false);
+  const [selectedTravel, setSelectedTravel] = useState<TravelRow | null>(null);
 
-  const slideAnim = useRef(new Animated.Value(320)).current;
+  const slideAnim = useRef(new Animated.Value(DRAWER_WIDTH)).current;
   const unreadCount = notifications.filter((n) => !n.read_at).length;
 
   const load = useCallback(async () => {
@@ -114,14 +134,71 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
       .maybeSingle();
     if (prof) setProfile(prof);
 
-    const [routesRes, subsRes, notifsRes] = await Promise.all([
+    const [routesRes, subsRes, notifsRes, listingIds] = await Promise.all([
       listSavedRoutes(),
       listMySubscriptions(),
       listMyNotifications(40),
+      listFavoriteListingIdsOrdered(),
     ]);
     setRoutes(routesRes.data);
     setSubscriptions(subsRes.data);
     setNotifications(notifsRes.data);
+
+    if (listingIds.length === 0) {
+      setFavListings([]);
+    } else {
+      const { data: listingRows } = await supabase
+        .from('listings')
+        .select(LISTING_PUBLIC_COLUMNS)
+        .in('id', listingIds)
+        .eq('status', 'active');
+      const rows = listingRows ?? [];
+      const order = new Map(listingIds.map((id, i) => [id, i]));
+      rows.sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999));
+      const creatorIds = [...new Set(rows.map((r) => r.created_by).filter(Boolean))];
+      const { data: profiles } = creatorIds.length
+        ? await supabase
+            .from('profiles')
+            .select('id, full_name, avatar_url, phone, is_verified')
+            .in('id', creatorIds)
+        : { data: [] as Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'phone' | 'is_verified'>[] };
+      const profileMap = new Map(
+        (profiles ?? []).map((p) => [
+          p.id,
+          p as Pick<Profile, 'id' | 'full_name' | 'avatar_url' | 'phone' | 'is_verified'>,
+        ])
+      );
+      setFavListings(
+        rows.map((row) => ({
+          ...row,
+          creator: profileMap.get(row.created_by) ?? null,
+        }))
+      );
+    }
+
+    const { data: travelRows } = await supabase
+      .from('travel_history')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('visited_at', { ascending: false })
+      .limit(80);
+    const trows = travelRows ?? [];
+    const travelPoiIds = [...new Set(trows.map((row) => row.poi_id).filter(Boolean))] as string[];
+    let poiMap = new Map<string, string>();
+    if (travelPoiIds.length > 0) {
+      const { data: pois } = await supabase
+        .from('pois')
+        .select('id, name')
+        .in('id', travelPoiIds);
+      poiMap = new Map((pois ?? []).map((poi) => [poi.id, poi.name]));
+    }
+    setTravels(
+      trows.map((row) => ({
+        ...row,
+        poi_name: row.poi_id ? (poiMap.get(row.poi_id) ?? null) : null,
+      }))
+    );
+
     setLoading(false);
   }, []);
 
@@ -130,7 +207,7 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
       return;
     }
     void load();
-    slideAnim.setValue(320);
+    slideAnim.setValue(DRAWER_WIDTH);
     Animated.spring(slideAnim, {
       toValue: 0,
       useNativeDriver: true,
@@ -141,7 +218,7 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
 
   const handleClose = useCallback(() => {
     Animated.timing(slideAnim, {
-      toValue: 320,
+      toValue: DRAWER_WIDTH,
       duration: 180,
       useNativeDriver: true,
     }).start(() => {
@@ -191,6 +268,35 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
   const handleRoutePress = useCallback((route: SavedRoute) => {
     setViewRoute(route);
   }, []);
+
+  const handleFavoriteListingPress = useCallback((listing: ListingWithCreator) => {
+    setSelectedListing(listing);
+    setListingVisible(true);
+  }, []);
+
+  const openMemories = useCallback(() => {
+    handleClose();
+    setTimeout(() => router.push('/feed' as never), 200);
+  }, [handleClose, router]);
+
+  const handleDeleteTravel = useCallback(
+    async (travelId: string) => {
+      const confirmed = await confirmDelete(
+        'Səyahəti sil',
+        'Bu səyahət qeydini silmək istədiyinizə əminsiniz?'
+      );
+      if (!confirmed) return;
+      const { error } = await deleteTravelHistory(travelId);
+      if (error) {
+        showError(error);
+        return;
+      }
+      setTravels((prev) => prev.filter((t) => t.id !== travelId));
+      setSelectedTravel((prev) => (prev?.id === travelId ? null : prev));
+      showInfo('Səyahət silindi');
+    },
+    [showError, showInfo]
+  );
 
   const handleDeleteRoute = useCallback(
     async (id: string) => {
@@ -260,11 +366,10 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
           <Animated.View
             style={[
               styles.drawer,
-              { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 },
+              { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 12 },
               { transform: [{ translateX: slideAnim }] },
             ]}
           >
-            {/* Close + profile */}
             <View style={styles.drawerTop}>
               <Pressable
                 onPress={handleClose}
@@ -276,6 +381,12 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
               </Pressable>
             </View>
 
+            <ScrollView
+              style={styles.drawerScroll}
+              contentContainerStyle={styles.drawerScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
             <Pressable
               style={styles.profileRow}
               onPress={() => {
@@ -305,12 +416,40 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
 
             <View style={styles.divider} />
 
+            <Pressable style={styles.sectionBtn} onPress={openMemories}>
+              <Ionicons
+                name="images-outline"
+                size={20}
+                color={colors.text}
+                style={{ marginRight: 10 }}
+              />
+              <Text style={styles.sectionLabel}>Xatirələri paylaş</Text>
+              <Ionicons
+                name="chevron-forward"
+                size={14}
+                color={colors.textMuted}
+                style={{ marginLeft: 'auto' }}
+              />
+            </Pressable>
+
             {[
               {
                 id: 'notifications' as MenuSection,
                 label: 'Bildirişlər',
                 icon: 'notifications-outline' as const,
                 badge: unreadCount,
+              },
+              {
+                id: 'listings' as MenuSection,
+                label: 'Elanlar',
+                icon: 'pricetag-outline' as const,
+                badge: 0,
+              },
+              {
+                id: 'travels' as MenuSection,
+                label: 'Səyahətlərim',
+                icon: 'car-outline' as const,
+                badge: 0,
               },
               {
                 id: 'routes' as MenuSection,
@@ -325,8 +464,8 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
                 badge: 0,
               },
             ].map((item) => (
+              <View key={item.id}>
               <Pressable
-                key={item.id}
                 style={[styles.sectionBtn, section === item.id && styles.sectionBtnActive]}
                 onPress={() => setSection(section === item.id ? null : item.id)}
               >
@@ -358,10 +497,9 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
                   style={{ marginLeft: 'auto' }}
                 />
               </Pressable>
-            ))}
 
-            {section === 'notifications' ? (
-              <ScrollView style={styles.sectionContent} showsVerticalScrollIndicator={false}>
+            {item.id === 'notifications' && section === 'notifications' ? (
+              <View style={styles.sectionContent}>
                 {loading ? (
                   <Text style={styles.emptyText}>Yüklənir…</Text>
                 ) : notifications.length === 0 ? (
@@ -391,11 +529,101 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
                     </Pressable>
                   ))
                 )}
-              </ScrollView>
+              </View>
             ) : null}
 
-            {section === 'routes' ? (
-              <ScrollView style={styles.sectionContent} showsVerticalScrollIndicator={false}>
+            {item.id === 'listings' && section === 'listings' ? (
+              <View style={styles.sectionContent}>
+                {loading ? (
+                  <Text style={styles.emptyText}>Yüklənir…</Text>
+                ) : favListings.length === 0 ? (
+                  <Text style={styles.emptyText}>Sevimli elan yoxdur.</Text>
+                ) : (
+                  favListings.map((listing) => {
+                    const organizerId = listing.created_by ?? listing.creator?.id;
+                    return (
+                      <Pressable
+                        key={listing.id}
+                        style={styles.routeRow}
+                        onPress={() => handleFavoriteListingPress(listing)}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.routeName} numberOfLines={1}>
+                            {listing.title}
+                          </Text>
+                          <Text style={styles.routeSub} numberOfLines={1}>
+                            {[listingTypeLabel(listing.type), regionLabel(listing.region)]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </Text>
+                        </View>
+                        {listing.type === 'tour' ? (
+                          <SubscribeMenuButton
+                            compact
+                            listingId={listing.id}
+                            organizerId={organizerId}
+                          />
+                        ) : null}
+                      </Pressable>
+                    );
+                  })
+                )}
+              </View>
+            ) : null}
+
+            {item.id === 'travels' && section === 'travels' ? (
+              <View style={styles.sectionContent}>
+                <Pressable
+                  style={styles.addTravelBtn}
+                  onPress={() => setAddTravelVisible(true)}
+                >
+                  <Ionicons name="add" size={16} color={colors.brand} />
+                  <Text style={[styles.sectionLabel, { color: colors.brand }]}>
+                    Səyahət əlavə et
+                  </Text>
+                </Pressable>
+                {loading ? (
+                  <Text style={styles.emptyText}>Yüklənir…</Text>
+                ) : travels.length === 0 ? (
+                  <Text style={styles.emptyText}>Səyahət qeydi yoxdur.</Text>
+                ) : (
+                  travels.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      style={styles.routeRow}
+                      onPress={() => setSelectedTravel(item)}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.routeName} numberOfLines={1}>
+                          {item.title}
+                        </Text>
+                        <Text style={styles.routeSub} numberOfLines={1}>
+                          {[
+                            formatRelativeTime(item.visited_at),
+                            item.poi_name,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={(e) => {
+                          e.stopPropagation?.();
+                          void handleDeleteTravel(item.id);
+                        }}
+                        hitSlop={8}
+                        accessibilityLabel="Sil"
+                      >
+                        <Ionicons name="trash-outline" size={16} color={colors.dangerText} />
+                      </Pressable>
+                    </Pressable>
+                  ))
+                )}
+              </View>
+            ) : null}
+
+            {item.id === 'routes' && section === 'routes' ? (
+              <View style={styles.sectionContent}>
                 {loading ? (
                   <Text style={styles.emptyText}>Yüklənir…</Text>
                 ) : routes.length === 0 ? (
@@ -430,11 +658,11 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
                     </Pressable>
                   ))
                 )}
-              </ScrollView>
+              </View>
             ) : null}
 
-            {section === 'subscriptions' ? (
-              <ScrollView style={styles.sectionContent} showsVerticalScrollIndicator={false}>
+            {item.id === 'subscriptions' && section === 'subscriptions' ? (
+              <View style={styles.sectionContent}>
                 {loading ? (
                   <Text style={styles.emptyText}>Yüklənir…</Text>
                 ) : subscriptions.length === 0 ? (
@@ -484,8 +712,11 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
                     </Pressable>
                   ))
                 )}
-              </ScrollView>
+              </View>
             ) : null}
+              </View>
+            ))}
+            </ScrollView>
           </Animated.View>
         </View>
       </Modal>
@@ -539,6 +770,50 @@ export function MenuDrawer({ visible, onClose }: DrawerProps) {
           void load();
         }}
       />
+
+      <AddTravelHistoryModal
+        visible={addTravelVisible}
+        onClose={() => setAddTravelVisible(false)}
+        onCreated={() => {
+          setAddTravelVisible(false);
+          void load();
+        }}
+      />
+
+      <Modal
+        visible={!!selectedTravel}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedTravel(null)}
+      >
+        <Pressable style={styles.travelOverlay} onPress={() => setSelectedTravel(null)}>
+          <Pressable style={styles.travelSheet} onPress={(e) => e.stopPropagation?.()}>
+            <Text style={styles.notifTitle}>{selectedTravel?.title}</Text>
+            <Text style={styles.notifTime}>
+              {selectedTravel ? formatRelativeTime(selectedTravel.visited_at) : ''}
+            </Text>
+            {selectedTravel?.poi_name ? (
+              <Text style={styles.routeSub}>📍 {selectedTravel.poi_name}</Text>
+            ) : null}
+            {selectedTravel?.notes?.trim() ? (
+              <Text style={styles.notifBody}>{selectedTravel.notes.trim()}</Text>
+            ) : (
+              <Text style={styles.emptyText}>Əlavə təsvir yoxdur</Text>
+            )}
+            {selectedTravel ? (
+              <Pressable
+                style={styles.travelDeleteBtn}
+                onPress={() => void handleDeleteTravel(selectedTravel.id)}
+              >
+                <Text style={styles.travelDeleteText}>Səyahəti sil</Text>
+              </Pressable>
+            ) : null}
+            <Pressable style={styles.travelCloseBtn} onPress={() => setSelectedTravel(null)}>
+              <Text style={styles.sectionLabel}>Bağla</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </>
   );
 }
@@ -571,7 +846,7 @@ function createStyles(colors: ThemeColors) {
       top: 0,
       right: 0,
       bottom: 0,
-      width: 300,
+      width: '65%',
       backgroundColor: colors.surface,
       shadowColor: '#000',
       shadowOffset: { width: -4, height: 0 },
@@ -579,6 +854,13 @@ function createStyles(colors: ThemeColors) {
       shadowRadius: 12,
       elevation: 12,
       paddingHorizontal: 16,
+      overflow: 'hidden',
+    },
+    drawerScroll: {
+      flex: 1,
+    },
+    drawerScrollContent: {
+      paddingBottom: 16,
     },
     drawerTop: {
       flexDirection: 'row',
@@ -661,9 +943,9 @@ function createStyles(colors: ThemeColors) {
       color: '#fff',
     },
     sectionContent: {
-      maxHeight: 320,
-      marginTop: 4,
+      marginTop: 2,
       marginBottom: 8,
+      paddingLeft: 4,
     },
     emptyText: {
       fontSize: 13,
@@ -758,6 +1040,38 @@ function createStyles(colors: ThemeColors) {
       fontSize: 11,
       color: colors.textMuted,
       marginTop: 2,
+    },
+    addTravelBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingVertical: 8,
+      paddingHorizontal: 4,
+    },
+    travelOverlay: {
+      flex: 1,
+      backgroundColor: colors.overlay,
+      justifyContent: 'center',
+      paddingHorizontal: 24,
+    },
+    travelSheet: {
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      padding: 16,
+      gap: 8,
+    },
+    travelDeleteBtn: {
+      marginTop: 8,
+      alignSelf: 'flex-start',
+    },
+    travelDeleteText: {
+      color: colors.dangerText,
+      fontWeight: '700',
+      fontSize: 13,
+    },
+    travelCloseBtn: {
+      marginTop: 4,
+      alignSelf: 'flex-end',
     },
   });
 }
