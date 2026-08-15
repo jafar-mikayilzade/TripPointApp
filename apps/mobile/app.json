@@ -12,7 +12,8 @@
     },
     "android": {
       "package": "com.jafar.TripPoint",
-      "versionCode": 17,
+      "googleServicesFile": "./google-services.json",
+      "versionCode": 18,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#0E5837",

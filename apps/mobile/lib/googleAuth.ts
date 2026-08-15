@@ -198,6 +198,12 @@ async function finalizeGoogleUser(): Promise<GoogleResult> {
 
 /** Play / SHA-1 uyğunsuzluğunda native Sign-In işləməyəndə brauzer OAuth. */
 async function signInWithGoogleOAuth(): Promise<GoogleResult> {
+  try {
+    await WebBrowser.warmUpAsync();
+  } catch {
+    // ignore
+  }
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
@@ -216,6 +222,11 @@ async function signInWithGoogleOAuth(): Promise<GoogleResult> {
   }
 
   const result = await WebBrowser.openAuthSessionAsync(data.url, AUTH_CALLBACK_URL);
+  try {
+    await WebBrowser.coolDownAsync();
+  } catch {
+    // ignore
+  }
   if (result.type === 'cancel' || result.type === 'dismiss') {
     return { error: 'Giriş ləğv edildi' };
   }
@@ -306,7 +317,10 @@ async function signInWithGoogleNative(): Promise<GoogleResult> {
 
 export async function signInWithGoogle(): Promise<GoogleResult> {
   try {
-    if (Platform.OS === 'web' || !loadGoogleSignIn()) {
+    // Android native Google Sign-In needs the exact signing SHA-1 in Cloud
+    // Console (debug / dev-client / Play each differ). Browser OAuth only
+    // needs the Web client ID and works on every build.
+    if (Platform.OS !== 'ios' || !loadGoogleSignIn()) {
       return await signInWithGoogleOAuth();
     }
 

@@ -44,12 +44,13 @@ async function ensureAndroidChannel(Notifications: NotificationsModule): Promise
     return;
   }
   // Android 13+: the OS permission prompt appears only after a channel exists.
+  // Omit `sound` so Android uses the system default — `'default'` is treated
+  // as a custom file and throws "Custom sound 'default' not found".
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
     name: 'TripPoint',
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#0E5837',
-    sound: 'default',
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     enableVibrate: true,
     showBadge: true,
@@ -147,41 +148,76 @@ async function persistToken(userId: string, token: string): Promise<boolean> {
   return true;
 }
 
+let registerInFlight: Promise<string | null> | null = null;
+let lastRegister: { userId: string; token: string | null; at: number } | null = null;
+let loggedMissingFirebase = false;
+
 /** Register Expo push token on profile (no-op if native module missing). */
 export async function registerExpoPushToken(userId: string): Promise<string | null> {
-  const Notifications = loadNotifications();
-  if (!Notifications) {
-    console.warn('[push] expo-notifications not available in this binary');
-    return null;
+  if (
+    lastRegister &&
+    lastRegister.userId === userId &&
+    Date.now() - lastRegister.at < 60_000
+  ) {
+    return lastRegister.token;
+  }
+  if (registerInFlight) {
+    return registerInFlight;
   }
 
-  if (!(await ensureNotificationPermissions())) {
-    return null;
-  }
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Constants = require('expo-constants') as typeof import('expo-constants');
-    const projectId =
-      Constants.easConfig?.projectId ??
-      Constants.expoConfig?.extra?.eas?.projectId ??
-      EXPO_PROJECT_ID;
-
-    const tokenResult = await Notifications.getExpoPushTokenAsync({ projectId });
-    const token = tokenResult.data?.trim();
-    if (!token) {
-      console.warn('[push] empty Expo token');
+  registerInFlight = (async () => {
+    const Notifications = loadNotifications();
+    if (!Notifications) {
+      console.warn('[push] expo-notifications not available in this binary');
       return null;
     }
 
-    const saved = await persistToken(userId, token);
-    if (!saved) {
-      console.warn('[push] token not persisted');
+    if (!(await ensureNotificationPermissions())) {
+      return null;
     }
-    return token;
-  } catch (err) {
-    console.warn('[push] getExpoPushTokenAsync failed', err);
-    return null;
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const Constants = require('expo-constants') as typeof import('expo-constants');
+      const projectId =
+        Constants.easConfig?.projectId ??
+        Constants.expoConfig?.extra?.eas?.projectId ??
+        EXPO_PROJECT_ID;
+
+      const tokenResult = await Notifications.getExpoPushTokenAsync({ projectId });
+      const token = tokenResult.data?.trim();
+      if (!token) {
+        console.warn('[push] empty Expo token');
+        return null;
+      }
+
+      const saved = await persistToken(userId, token);
+      if (!saved) {
+        console.warn('[push] token not persisted');
+      }
+      lastRegister = { userId, token, at: Date.now() };
+      return token;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/googleServicesFile|FirebaseApp is not initialized/i.test(message)) {
+        if (!loggedMissingFirebase) {
+          loggedMissingFirebase = true;
+          console.warn(
+            '[push] Android FCM yoxdur: google-services.json native build-ə düşməlidir. Metro reload kifayət etmir.'
+          );
+        }
+      } else {
+        console.warn('[push] getExpoPushTokenAsync failed', err);
+      }
+      lastRegister = { userId, token: null, at: Date.now() };
+      return null;
+    }
+  })();
+
+  try {
+    return await registerInFlight;
+  } finally {
+    registerInFlight = null;
   }
 }
 
