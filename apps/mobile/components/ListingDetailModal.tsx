@@ -615,10 +615,19 @@ export function ListingDetailModal({
       updatePayload.rejection_reason = reason.trim();
     }
 
-    const { error } = await supabase
+    let { error } = await supabase
       .from('listing_participants')
       .update(updatePayload)
       .eq('id', participantId);
+
+    // Older DBs may lack rejection_reason — still persist the status change.
+    if (error && updatePayload.rejection_reason) {
+      const retry = await supabase
+        .from('listing_participants')
+        .update({ status })
+        .eq('id', participantId);
+      error = retry.error;
+    }
 
     if (error) {
       setErrorMessage(getErrorMessage(error));
@@ -1335,7 +1344,11 @@ export function ListingDetailModal({
                                           <Text style={styles.rejectButtonText}>✗ Rədd et</Text>
                                         )}
                                       </Pressable>
-                                      <Pressable style={styles.cancelRejectButton} onPress={cancelReject}>
+                                      <Pressable
+                                        style={styles.cancelRejectButton}
+                                        onPress={cancelReject}
+                                        hitSlop={12}
+                                      >
                                         <Text style={styles.cancelRejectText}>Ləğv et</Text>
                                       </Pressable>
                                     </View>

@@ -22,6 +22,7 @@ from app.services.notify_dispatch import (
     create_and_dispatch,
     dispatch_notifications,
 )
+from app.db import supabase
 from app.services.push_notify import notify_users_push
 
 router = APIRouter(prefix="/api/notify", tags=["notify"])
@@ -61,6 +62,33 @@ class CreateBody(BaseModel):
     title: str = Field(..., min_length=1, max_length=120)
     body: str | None = Field(default=None, max_length=500)
     listing_id: str | None = None
+
+
+class RegisterTokenBody(BaseModel):
+    token: str = Field(..., min_length=10, max_length=240)
+
+
+@router.post("/register-token")
+def api_register_push_token(
+    body: RegisterTokenBody,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    """Save the caller's Expo push token (service role — bypasses profile RLS)."""
+    actor_id = verify_user(authorization)
+    if not actor_id:
+        raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+    token = body.token.strip()
+    if "PushToken" not in token:
+        raise HTTPException(status_code=400, detail={"error": "invalid_token"})
+    try:
+        supabase.table("profiles").update({"expo_push_token": token}).eq(
+            "id", actor_id
+        ).execute()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail={"error": "token_save_failed"}
+        ) from exc
+    return {"ok": True}
 
 
 @router.post("/create")

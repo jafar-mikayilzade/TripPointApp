@@ -15,7 +15,7 @@ import {
 } from '../../lib/encouragementNotifications';
 import { useResponsiveLayout } from '../../lib/layout';
 import { subscribeNotificationInbox } from '../../lib/notificationInbox';
-import { ensureNotificationPermissions } from '../../lib/pushNotifications';
+import { registerExpoPushToken } from '../../lib/pushNotifications';
 import { supabase } from '../../lib/supabase';
 import { useThemeColors } from '../../theme/ThemeProvider';
 
@@ -53,8 +53,12 @@ export default function TabLayout() {
 
   useEffect(() => {
     configureNotificationHandler();
-    void ensureNotificationPermissions();
     let cancelled = false;
+    void supabase.auth.getUser().then(({ data }) => {
+      if (data.user?.id) {
+        void registerExpoPushToken(data.user.id);
+      }
+    });
     void (async () => {
       const welcome = await consumePendingWelcomeToast();
       if (!cancelled && welcome) {

@@ -726,8 +726,11 @@ export function createStyles(colors: ThemeColors) {
   },
   cancelRejectButton: {
     borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    minWidth: 88,
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
   },
   cancelRejectText: {
     color: colors.textMuted,

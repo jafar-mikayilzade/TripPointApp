@@ -1,7 +1,7 @@
 import type { ErrorBoundaryProps } from 'expo-router';
 import { Stack, router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 
 import { subscribeAuthDeepLinks } from '../lib/authDeepLink';
@@ -237,6 +237,20 @@ function RootLayoutInner() {
       authListener.subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!userId || passwordRecovery) {
+      return;
+    }
+    void registerExpoPushToken(userId);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void registerExpoPushToken(userId);
+      }
+    });
+    return () => sub.remove();
+  }, [session?.user?.id, passwordRecovery]);
 
   if (isLoading) {
     return <BrandSplash animateProgress />;

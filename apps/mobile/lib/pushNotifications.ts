@@ -1,11 +1,31 @@
 import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
 
+import { getApiBaseUrl } from './apiBase';
+import { getAuthHeaders } from './authHeaders';
 import { supabase } from './supabase';
 
 const ANDROID_CHANNEL_ID = 'trippoint-default';
+const EXPO_PROJECT_ID = 'b06167c8-d122-4f72-850e-61100f51228d';
 
-/** True only when native binary includes expo-notifications. */
+type NotificationsModule = typeof import('expo-notifications');
+
+function loadNotifications(): NotificationsModule | null {
+  if (Platform.OS === 'web') {
+    return null;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('expo-notifications') as NotificationsModule;
+  } catch {
+    return null;
+  }
+}
+
+/** True when expo-notifications can run (dev-client / production, not web). */
 export function hasPushNativeModule(): boolean {
+  if (loadNotifications()) {
+    return true;
+  }
   if (Platform.OS === 'web') {
     return false;
   }
@@ -19,40 +39,46 @@ export function hasPushNativeModule(): boolean {
   }
 }
 
-async function ensureAndroidChannel(
-  Notifications: typeof import('expo-notifications')
-): Promise<void> {
+async function ensureAndroidChannel(Notifications: NotificationsModule): Promise<void> {
   if (Platform.OS !== 'android') {
     return;
   }
+  // Android 13+: the OS permission prompt appears only after a channel exists.
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
     name: 'TripPoint',
-    importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 180],
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
     lightColor: '#0E5837',
+    sound: 'default',
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    enableVibrate: true,
+    showBadge: true,
   });
 }
 
 /** Ask for notification permission (no-op if denied / web / missing native). */
 export async function ensureNotificationPermissions(): Promise<boolean> {
-  if (!hasPushNativeModule()) {
+  const Notifications = loadNotifications();
+  if (!Notifications) {
     return false;
   }
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Notifications = require('expo-notifications') as typeof import('expo-notifications');
+    await ensureAndroidChannel(Notifications);
     const { status: existing } = await Notifications.getPermissionsAsync();
     let status = existing;
     if (existing !== 'granted') {
-      const asked = await Notifications.requestPermissionsAsync();
+      const asked = await Notifications.requestPermissionsAsync({
+        ios: { allowAlert: true, allowBadge: true, allowSound: true },
+      });
       status = asked.status;
     }
     if (status !== 'granted') {
+      console.warn('[push] permission status', status);
       return false;
     }
-    await ensureAndroidChannel(Notifications);
     return true;
-  } catch {
+  } catch (err) {
+    console.warn('[push] permission failed', err);
     return false;
   }
 }
@@ -66,9 +92,10 @@ export async function presentLocalNotification(
   body: string,
   data?: Record<string, unknown>
 ): Promise<void> {
+  const Notifications = loadNotifications();
   const cleanTitle = title.trim() || 'TripPoint';
   const cleanBody = body.trim();
-  if (!cleanBody || !hasPushNativeModule()) {
+  if (!cleanBody || !Notifications) {
     return;
   }
   try {
@@ -76,8 +103,6 @@ export async function presentLocalNotification(
     if (!ok) {
       return;
     }
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Notifications = require('expo-notifications') as typeof import('expo-notifications');
     await Notifications.scheduleNotificationAsync({
       content: {
         title: cleanTitle,
@@ -87,41 +112,76 @@ export async function presentLocalNotification(
       },
       trigger: null,
     });
-  } catch {
-    // Permission / Expo Go without native module
+  } catch (err) {
+    console.warn('[push] local notification failed', err);
   }
 }
 
-/** Register Expo push token on profile (no-op if native module missing). */
-export async function registerExpoPushToken(userId: string): Promise<void> {
-  if (!(await ensureNotificationPermissions())) {
-    return;
+async function persistToken(userId: string, token: string): Promise<boolean> {
+  const base = getApiBaseUrl();
+  const headers = await getAuthHeaders();
+  if (base && headers) {
+    try {
+      const res = await fetch(`${base}/api/notify/register-token`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ token }),
+      });
+      if (res.ok) {
+        return true;
+      }
+      console.warn('[push] register-token HTTP', res.status);
+    } catch (err) {
+      console.warn('[push] register-token failed', err);
+    }
   }
 
-    try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const Notifications = require('expo-notifications') as typeof import('expo-notifications');
+  const { error } = await supabase
+    .from('profiles')
+    .update({ expo_push_token: token })
+    .eq('id', userId);
+  if (error) {
+    console.warn('[push] profile token update', error.message);
+    return false;
+  }
+  return true;
+}
+
+/** Register Expo push token on profile (no-op if native module missing). */
+export async function registerExpoPushToken(userId: string): Promise<string | null> {
+  const Notifications = loadNotifications();
+  if (!Notifications) {
+    console.warn('[push] expo-notifications not available in this binary');
+    return null;
+  }
+
+  if (!(await ensureNotificationPermissions())) {
+    return null;
+  }
+
+  try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Constants = require('expo-constants') as typeof import('expo-constants');
-
     const projectId =
       Constants.easConfig?.projectId ??
-      Constants.expoConfig?.extra?.eas?.projectId;
+      Constants.expoConfig?.extra?.eas?.projectId ??
+      EXPO_PROJECT_ID;
 
-    const tokenResult = projectId
-      ? await Notifications.getExpoPushTokenAsync({ projectId })
-      : await Notifications.getExpoPushTokenAsync();
+    const tokenResult = await Notifications.getExpoPushTokenAsync({ projectId });
     const token = tokenResult.data?.trim();
     if (!token) {
-      return;
+      console.warn('[push] empty Expo token');
+      return null;
     }
 
-    await supabase
-      .from('profiles')
-      .update({ expo_push_token: token })
-      .eq('id', userId);
-  } catch {
-    // Permission / Expo Go without native module — skip until rebuild
+    const saved = await persistToken(userId, token);
+    if (!saved) {
+      console.warn('[push] token not persisted');
+    }
+    return token;
+  } catch (err) {
+    console.warn('[push] getExpoPushTokenAsync failed', err);
+    return null;
   }
 }
 

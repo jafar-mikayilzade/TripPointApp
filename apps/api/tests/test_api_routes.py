@@ -51,6 +51,13 @@ class TestNotifyDispatchAuth:
         assert res.status_code == 200
         assert res.json()["ok"] is True
 
+    def test_register_token_requires_auth(self, client: TestClient):
+        res = client.post(
+            "/api/notify/register-token",
+            json={"token": "ExponentPushToken[test]"},
+        )
+        assert res.status_code == 401
+
     def test_create_requires_auth(self, client: TestClient):
         res = client.post(
             "/api/notify/create",

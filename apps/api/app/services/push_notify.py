@@ -71,6 +71,7 @@ def send_expo_push(
         if not res.ok:
             logger.warning("Expo push failed: %s %s", res.status_code, res.text[:200])
             return {"sent": 0, "requested": len(clean)}
+        logger.info("Expo push ok: %s", res.text[:300])
         return {"sent": len(clean), "requested": len(clean)}
     except Exception:
         logger.exception("Expo push raised")
@@ -85,8 +86,17 @@ def notify_users_push(
     data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     tokens: list[str] = []
+    missing = 0
     for uid in user_ids:
         token = get_push_token_for_user(uid)
         if token:
             tokens.append(token)
+        else:
+            missing += 1
+    if missing:
+        logger.warning(
+            "notify push: %s/%s recipients have no expo_push_token",
+            missing,
+            len(user_ids),
+        )
     return send_expo_push(tokens, title=title, body=body, data=data)

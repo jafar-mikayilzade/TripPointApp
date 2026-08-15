@@ -103,7 +103,8 @@
         "expo-notifications",
         {
           "icon": "./assets/android-icon-monochrome.png",
-          "color": "#0E5837"
+          "color": "#0E5837",
+          "defaultChannel": "trippoint-default"
         }
       ],
       "expo-web-browser"
